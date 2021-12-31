@@ -1,6 +1,6 @@
 # -*- coding: UTF-8 -*-
 '''
-Copyright (c) 2018-2020 Prof. Jan Berger, Hochschule fuer Technik und Wirtschaft Berlin, Germany
+Copyright (c) 2018-2021 Prof. Jan Berger, Hochschule fuer Technik und Wirtschaft Berlin, Germany
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
 associated documentation files (the "Software"), to deal in the Software without restriction, including
 without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
@@ -20,7 +20,7 @@ Autodesk® Maya® is a registered trademark of Autodesk Inc.
 All other brand names, product names or trademarks belong to their respective holders.
 
 Supported Maya Versions:
-2018-2020
+2020-2022
 
 Supported OS:
 Any OS supported by Maya
@@ -11345,17 +11345,27 @@ class AniMetaUI( MayaQWidgetDockableMixin, QWidget):
             return None
         widget = None
         try:
-            widget = wrapInstance(long(ptr), QWidget)
+            widget = wrapInstance( long( ptr ), QWidget )
         except:
+            '''
             mc.warning('aniMeta find char: Can not wrap swip object.' + str(args))
             return None
-        char_list = None
-        try:
-            char_list = widget.findChild(QComboBox, 'aniMetaCharList')
+            '''
+            pass
+        if widget is None:
+            try:
+                widget = wrapInstance( int( ptr ), QWidget )
+            except:
+                pass
+            
+        if widget is not None:
+            char_list = None
+            try:
+                char_list = widget.findChild(QComboBox, 'aniMetaCharList')
 
-        except:
-            mc.warning('aniMeta find char: Can not find character list.')
-            return None
+            except:
+                mc.warning('aniMeta find char: Can not find character list.')
+                return None
 
         return char_list
 
