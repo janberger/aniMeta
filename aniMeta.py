@@ -36,6 +36,7 @@ import inspect
 import shutil
 import ast
 import copy
+from six import string_types
 
 import maya.api.OpenMaya as om
 import maya.api.OpenMayaAnim as oma
@@ -55,7 +56,7 @@ from shiboken2 import wrapInstance
 from functools import partial
 
 kPluginName    = 'aniMeta'
-kPluginVersion = '01.00.125'
+kPluginVersion = '01.00.126'
 
 kLeft, kRight, kCenter, kAll, kSelection = range( 5 )
 kHandle, kIKHandle, kJoint, kMain, kBodyGuide, kBipedRoot, kQuadrupedRoot, kCustomHandle, kBodyGuideLock, kBipedRootUE = range(10)
@@ -82,6 +83,7 @@ attrInput = [ 'static', 'animCurve' ]
 
 floatPrec = 5
 
+py_version = float( sys.version[0:3] )
 
 def maya_useNewAPI():
     """
@@ -202,11 +204,17 @@ class AniMeta( object ):
             #mc.warning( 'aniMeta find char: Can not find UI.' )
             return None
         widget = None
+
         try:
-            widget = wrapInstance( long( ptr ), QWidget )
+            if py_version < 3:
+                widget = wrapInstance( long( ptr ), QWidget )
+            else:
+                # Python 3 doesn`t featrue the long data type anymore, so we can simply use int
+                widget = wrapInstance( int( ptr ), QWidget )
         except:
-            #mc.warning( 'aniMeta find char: Can not wrap swip object.' )
+            mc.warning( 'aniMeta find char: Can not wrap swip object.' )
             return None
+
         list = None
         try:
             list = widget.findChild( QComboBox, 'aniMetaCharList' )
@@ -381,7 +389,7 @@ class AniMeta( object ):
 
     def short_name( self,  node ):
         if node is not None:
-            if isinstance( node, str ) or isinstance( node, unicode ):
+            if isinstance( node, string_types ) :
                 buff = node.split('|')
                 return buff[len(buff)-1]
             elif isinstance( node, om.MDagPath ):
@@ -1677,7 +1685,7 @@ class Rig( Transform ):
             if isinstance( node, om.MDagPath ):
                 return node
 
-            if  isinstance( node, str ) or isinstance( node, unicode ):
+            if  isinstance( node, string_types ) :
                 out_node = self.find_node( charRoot, node )
                 if out_node is not None:
                     out_node = self.get_path( node )
@@ -1776,7 +1784,7 @@ class Rig( Transform ):
         mc.addAttr(ctrl_path.fullPathName(), ln='controlOffsetY', parent='controlOffset', at='float')
         mc.addAttr(ctrl_path.fullPathName(), ln='controlOffsetZ', parent='controlOffset', at='float')
 
-        cluster = mc.deformer( ctrl_path.fullPathName(), type='cluster')
+        cluster = mc.deformer( ctrl_path.fullPathName(), type='cluster', name='aniMetaCluster')
         compMatrix = mc.createNode('composeMatrix', ss=True, name=name+'HandleOffsetMatrix')
 
         mc.connectAttr( ctrl_path.fullPathName()+'.controlOffset', compMatrix + '.inputTranslate')
@@ -2586,14 +2594,15 @@ class Rig( Transform ):
         parentPathLong = ''
 
         if parent is not None and node is not None:
-            if isinstance( node, basestring ):
+
+            if isinstance( node, string_types ):
                 nodePathShort = node
                 nodePathLong = self.find_node( char, node )
             else:
                 nodePathShort = node.partialPathName()
                 nodePathLong = node.fullPathName()
 
-            if isinstance( parent, basestring ):
+            if isinstance( parent, string_types ):
                 parentPathShort = parent
                 parentPathLong = self.find_node( char, parent )
             else:
@@ -2625,14 +2634,14 @@ class Rig( Transform ):
         parentPathLong = ''
 
         if parent is not None and node is not None:
-            if isinstance( node, basestring ):
+            if isinstance( node, string_types ):
                 nodePathShort = node
                 nodePathLong = self.find_node( char, node )
             else:
                 nodePathShort = node.partialPathName()
                 nodePathLong = node.fullPathName()
 
-            if isinstance( parent, basestring ):
+            if isinstance( parent, string_types ):
                 parentPathShort = parent
                 parentPathLong = self.find_node( char, parent )
             else:
