@@ -55,6 +55,8 @@ from shiboken2 import wrapInstance
 
 from functools import partial
 
+px = omui.MQtUtil.dpiScale
+
 kPluginName    = 'aniMeta'
 kPluginVersion = '01.00.127'
 
@@ -11470,8 +11472,8 @@ class AniMetaUI( MayaQWidgetDockableMixin, QWidget):
         }
 
         refreshButton = QPushButton("Refresh", self)
-        refreshButton.setFixedWidth(72)
-        refreshButton.setFixedHeight(32)
+        refreshButton.setFixedWidth(px(72))
+        refreshButton.setFixedHeight(px(32))
         refreshButton.setStyleSheet(
             "QPushButton {background-color: #666666; border-radius: 3px;}"
             "QPushButton:hover {background-color: #777777; }"
@@ -11755,7 +11757,7 @@ class MainTab( QWidget ):
 
     def __options__( self ):
 
-        self.button_sizes   = { 'X-Small': 16, 'Small': 20, 'Medium': 24, 'Large': 28, 'X-Large': 32 }
+        self.button_sizes   = { 'X-Small': px(16), 'Small': px(20), 'Medium': px(24), 'Large': px(28), 'X-Large': px(32) }
         self.button_sizes_names = ( 'X-Small', 'Small', 'Medium', 'Large', 'X-Large' )
         if not mc.optionVar( exists = 'aniMetaUIButtonSize' ):
             mc.optionVar( sv = [ 'aniMetaUIButtonSize', 'Medium' ] )
@@ -11794,7 +11796,7 @@ class MainTab( QWidget ):
 
         ########################################
         #   Create
-        row_height = 48
+        row_height = px(48)
 
         frame1 = FrameWidget('Create', None,  row_height*2   )
         frames_layout.addWidget(frame1)
