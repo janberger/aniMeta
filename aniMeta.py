@@ -126,6 +126,8 @@ class AniMeta( object ):
         self.check_folder( self.folder_anim )
         self.check_folder( self.folder_rig )
 
+        # Required plug-in that may or may not already be loaded
+        mc.loadPlugin("mayaHIK", quiet=True)
 
     def check_folder (self, folder):
 
