@@ -9574,7 +9574,10 @@ class Skin(Transform):
                 if len( joints ) == len ( infs ):
 
                     for geo in geos:
-                        mc.skinCluster( infs, geo, tsb=True )
+                        try:
+                            mc.skinCluster( infs, geo, tsb=True )
+                        except:
+                            mc.warning( "aniMeta: There was an issue binding geo " + geo )
 
                     print ( "aniMeta: Bound geometry to skin. "  + str( geos ) )
         else:
