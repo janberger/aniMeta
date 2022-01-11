@@ -58,7 +58,7 @@ from functools import partial
 px = omui.MQtUtil.dpiScale
 
 kPluginName    = 'aniMeta'
-kPluginVersion = '01.00.127'
+kPluginVersion = '01.00.128'
 
 kLeft, kRight, kCenter, kAll, kSelection = range( 5 )
 kHandle, kIKHandle, kJoint, kMain, kBodyGuide, kBipedRoot, kQuadrupedRoot, kCustomHandle, kBodyGuideLock, kBipedRootUE = range(10)
@@ -216,7 +216,7 @@ class AniMeta( object ):
                 # Python 3 doesn`t featrue the long data type anymore, so we can simply use int
                 widget = wrapInstance( int( ptr ), QWidget )
         except:
-            mc.warning( 'aniMeta find char: Can not wrap swip object.' )
+            mc.warning( 'aniMeta find char: please select a character in the character editor' )
             return None
 
         list = None
@@ -487,6 +487,7 @@ class Menu(AniMeta):
         skin = Skin()
 
         mc.menuItem( d = True, dl = 'Skinning' )
+        mc.menuItem( label = 'Bind Skin',             c = skin.bind )
         mc.menuItem( label = 'Smooth Weights',        c = skin.smooth )
         mc.menuItem( label = 'Smooth Weights Tool',   c = skin.smooth_tool )
         mc.menuItem( label = 'Reset Skin Influences', c = skin.reset )
@@ -9515,6 +9516,72 @@ class Skin(Transform):
 
     def __init__(self):
         super( Skin, self ).__init__()
+
+    def get_skinning_joints(self ):
+
+        return [
+            'ArmLo_Aux1_Lft_Jnt', 'ArmLo_Aux2_Lft_Jnt', 'ArmLo_Aux3_Lft_Jnt', 'ArmLo_Blend_Lft_Jnt', 'ArmLo_Lft_Jnt',
+            'ArmLo_Aux1_Rgt_Jnt', 'ArmLo_Aux2_Rgt_Jnt', 'ArmLo_Aux3_Rgt_Jnt', 'ArmLo_Blend_Rgt_Jnt', 'ArmLo_Rgt_Jnt',
+            'ArmUp_Aux1_Lft_Jnt', 'ArmUp_Aux2_Lft_Jnt', 'ArmUp_Aux3_Lft_Jnt', 'ArmUp_Lft_Jnt', 'Ball_Lft_Jnt_Blend',
+            'ArmUp_Aux3_Rgt_Jnt', 'ArmUp_Rgt_Jnt', 'Ball_Rgt_Jnt_Blend', 'Clavicle_Lft_Jnt', 'Eye_Lft_Jnt',
+            'Chest_Jnt', 'Clavicle_Rgt_Jnt', 'Eye_Rgt_Jnt', 'Foot_Lft_Jnt_Blend', 'Foot_Rgt_Jnt_Blend',
+            'Foot_Lft_Jnt', 'Foot_Rgt_Jnt', 'Hand_Lft_Jnt', 'Head_Jnt', 'Head_Jnt_Tip',  'ArmUp_Aux2_Rgt_Jnt',
+            'Hand_Rgt_Jnt', 'Head_Jnt_Blend', 'Heel_Lft_Jnt', 'Hips_Jnt', 'Index1_Rgt_Jnt',  'ArmUp_Aux1_Rgt_Jnt',
+            'Heel_Rgt_Jnt', 'Index1_Lft_Jnt', 'Index2_Blend_Lft_Jnt', 'Index2_Lft_Jnt', 'Index3_Blend_Lft_Jnt',
+            'Index2_Blend_Rgt_Jnt', 'Index2_Rgt_Jnt', 'Index3_Blend_Rgt_Jnt', 'Index3_Rgt_Jnt', 'Index4_Blend_Rgt_Jnt',
+            'Index3_Lft_Jnt', 'Index4_Blend_Lft_Jnt', 'Index4_Lft_Jnt', 'Jaw_Jnt', 'LegLo_Aux1_Lft_Jnt',
+            'Index4_Rgt_Jnt', 'Jaw_Jnt_Tip', 'LegLo_Aux1_Rgt_Jnt', 'LegLo_Aux2_Rgt_Jnt', 'LegLo_Aux3_Rgt_Jnt',
+            'LegLo_Aux2_Lft_Jnt', 'LegLo_Aux3_Lft_Jnt', 'LegLo_Lft_Jnt', 'LegLo_Rgt_Jnt', 'LegUp_Aux1_Lft_Jnt',
+            'LegLo_Lft_Jnt_Blend', 'LegLo_Rgt_Jnt_Blend', 'LegUp_Aux1_Rgt_Jnt', 'LegUp_Aux2_Rgt_Jnt', 'LegUp_Aux3_Rgt_Jnt',
+            'LegUp_Aux2_Lft_Jnt', 'LegUp_Aux3_Lft_Jnt', 'LegUp_Lft_Jnt', 'LegUp_Rgt_Jnt', 'Middle1_Lft_Jnt',
+            'LegUp_Lft_Jnt_Blend', 'LegUp_Rgt_Jnt_Blend', 'Middle1_Rgt_Jnt', 'Middle2_Blend_Rgt_Jnt', 'Middle2_Rgt_Jnt',
+            'Middle2_Blend_Lft_Jnt', 'Middle2_Lft_Jnt', 'Middle3_Blend_Lft_Jnt', 'Middle3_Lft_Jnt', 'Middle4_Blend_Lft_Jnt',
+            'Middle3_Blend_Rgt_Jnt', 'Middle3_Rgt_Jnt', 'Middle4_Blend_Rgt_Jnt', 'Middle4_Rgt_Jnt', 'Palm_Lft_Jnt',
+            'Middle4_Lft_Jnt', 'Neck_Jnt', 'Palm_Rgt_Jnt', 'Pinky1_Rgt_Jnt', 'Pinky2_Blend_Rgt_Jnt',
+            'Pinky1_Lft_Jnt', 'Pinky2_Blend_Lft_Jnt', 'Pinky2_Lft_Jnt', 'Pinky3_Blend_Lft_Jnt', 'Pinky3_Lft_Jnt',
+            'Pinky2_Rgt_Jnt', 'Pinky3_Blend_Rgt_Jnt', 'Pinky3_Rgt_Jnt', 'Pinky4_Blend_Rgt_Jnt', 'Pinky4_Rgt_Jnt',
+            'Pinky4_Blend_Lft_Jnt', 'Pinky4_Lft_Jnt', 'Ring1_Lft_Jnt', 'Ring2_Blend_Lft_Jnt', 'Ring2_Lft_Jnt',
+            'Ring1_Rgt_Jnt', 'Ring2_Blend_Rgt_Jnt', 'Ring2_Rgt_Jnt', 'Ring3_Blend_Rgt_Jnt', 'Ring3_Rgt_Jnt',
+            'Ring3_Blend_Lft_Jnt', 'Ring3_Lft_Jnt', 'Ring4_Blend_Lft_Jnt', 'Ring4_Lft_Jnt',
+            'Ring4_Blend_Rgt_Jnt', 'Ring4_Rgt_Jnt', 'Shoulder_Blend_Lft_Jnt', 'Spine1_Jnt', 'Spine3_Jnt',
+            'Shoulder_Blend_Rgt_Jnt', 'Spine2_Jnt', 'Thumb1_Blend_Lft_Jnt', 'Thumb1_Lft_Jnt', 'Thumb2_Blend_Lft_Jnt',
+            'Thumb1_Blend_Rgt_Jnt', 'Thumb1_Rgt_Jnt', 'Thumb2_Blend_Rgt_Jnt', 'Thumb2_Rgt_Jnt', 'Thumb3_Blend_Rgt_Jnt',
+            'Thumb2_Lft_Jnt', 'Thumb3_Blend_Lft_Jnt', 'Thumb3_Lft_Jnt', 'ToesTip_Lft_Jnt', 'Toes_Lft_Jnt',
+            'Thumb3_Rgt_Jnt', 'ToesTip_Rgt_Jnt', 'Toes_Rgt_Jnt', 'Wrist_Blend_Rgt_Jnt',
+            'Wrist_Blend_Lft_Jnt'
+        ]
+
+    def bind(self, *args ):
+
+        geos = mc.ls( sl=True )
+
+        if len( geos ) > 0:
+
+            char = self.get_active_char()
+
+            joints = self.get_skinning_joints()
+
+            if char is not None:
+
+                infs = []
+
+                for joint in joints:
+                    inf = self.find_node( char, joint )
+
+                    if inf is not None:
+                        infs.append( inf )
+
+                if len( joints ) == len ( infs ):
+
+                    for geo in geos:
+                        mc.skinCluster( infs, geo, tsb=True )
+
+                    print ( "aniMeta: Bound geometry to skin. "  + str( geos ) )
+        else:
+            print( "aniMeta: Please select a mesh with a skinCluster to mirror.")
+
+
+
 
     def mirror(self, *args):
 
