@@ -56,7 +56,7 @@ from shiboken2 import wrapInstance
 from functools import partial
 
 kPluginName    = 'aniMeta'
-kPluginVersion = '01.00.126'
+kPluginVersion = '01.00.127'
 
 kLeft, kRight, kCenter, kAll, kSelection = range( 5 )
 kHandle, kIKHandle, kJoint, kMain, kBodyGuide, kBipedRoot, kQuadrupedRoot, kCustomHandle, kBodyGuideLock, kBipedRootUE = range(10)
@@ -9667,34 +9667,43 @@ class Skin(Transform):
 
         skin1 = mm.eval( 'findRelatedSkinCluster ' + sourceMesh )
 
-        path = self.get_path( destMesh )
 
-        name = path.partialPathName()
+        skin2 = mm.eval( 'findRelatedSkinCluster ' + destMesh )
 
-        path.extendToShape()
+        if mc.objExists( skin2 ):
+            mc.warning ( destMesh + ' already has a skinCluster.')
+        else:
+            path = self.get_path( destMesh )
 
-        infs = mc.skinCluster( skin1, q = True, inf = True )
+            name = self.short_name( path.partialPathName() )
 
-        skin_method = mc.getAttr( skin1 + '.skinningMethod' )
+            path.extendToShape()
 
-        joints = [ ]
-        xforms = [ ]
+            infs = mc.skinCluster( skin1, q = True, inf = True )
 
-        for inf in infs:
-            if mc.nodeType( inf ) == "joint":
-                joints.append( inf )
-            else:
-                xforms.append( inf )
+            skin_method = mc.getAttr( skin1 + '.skinningMethod' )
 
-        skin2 = mc.skinCluster( joints, path.fullPathName(), name = name + '_skin', tsb = True )[ 0 ]
+            joints = [ ]
+            xforms = [ ]
 
-        mc.setAttr( skin2 + '.skinningMethod', skin_method )
+            for inf in infs:
+                if mc.nodeType( inf ) == "joint":
+                    joints.append( inf )
+                else:
+                    xforms.append( inf )
 
-        for xform in xforms:
-            mc.skinCluster( skin2, e = True, ai = xform )
+            skin2 = mc.skinCluster( joints, path.fullPathName(), name = name + '_skin', tsb = True )[ 0 ]
 
-        mc.copySkinWeights( ss = skin1, ds = skin2, noMirror = True, surfaceAssociation = 'closestPoint',
-                            influenceAssociation = 'name' )
+            mc.setAttr( skin2 + '.skinningMethod', skin_method )
+
+            for xform in xforms:
+                mc.skinCluster( skin2, e = True, ai = xform )
+
+        try:
+            mc.copySkinWeights( ss = skin1, ds = skin2, noMirror = True, surfaceAssociation = 'closestPoint',
+                                influenceAssociation = 'name' )
+        except:
+            mc.warning( 'There was a problem transferring skinning from ' + sourceMesh + ' to ' + destMesh )
 
         return skin2
 
