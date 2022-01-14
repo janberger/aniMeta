@@ -58,7 +58,7 @@ from functools import partial
 px = omui.MQtUtil.dpiScale
 
 kPluginName    = 'aniMeta'
-kPluginVersion = '01.00.128'
+kPluginVersion = '01.00.129'
 
 kLeft, kRight, kCenter, kAll, kSelection = range( 5 )
 kHandle, kIKHandle, kJoint, kMain, kBodyGuide, kBipedRoot, kQuadrupedRoot, kCustomHandle, kBodyGuideLock, kBipedRootUE = range(10)
@@ -8497,6 +8497,13 @@ class Biped( Char ):
 
             createWorldOrient( controls['Head_Ctr_Ctrl'], controls['Main_Ctr_Ctrl'], 1)
 
+
+            for node in ['Spine1_Ctr_Ctrl', 'Spine2_Ctr_Ctrl', 'Spine3_Ctr_Ctrl', 'Chest_Ctr_Ctrl']:
+                node = self.find_node( rootNode, node )
+                createWorldOrient( node, controls['Main_Ctr_Ctrl'], 0 )
+
+            # World Orient
+            #
             #######################################################################
             #
             # Meta Data
@@ -9558,7 +9565,6 @@ class Skin(Transform):
         if len( geos ) > 0:
 
             char = self.get_active_char()
-
             joints = self.get_skinning_joints()
 
             if char is not None:
@@ -9566,8 +9572,7 @@ class Skin(Transform):
                 infs = []
 
                 for joint in joints:
-                    inf = self.find_node( char, joint )
-
+                    inf = self.find_node( char, joint ) 
                     if inf is not None:
                         infs.append( inf )
 
@@ -11428,7 +11433,7 @@ class AniMetaUI( MayaQWidgetDockableMixin, QWidget):
             return None
 
     def get_char_list( self, *args ):
-
+        char_list = None
         ptr = None
         try:
             ptr = omui.MQtUtil.findControl('aniMetaUI')
