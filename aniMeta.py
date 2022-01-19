@@ -58,7 +58,7 @@ from functools import partial
 px = omui.MQtUtil.dpiScale
 
 kPluginName    = 'aniMeta'
-kPluginVersion = '01.00.129'
+kPluginVersion = '01.00.130'
 
 kLeft, kRight, kCenter, kAll, kSelection = range( 5 )
 kHandle, kIKHandle, kJoint, kMain, kBodyGuide, kBipedRoot, kQuadrupedRoot, kCustomHandle, kBodyGuideLock, kBipedRootUE = range(10)
@@ -7566,7 +7566,7 @@ class Biped( Char ):
                     'color': colors[ i ],
                     'constraint': self.kParent,
                     'constraintNode':'Hips_' + SIDES[ i ] + '_upVec',
-                    'maintainOffset': True
+                    'maintainOffset': False
                 }
                 handleDict[ 'Clavicle_' + SIDES[ i ] + '_Ctrl' ] = {
                     'name': 'Clavicle_' + SIDES[ i ] + '_Ctrl',
@@ -7588,7 +7588,7 @@ class Biped( Char ):
                     'radius': 2,
                     'constraint': self.kParent,
                     'constraintNode':'Shoulder_' + SIDES[ i ] + '_upVec',
-                    'maintainOffset': True
+                    'maintainOffset': False
                 }
                 handleDict[ 'ArmUp_FK_' + SIDES[ i ] + '_Ctrl' ] = {
                     'name': 'ArmUp_FK_' + SIDES[ i ] + '_Ctrl',
@@ -12605,12 +12605,15 @@ class MainTab( QWidget ):
         self.button_Torso    = self.button_create( self.pickerLayout, 13, 6, self.yellow, 1, 3 )
         self.button_Torso.setFixedWidth( three_units )
         self.button_Torso.setToolTip( 'Torso')
+        self.button_HipsUpVec_L    = self.button_create( self.pickerLayout, 13, 9, self.blue, 1, 1 )
+        self.button_HipsUpVec_R    = self.button_create( self.pickerLayout, 13, 5, self.red, 1, 1 )
 
         # Arm L
         # FK
         self.button_Clavicle_L = self.button_create( self.pickerLayout, 8, 9, self.blue )
         self.button_ArmUp_L    = self.button_create( self.pickerLayout, 8, 10, self.blue, 2, 1 )
         self.button_ArmUp_L.setFixedHeight( two_units  )
+        self.button_ShoulderUpVec_L = self.button_create( self.pickerLayout, 7, 9, self.blue )
 
         ###################################################################################################
         # Orientation Switch Context Menu
@@ -12664,6 +12667,7 @@ class MainTab( QWidget ):
         self.button_Clavicle_R = self.button_create( self.pickerLayout, 8, 5, self.red )
         self.button_ArmUp_R    = self.button_create( self.pickerLayout, 8, 4, self.red, 2, 1 )
         self.button_ArmUp_R.setFixedHeight( two_units )
+        self.button_ShoulderUpVec_R = self.button_create( self.pickerLayout, 7, 5, self.red )
 
         ###################################################################################################
         # Orientation Switch Context Menu
@@ -12880,6 +12884,8 @@ class MainTab( QWidget ):
 
         # Torso
         self.button_Torso.clicked.connect( partial( self.picker_cmd,      {'Nodes': ['Torso_Ctr_Ctrl']} ) )
+        self.button_HipsUpVec_L.clicked.connect( partial( self.picker_cmd,{'Nodes': ['HipsUpVec_Lft_Ctrl']} ) )
+        self.button_HipsUpVec_R.clicked.connect( partial( self.picker_cmd,{'Nodes': ['HipsUpVec_Rgt_Ctrl']} ) )
         self.button_Spine1.clicked.connect( partial( self.picker_cmd,     {'Nodes': ['Spine1_Ctr_Ctrl']} ) )
         self.button_Spine2.clicked.connect( partial( self.picker_cmd,     {'Nodes': ['Spine2_Ctr_Ctrl']} ) )
         self.button_Spine3.clicked.connect( partial( self.picker_cmd,     {'Nodes': ['Spine3_Ctr_Ctrl']} ) )
@@ -12898,6 +12904,7 @@ class MainTab( QWidget ):
         self.button_Hand_L.clicked.connect(partial(self.picker_cmd,       {'Nodes': ['Hand_FK_Lft_Ctrl']}))
         self.button_Hand_IK_L.clicked.connect(partial(self.picker_cmd,    {'Nodes': ['Hand_IK_Lft_Ctrl']}))
         self.button_ArmPole_IK_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['ArmPole_IK_Lft_Ctrl']}))
+        self.button_ShoulderUpVec_L.clicked.connect(partial(self.picker_cmd,{'Nodes': ['ShoulderUpVec_Lft_Ctrl']}))
 
         # Arm R
         self.button_Clavicle_R.clicked.connect(partial(self.picker_cmd,   {'Nodes': ['Clavicle_Rgt_Ctrl']}))
@@ -12906,6 +12913,7 @@ class MainTab( QWidget ):
         self.button_Hand_R.clicked.connect(partial(self.picker_cmd,       {'Nodes': ['Hand_FK_Rgt_Ctrl']}))
         self.button_Hand_IK_R.clicked.connect(partial(self.picker_cmd,    {'Nodes': ['Hand_IK_Rgt_Ctrl']}))
         self.button_ArmPole_IK_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['ArmPole_IK_Rgt_Ctrl']}))
+        self.button_ShoulderUpVec_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['ShoulderUpVec_Rgt_Ctrl']}))
 
         # Leg IK L
         self.button_Foot_IK_L.clicked.connect(partial(self.picker_cmd,    {'Nodes': ['Foot_IK_Lft_Ctrl']}))
@@ -12950,19 +12958,23 @@ class MainTab( QWidget ):
         self.button_Arm_FK_L.clicked.connect(partial(self.picker_cmd,    {'Nodes': ['Clavicle_Lft_Ctrl',
                                                                                  'ArmUp_FK_Lft_Ctrl',
                                                                                  'ArmLo_FK_Lft_Ctrl',
+                                                                                 'ShoulderUpVec_Lft_Ctrl',
                                                                                  'Hand_FK_Lft_Ctrl' ]}))
 
         self.button_Arm_FK_R.clicked.connect(partial(self.picker_cmd,    {'Nodes': ['Clavicle_Rgt_Ctrl',
                                                                                  'ArmUp_FK_Rgt_Ctrl',
                                                                                  'ArmLo_FK_Rgt_Ctrl',
+                                                                                 'ShoulderUpVec_Rgt_Ctrl',
                                                                                  'Hand_FK_Rgt_Ctrl' ]}))
 
         self.button_Arm_IK_L.clicked.connect(partial(self.picker_cmd,    {'Nodes': ['Clavicle_Lft_Ctrl',
                                                                                  'ArmPole_IK_Lft_Ctrl',
+                                                                                 'ShoulderUpVec_Lft_Ctrl',
                                                                                  'Hand_IK_Lft_Ctrl' ]}))
 
         self.button_Arm_IK_R.clicked.connect(partial(self.picker_cmd,    {'Nodes': ['Clavicle_Rgt_Ctrl',
                                                                                  'ArmPole_IK_Rgt_Ctrl',
+                                                                                 'ShoulderUpVec_Rgt_Ctrl',
                                                                                  'Hand_IK_Rgt_Ctrl' ]}))
 
 
@@ -12974,6 +12986,7 @@ class MainTab( QWidget ):
 
         self.button_Leg_IK_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Foot_IK_Lft_Ctrl',
                                                                                  'FootLift_IK_Lft_Ctrl',
+                                                                                 'HipsUpVec_Lft_Ctrl',
                                                                                  'Toes_IK_Lft_Ctrl',
                                                                                  'ToesTip_IK_Lft_Ctrl',
                                                                                  'Heel_IK_Lft_Ctrl',
@@ -12981,11 +12994,13 @@ class MainTab( QWidget ):
 
         self.button_Leg_FK_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Foot_FK_Lft_Ctrl',
                                                                                  'Toes_FK_Lft_Ctrl',
+                                                                                 'HipsUpVec_Lft_Ctrl',
                                                                                  'LegUp_FK_Lft_Ctrl',
                                                                                  'LegLo_FK_Lft_Ctrl']}))
 
         self.button_Leg_IK_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Foot_IK_Rgt_Ctrl',
                                                                                  'FootLift_IK_Rgt_Ctrl',
+                                                                                 'HipsUpVec_Rgt_Ctrl',
                                                                                  'Toes_IK_Rgt_Ctrl',
                                                                                  'ToesTip_IK_Rgt_Ctrl',
                                                                                  'Heel_IK_Rgt_Ctrl',
@@ -12993,6 +13008,7 @@ class MainTab( QWidget ):
 
         self.button_Leg_FK_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Foot_FK_Rgt_Ctrl',
                                                                                  'Toes_FK_Rgt_Ctrl',
+                                                                                 'HipsUpVec_Rgt_Ctrl',
                                                                                  'LegUp_FK_Rgt_Ctrl',
                                                                                  'LegLo_FK_Rgt_Ctrl']}))
         # Commands
@@ -13267,11 +13283,13 @@ class MainTab( QWidget ):
         self.button_ArmUp_L.setToolTip( 'Upper Arm Left')
         self.button_ArmLo_L.setToolTip( 'Lower Arm Left')
         self.button_Hand_L.setToolTip( 'Hand Left')
+        self.button_ShoulderUpVec_L.setToolTip( 'Shoulder Up Vector Left')
 
         self.button_Clavicle_R.setToolTip( 'Clavicle Right')
         self.button_ArmUp_R.setToolTip( 'Upper Arm Right')
         self.button_ArmLo_R.setToolTip( 'Lower Arm Right')
         self.button_Hand_R.setToolTip( 'Hand Right')
+        self.button_ShoulderUpVec_R.setToolTip( 'Shoulder Up Vector Right')
 
         self.button_Foot_IK_L.setToolTip( 'Foot Left')
         self.button_Ball_IK_L.setToolTip( 'Ball Left')
