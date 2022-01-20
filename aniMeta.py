@@ -58,7 +58,7 @@ from functools import partial
 px = omui.MQtUtil.dpiScale
 
 kPluginName    = 'aniMeta'
-kPluginVersion = '01.00.130'
+kPluginVersion = '01.00.131'
 
 kLeft, kRight, kCenter, kAll, kSelection = range( 5 )
 kHandle, kIKHandle, kJoint, kMain, kBodyGuide, kBipedRoot, kQuadrupedRoot, kCustomHandle, kBodyGuideLock, kBipedRootUE = range(10)
@@ -7672,7 +7672,7 @@ class Biped( Char ):
                 handleDict[ 'Toes_FK_' + SIDES[ i ] + '_Ctrl' ] = {
                     'name': 'Toes_FK_' + SIDES[ i ] + '_Ctrl',
                     'parent': 'Foot_FK_' + SIDES[ i ] + '_Ctrl',
-                    'matchTransform': 'Toes_' + SIDES[ i ] + '_Guide',
+                    'matchTransform': 'Ball_' + SIDES[ i ] + '_Guide',
                     'color': colors[ i ],
                     'shapeType': self.kSphere,
                     'radius': 4
@@ -8246,11 +8246,13 @@ class Biped( Char ):
                 # Visibility based on IK/FK mode
                 rev = mc.createNode( 'reverse', name=self.short_name( ik_loc.partialPathName() ) +'_rev', ss=True  )
                 mc.connectAttr( ik_loc.fullPathName() + '.' + ik_attr, rev + '.inputX')
+
                 for ctl in [ 'LegUp_FK_' + SIDE + '_Ctrl', 'LegLo_FK_' + SIDE + '_Ctrl', 'Foot_FK_' + SIDE + '_Ctrl', 'Toes_FK_' + SIDE + '_Ctrl' ]:
                     mc.connectAttr( rev + '.outputX', controls[ctl].fullPathName() + '.v')
 
-                mc.setAttr( controls[ 'Foot_IK_' + SIDE + '_Ctrl'].fullPathName() + '.v', l=False )
-                mc.connectAttr(  ik_loc.fullPathName() + '.' + ik_attr, controls[ 'Foot_IK_' + SIDE + '_Ctrl'].fullPathName()  + '.v' )
+                for ctl in [ 'Foot_IK_' + SIDE + '_Ctrl', 'FootLift_IK_' + SIDE + '_Ctrl', 'Heel_IK_' + SIDE + '_Ctrl', 'Toes_IK_' + SIDE + '_Ctrl', 'ToesTip_IK_' + SIDE + '_Ctrl' ]:
+                    mc.connectAttr( ik_loc.fullPathName() + '.' + ik_attr, controls[ctl].fullPathName() + '.v')
+
 
                 # IK Handle
                 mc.orientConstraint( controls['FootLift_IK_'+SIDE+'_Ctrl'].fullPathName(), footJntIK, mo=True)
@@ -8631,8 +8633,7 @@ class Biped( Char ):
                                 'Pinky1_Lft_Ctrl', 'Pinky2_Lft_Ctrl', 'Pinky3_Lft_Ctrl', 'Pinky4_Lft_Ctrl',
                                 'Thumb1_Lft_Ctrl', 'Thumb2_Lft_Ctrl', 'Thumb3_Lft_Ctrl' ]
 
-            dict['Legs'] = ['Foot_IK_Lft_Ctrl', 'ToesTip_IK_Lft_Ctrl', 'Heel_IK_Lft_Ctrl', 'Toes_IK_Lft_Ctrl',
-                                'FootLift_IK_Lft_Ctrl', 'LegPole_IK_Lft_Ctrl']
+            dict['Legs'] = ['Foot_IK_Lft_Ctrl_Grp', 'LegUp_FK_Lft_Ctrl_Grp' ]
             dict['Head'] = ['Head_Ctr_Ctrl', 'Neck_Ctr_Ctrl']
             dict['Torso'] = ['Torso_Ctr_Ctrl', 'Hips_Ctr_Ctrl', 'Spine1_Ctr_Ctrl', 'Spine2_Ctr_Ctrl', 'Spine3_Ctr_Ctrl',
                                'Chest_Ctr_Ctrl']
@@ -12606,7 +12607,7 @@ class MainTab( QWidget ):
         self.button_Torso.setFixedWidth( three_units )
         self.button_Torso.setToolTip( 'Torso')
         self.button_HipsUpVec_L    = self.button_create( self.pickerLayout, 13, 9, self.blue, 1, 1 )
-        self.button_HipsUpVec_R    = self.button_create( self.pickerLayout, 13, 5, self.red, 1, 1 )
+        self.button_HipsUpVec_R    = self.button_create( self.pickerLayout, 13, 5, self.blue, 1, 1 )
 
         # Arm L
         # FK
