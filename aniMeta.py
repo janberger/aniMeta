@@ -2509,8 +2509,7 @@ class Rig( Transform ):
                                 pass
                     else:
                         if mc.objExists( xform_data['parent'] ):
-                            mc.parent( joints[i], xform_data['parent'])
-        attrs = ['tx', 'ty', 'tz', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz' ]
+                            mc.parent( joints[i], xform_data['parent']) 
 
         for i in range(len(joints)):
 
@@ -2533,7 +2532,7 @@ class Rig( Transform ):
                         break
             if jnt:
 
-                for attr in attrs:
+                for attr in self.attrs:
                     if attr in xform_data:
                         try:
                             mc.setAttr( jnt + '.' + attr, l=False )
