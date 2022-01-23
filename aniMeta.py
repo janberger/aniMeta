@@ -58,7 +58,7 @@ from functools import partial
 px = omui.MQtUtil.dpiScale
 
 kPluginName    = 'aniMeta'
-kPluginVersion = '01.00.131'
+kPluginVersion = '01.00.132'
 
 kLeft, kRight, kCenter, kAll, kSelection = range( 5 )
 kHandle, kIKHandle, kJoint, kMain, kBodyGuide, kBipedRoot, kQuadrupedRoot, kCustomHandle, kBodyGuideLock, kBipedRootUE = range(10)
@@ -2180,9 +2180,8 @@ class Rig( Transform ):
 
         data_json = json.dumps( drivenKeysData, indent = 4 )
 
-        f = file( fileName, 'w' )
-        f.write( data_json )
-        f.close()
+        with open(fileName, 'w') as file_obj:
+            file_obj.write( data_json)
 
 
     def export_joints( self, joints, fileName ):
@@ -2245,9 +2244,8 @@ class Rig( Transform ):
 
         data_json = json.dumps( skeleton, indent = 1 )
 
-        f = file( fileName, 'w' )
-        f.write( data_json )
-        f.close()
+        with open( fileName, 'w') as file_obj:
+            file_obj.write( data_json )
 
     def export_drivenKeys_ui( self, *args, **kwargs ):
         jnts = mc.ls( sl = True ) or [ ]
@@ -2433,8 +2431,9 @@ class Rig( Transform ):
         #####################################################################################
 
     def import_drivenKeys( self, fileName ):
-        f = file( fileName, 'r' )
-        data_json = f.read()
+
+        with open( fileName ) as file_obj:
+            data_json = file_obj.read()
 
         drivenKeys = json.loads( data_json )
 
@@ -2464,8 +2463,9 @@ class Rig( Transform ):
         self.import_drivenKeys( fileName )
 
     def import_joints( self, fileName, create=True, parent=True, root=None ):
-        f = file( fileName, 'r' )
-        data_json = f.read()
+
+        with open(fileName ) as f:
+            data_json = f.read()
 
         joints = json.loads( data_json )
 
@@ -9470,7 +9470,6 @@ class Model(Transform):
 
                 flat = json.dumps( dict, indent= 4 )
 
-
                 with open(fileName, 'w') as write_file:
                     write_file.write( flat )
 
@@ -10084,9 +10083,8 @@ class aniMetaSkinExport( om.MPxCommand ):
             jsonDump = json.dumps( weightDict, indent = 1 )
 
             try:
-                f = open( self.__file, 'w' )
-                f.write( jsonDump )
-                f.close()
+                with open( self.__file, 'w') as file_obj:
+                    file_obj.write( jsonDump )
             except:
                 mc.warning( 'Can not write skin file to ', self.__file )
                 return False
@@ -10212,14 +10210,11 @@ class aniMetaSkinImport( om.MPxCommand ):
         # Read File
 
         try:
-            f = open( self.__file, 'r' )
+            with open(self.__file) as file_obj:
+                data = file_obj.read()
         except:
             mc.warning( 'aniMeta import skin: Can not open file ', self.__file )
             return False
-
-        data = f.read()
-
-        f.close()
 
         skinWeightDict = json.loads( data )
 
@@ -14526,7 +14521,6 @@ class LibTab(QWidget):
                 if result == 'No':
                     return False
 
-
             with open(full_file_path, 'w') as write_file:
                 write_file.write(pretty_json)
 
@@ -14982,6 +14976,7 @@ class LibTab(QWidget):
             pretty_json = json.dumps( animDict, indent=4, sort_keys=True)
 
             full_file_path = os.path.join( os.path.abspath(self.anim_path), anim_name + '.json' )
+
             with open(full_file_path, 'w') as write_file:
                 write_file.write(pretty_json)
 
@@ -15259,12 +15254,10 @@ class LibTab(QWidget):
                     mc.warning( 'aniMeta: Can not find object ' + node + '.' + attr + ', skipping...' )
 
         if len( cmds ):
-
             mc.undoInfo( openChunk=True )
             mm.eval( cmds )
             mc.undoInfo( closeChunk=True )
             print ('aniMeta: file imported.')
-
 
     # Anim Import/Export
     #
@@ -16340,10 +16333,10 @@ class Build( Rig ):
                             blockCodeFilePath = os.path.join(  pathAssetClass, self.scriptsPath, d['blockFile'] + '.py' )
                             if os.path.isfile( blockCodeFilePath ) :
 
-                                f = open( blockCodeFilePath, 'r')
-
                                 # Read Code Block
-                                blockCode += f.read()
+                                with open( blockCodeFilePath ) as file_obj:
+                                    blockCode += file_obj.read()
+
                             else:
                                 blockCode += "# ERROR: can not open file " +  blockCodeFilePath + "\n"
 
@@ -16557,9 +16550,9 @@ class Build( Rig ):
                 break
 
             if buildByBlock == True:
-                f = open( buildFilePath, 'w')
-                f.write( block )
-                f.close()
+
+                with open(buildFilePath, 'w') as file_obj:
+                    file_obj.write( block )
 
                 print ('####################################################################################')
                 print ('#')
@@ -16577,9 +16570,9 @@ class Build( Rig ):
             
         if writeFile:
             try:
-                f = open(  buildFilePath, 'w')
-                f.write( code )
-                f.close()
+                with open(buildFilePath, 'w') as file_obj:
+                    file_obj.write( block )
+
                 print ('\naniMeta: build file saved to   ',  buildFilePath)
             except:
                 print ('aniMeta: there was a problem saving the build file to ',  buildFilePath)
