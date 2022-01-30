@@ -58,7 +58,7 @@ from functools import partial
 px = omui.MQtUtil.dpiScale
 
 kPluginName    = 'aniMeta'
-kPluginVersion = '01.00.132'
+kPluginVersion = '01.00.134'
 
 kLeft, kRight, kCenter, kAll, kSelection = range( 5 )
 kHandle, kIKHandle, kJoint, kMain, kBodyGuide, kBipedRoot, kQuadrupedRoot, kCustomHandle, kBodyGuideLock, kBipedRootUE = range(10)
@@ -2193,21 +2193,21 @@ class Rig( Transform ):
 
         for joint in joints:
 
-            jointPath = self.get_path( joint )
-
-            shortPath = jointPath.partialPathName()
-
-            if '|' in shortPath:
-                buff = shortPath.split( '|' )
-                shortPath = buff[ len( buff ) - 1 ]
-
-            if ':' in shortPath:
-                buff = shortPath.split( ':' )
-                shortPath = buff[ len( buff ) - 1 ]
-
-            skeleton[ 'Skeleton' ][ 'Joints' ][ shortPath ] = { }
-
             if mc.nodeType( joint ) == 'joint' or mc.nodeType( joint ) == 'transform':
+                jointPath = self.get_path( joint )
+
+                shortPath = jointPath.partialPathName()
+
+                if '|' in shortPath:
+                    buff = shortPath.split( '|' )
+                    shortPath = buff[ len( buff ) - 1 ]
+
+                if ':' in shortPath:
+                    buff = shortPath.split( ':' )
+                    shortPath = buff[ len( buff ) - 1 ]
+
+                skeleton[ 'Skeleton' ][ 'Joints' ][ shortPath ] = { }
+
 
                 dict = { }
                 for i in range( len( self.attrs ) ):
@@ -2480,11 +2480,13 @@ class Rig( Transform ):
         fileName = result[ 0 ]
         print( 'Skeleton file to import:', fileName )
         rootNode = self.import_joints( fileName )
+        return rootNode
 
 
     def joints_build(self, data, create=True, parent=True, root=None ):
 
         joints = sorted( data['Skeleton']['Joints'].keys() )
+
 
         if create:
             # Create if necessary
@@ -2492,6 +2494,10 @@ class Rig( Transform ):
                 xform_data = data['Skeleton']['Joints'][joints[i]]
                 if not mc.objExists( joints[i] ):
                     mc.createNode( xform_data['nodeType'], name=self.short_name(joints[i] ) )
+
+                else:
+                    mc.warning('aniMeta.import_joints: There is already a node called: ' + joints[i] )
+        out = []
 
         if parent:
             # Create if necessary
@@ -2509,7 +2515,9 @@ class Rig( Transform ):
                                 pass
                     else:
                         if mc.objExists( xform_data['parent'] ):
-                            mc.parent( joints[i], xform_data['parent']) 
+                            mc.parent( joints[i], xform_data['parent'])
+
+
 
         for i in range(len(joints)):
 
@@ -4337,8 +4345,15 @@ class Char( Rig ):
                 # Shoulder_Blend_Lft_Jnt
                 node = self.find_node( rootNode, 'Shoulder_Blend_' + SIDE + '_Jnt' )
                 inNode = self.find_node( rootNode, 'Shoulder_Blend_' + SIDE + '_Loc' )
+                clav_jnt = self.find_node( rootNode, 'Clavicle_'+SIDE+'_Jnt' )
+
+                soulder_nul = self.create_nul( inNode )
+
+                mc.parentConstraint( clav_jnt, soulder_nul, mo=False )
+
                 mode = kPairBlendRotate
                 weight = 0.5
+                inNode = self.find_node( rootNode, 'Shoulder_Blend_' + SIDE + '_Loc' )
                 self.create_pair_blend( node, inNode, mode, weight )
                 mc.orientConstraint(
                     self.find_node( rootNode, 'ArmUp_' + SIDE + '_Jnt' ),
