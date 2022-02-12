@@ -58,7 +58,7 @@ from functools import partial
 px = omui.MQtUtil.dpiScale
 
 kPluginName    = 'aniMeta'
-kPluginVersion = '01.00.134'
+kPluginVersion = '01.00.135'
 
 kLeft, kRight, kCenter, kAll, kSelection = range( 5 )
 kHandle, kIKHandle, kJoint, kMain, kBodyGuide, kBipedRoot, kQuadrupedRoot, kCustomHandle, kBodyGuideLock, kBipedRootUE = range(10)
@@ -2237,6 +2237,12 @@ class Rig( Transform ):
                 except:
                     pass
 
+                opm = mc.getAttr( joint + '.offsetParentMatrix')
+
+                # Check whether there are values on the offsetParentMatrix
+                if not self.is_identity( opm ):
+                    dict[ 'offsetParentMatrix' ] = opm
+
                 dict[ 'nodeType' ] = mc.nodeType( joint )
 
             if len( dict ) > 0:
@@ -2246,6 +2252,13 @@ class Rig( Transform ):
 
         with open( fileName, 'w') as file_obj:
             file_obj.write( data_json )
+
+    def is_identity( self, matrix ):
+        identity = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+        for i in range( 16 ):
+            if matrix[i] != identity[i]:
+                return False
+        return True
 
     def export_drivenKeys_ui( self, *args, **kwargs ):
         jnts = mc.ls( sl = True ) or [ ]
@@ -2562,6 +2575,8 @@ class Rig( Transform ):
                             except:
                                 #print( 'Issue loading:',  jnt + '.' + attr )
                                 pass
+                if 'offsetParentMatrix' in xform_data:
+                    mc.setAttr( jnt + '.offsetParentMatrix',  xform_data['offsetParentMatrix'], type='matrix' )
 
     def lock_trs( self, node, lock=True):
         for attr in ['t', 'r', 's']:
