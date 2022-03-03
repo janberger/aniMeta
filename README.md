@@ -1,6 +1,6 @@
 # aniMeta
 
-aniMeta is an open-source character rigging tool-set for Autodesk Maya. It creates a basic bipedal rig to be a animated in Maya.
+aniMeta is an open-source character rigging tool-set for Autodesk Maya. It creates a basic bipedal rig to be a animated in Maya. It was specifically designed to give a solid basic biped rig that is compatible with game engines like Unity and Unreal.
 
 Main features:
 - IK/FK switches
