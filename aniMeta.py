@@ -10916,8 +10916,9 @@ class aniMetaSkinMirror( om.MPxCommand ):
 
             ls = inf.partialPathName().split( '_' )
 
-            lfts = [ 'l', 'L', 'Lft', 'LFT', 'Left', 'LEFT', 'L0', 'L1', 'L2', 'L3', 'L4', 'L5', 'L6' ]
-            rgts = [ 'r', 'R', 'Rgt', 'RGT', 'Right', 'RIGHT', 'R0', 'R1', 'R2', 'R3', 'R4', 'R5', 'R6' ]
+            # Not pretty, i know ...
+            lfts = [ 'l', 'L', 'Lft', 'LFT', 'Left', 'LEFT', 'L0', 'L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L01', 'L02', 'L03', 'L04' ]
+            rgts = [ 'r', 'R', 'Rgt', 'RGT', 'Right', 'RIGHT', 'R0', 'R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R01', 'R02', 'R03', 'R04' ]
 
             for i, l in enumerate( ls ):
 
