@@ -58,7 +58,7 @@ from functools import partial
 px = omui.MQtUtil.dpiScale
 
 kPluginName    = 'aniMeta'
-kPluginVersion = '01.00.135'
+kPluginVersion = '01.00.136'
 
 kLeft, kRight, kCenter, kAll, kSelection = range( 5 )
 kHandle, kIKHandle, kJoint, kMain, kBodyGuide, kBipedRoot, kQuadrupedRoot, kCustomHandle, kBodyGuideLock, kBipedRootUE = range(10)
@@ -539,7 +539,7 @@ class Menu(AniMeta):
         mc.menuItem( label = 'Flip Points', c = model.flip_geo, parent = model_menu )
         mc.menuItem( label = 'Mirror Points', c = model.mirror_geo, parent = model_menu )
         mc.menuItem( label = 'Export Symmetry...', c = model.export_symmetry_ui, parent = model_menu )
-        mc.menuItem( label = 'Specify Symmetry File ...', c = model.specify_symmetry_file, parent = model_menu )
+        mc.menuItem( label = 'Specify Symmetry File ...', c = model.specify_symmetry_file_ui, parent = model_menu )
 
         # Modeling
         #
@@ -9437,7 +9437,7 @@ class Model(Transform):
             # print 'Length sym', len(posX), len(negX), len(sym_neg)
             return posX, sym_neg, nulX
 
-    def specify_symmetry_file(self, *args ):
+    def specify_symmetry_file_ui(self, *args ):
 
         geos = mc.ls( sl = True ) or [ ]
 
@@ -9446,26 +9446,28 @@ class Model(Transform):
             workDir = mc.workspace( q = True, directory = True )
             result = mc.fileDialog2( startingDirectory = workDir, fileFilter = "JSON (*.json)", ds = 2, okc = 'Select',
                                      fm=1, cap = 'Specify Symmetry' )
-
             if result:
-                fileName = result[ 0 ]
 
-                for geo in geos:
-                    if mc.nodeType( geo ) == 'transform':
-                        shapes = mc.listRelatives( geo, shapes=True ) or []
-                        if shapes:
-                            if mc.nodeType( shapes[0]) == 'mesh':
-                                geo = shapes[0]
-
-                    if mc.nodeType(geo) == 'mesh':
-                        if not mc.attributeQuery( 'aniMetaSymFile', node=geo, exists=True ):
-                            mc.addAttr( geo, ln='aniMetaSymFile', dt='string' )
-
-                        mc.setAttr( geo + '.aniMetaSymFile', fileName, type='string' )
-
+                self.specify_symmetry_file( result[0], geos  )
         else:
             mc.confirmDialog( message='Please select one or more meshes.',
                               title='Specify Symmetry File')
+
+    def specify_symmetry_file( self, fileName, geos=[] ):
+
+        for geo in geos:
+            if mc.nodeType( geo ) == 'transform':
+                shapes = mc.listRelatives( geo, shapes=True ) or []
+                if shapes:
+                    if mc.nodeType( shapes[0]) == 'mesh':
+                        geo = shapes[0]
+
+            if mc.nodeType(geo) == 'mesh':
+                if not mc.attributeQuery( 'aniMetaSymFile', node=geo, exists=True ):
+                    mc.addAttr( geo, ln='aniMetaSymFile', dt='string' )
+
+                mc.setAttr( geo + '.aniMetaSymFile', fileName, type='string' )
+
 
     def export_symmetry_ui( self, *args ):
 
@@ -9502,6 +9504,7 @@ class Model(Transform):
                 with open(fileName, 'w') as write_file:
                     write_file.write( flat )
 
+                self.specify_symmetry_file( fileName, [geo[0]] )
                 print( 'Symmetry exported to file ', fileName )
 
         else:
@@ -10021,6 +10024,7 @@ class aniMetaSkinExport( om.MPxCommand ):
             compFn = om.MFnSingleIndexedComponent()
             compObj = compFn.create( om.MFn.kMeshVertComponent )
 
+
             ints = om.MIntArray()
 
             for i in range( vtxCount ):
@@ -10060,15 +10064,24 @@ class aniMetaSkinExport( om.MPxCommand ):
 
             weights = skinFn.getWeights( meshPath, compObj, infInts )
 
-            # print  'InfCount:     ', infCount
-            # print  'skinIndexDict ', len( skinIndexDict.keys() )
-            # print  'Weights       ', len( weights )
-            # print  'VtxCount      ', vtxCount
-
             weighting = [ ]
 
+            joint_names = []
+            for j in range( infCount ):
+                joint_names.append(AniMeta().short_name( infs[ infInts[ j ] ].partialPathName() ) )
+
             # Loop over Vertices
+
+            gMainProgressBar = mm.eval('$tmp = $gMainProgressBar')
+            mc.progressBar( gMainProgressBar,e=True,bp=True,ii=True,status='Getting weights',maxValue=vtxCount,step=1 )
+
+            interrupted = False
             for i in range( vtxCount ):
+
+                if mc.progressBar(gMainProgressBar, query=True, isCancelled=True ) :
+                    mc.warning("aniMeta Export Skin Weights: process interrupted by user.")
+                    return None
+                mc.progressBar(gMainProgressBar, edit=True, step=1)
 
                 dict = { }
 
@@ -10076,34 +10089,26 @@ class aniMetaSkinExport( om.MPxCommand ):
 
                 for j in range( infCount ):
 
-                    weightIndex = i * infCount + j
-
-                    weight = weights[ weightIndex ]
+                    weight = weights[ i * infCount + j ]
 
                     if weight > 0.00001:
 
-                        # print j, weight, infInts[j], infs[infInts[j]].partialPathName()
-
-                        try:
-                            jointName = AniMeta().short_name( infs[ infInts[ j ] ].partialPathName() )
-                            vtxIndex = i
-                            dict[ jointName ] =   weight
-                        except:
-                            mc.warning( 'There is an issue exporting weights.' )
-                            pass
+                        jointName = joint_names[ j ]
+                        dict[ jointName ] =   weight
 
                 weighting.append( dict )
+
+            mc.progressBar(gMainProgressBar, edit=True, endProgress=True)
 
             ################################################################################
             #
             # Create Weighting Information Dictionary
-
             weightDict = { }
 
-            weightDict[ 'Weights' ] = weighting
-            weightDict[ 'Influences' ] = infList
+            weightDict[ 'Weights' ]     = weighting
+            weightDict[ 'Influences' ]  = infList
             weightDict[ 'VertexCount' ] = vtxCount
-            weightDict[ 'Name' ] = skinFn.name()
+            weightDict[ 'Name' ]        = skinFn.name()
 
             ################################################################################
             #
