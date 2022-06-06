@@ -9606,7 +9606,7 @@ class Model(Transform):
                 sym_neg.append( None )
 
         # print 'Length sym', len(posX), len(negX), len(sym_neg)
-        return posX, sym_neg, nulX 
+        return posX, sym_neg, nulX
 
     def specify_symmetry_file_ui(self, *args ):
 
