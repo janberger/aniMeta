@@ -9472,7 +9472,7 @@ class Model(Transform):
         destFn.setPoints( dest_pts )
 
 
-    def mirror_geo(self, *args ):
+    def mirror_geo(self, *args, **kwargs ):
 
         sel = mc.ls(sl=True)
 
@@ -9494,92 +9494,119 @@ class Model(Transform):
 
             plusX, negX, ctr = self.import_symmetry( file )
 
-            sourceFn = om.MFnMesh( source_path )
-            destFn = om.MFnMesh( dest_path )
+            if mc.nodeType ( source_path.fullPathName() ) == 'mesh':
 
-            source_pts = sourceFn.getPoints( om.MSpace.kObject )
-            dest_pts = sourceFn.getPoints( om.MSpace.kObject )
+                sourceFn = om.MFnMesh( source_path )
+                destFn = om.MFnMesh( dest_path )
 
-            for i in range( len ( plusX )):
-                px = source_pts[ plusX[ i ] ]
-                #nx = source_pts[ negX[ i ] ]
+                source_pts = sourceFn.getPoints( om.MSpace.kObject )
+                dest_pts = sourceFn.getPoints( om.MSpace.kObject )
 
-                px.cartesianize()
-                #nx.cartesianize()
+                for i in range( len ( plusX )):
+                    px = source_pts[ plusX[ i ] ]
+                    px.cartesianize()
+                    px.x *= -1
+                    dest_pts[negX[i]]  = px
 
-                px.x *= -1
-                #nx.x *= -1
+                for i in range(len(ctr)):
+                    px = source_pts[ ctr[ i ] ]
+                    px.x = 0.0
+                    dest_pts[ctr[i]] = px
 
-                #dest_pts[plusX[i]] = nx
-                dest_pts[negX[i]]  = px
+                destFn.setPoints( dest_pts )
 
-            for i in range(len(ctr)):
-                px = source_pts[ ctr[ i ] ]
-                px.x = 0.0
-                dest_pts[ctr[i]] = px
+            if mc.nodeType( source_path.fullPathName() ) == 'nurbsSurface':
 
-            destFn.setPoints( dest_pts )
+                sourceFn = om.MFnNurbsSurface( source_path )
+                destFn = om.MFnNurbsSurface( dest_path )
 
+                source_pts = sourceFn.cvPositions(  )
+                dest_pts = sourceFn.cvPositions(  )
 
+                for i in range( len( plusX ) ):
+                    px = source_pts[ plusX[ i ] ]
+                    px.cartesianize()
+                    dest_pts[ plusX[ i ] ] = px
 
+                    px.x *= -1
+                    dest_pts[ negX[ i ] ] = px
+
+                for i in range( len( ctr ) ):
+                    px = source_pts[ ctr[ i ] ]
+                    px.x = 0.0
+                    dest_pts[ ctr[ i ] ] = px
+
+                destFn.setCVPositions( dest_pts, om.MSpace.kWorld )
+
+                destFn.updateSurface()
 
     def get_model_sides( self, modelPath = om.MDagPath ):
 
         if mc.nodeType( modelPath.fullPathName() ) == 'mesh':
 
-            vtxCount = mc.polyEvaluate( modelPath.fullPathName(), vertex = True )
-
-            posX = [ ]
-            negX = [ ]
-            nulX = [ ]
-
             meshFn = om.MFnMesh( modelPath )
 
             pts = meshFn.getPoints( space = om.MSpace.kObject )
 
-            pts_pos = [ ]
-            pts_neg = [ ]
+            return self.get_sym_points( pts )
 
-            for i in range( len( pts ) ):
+        if mc.nodeType( modelPath.fullPathName() ) == 'nurbsSurface':
+            surfFn = om.MFnNurbsSurface( modelPath )
 
-                x = pts[ i ][ 0 ]
+            pts = surfFn.cvPositions(  )
 
-                if x > self.tol:
-                    posX.append( i )
-                elif x < -self.tol:
-                    negX.append( i )
-                else:
-                    nulX.append( i )
+            return self.get_sym_points( pts )
 
-            sym_neg = [ ]
+    def get_sym_points( self, pts ):
+        posX = [ ]
+        negX = [ ]
+        nulX = [ ]
 
-            # Loop over the indices on +X
-            for i in range( len( posX ) ):
 
-                # Set an initial high distance
-                distance = 100.0
-                # Set an initial "bad" index
-                index = -1
+        pts_pos = [ ]
+        pts_neg = [ ]
 
-                # Create a Point on -X based on +X
-                posX_NEG = om.MPoint( -pts[ posX[ i ] ][ 0 ], pts[ posX[ i ] ][ 1 ], pts[ posX[ i ] ][ 2 ] )
+        for i in range( len( pts ) ):
 
-                # Loop over the inidces on -X
-                for j in range( len( negX ) ):
-                    # Compare the current distance to the saved distance
-                    if posX_NEG.distanceTo( pts[ negX[ j ] ] ) < distance:
-                        # If it is closer, save the index of that point
-                        index = negX[ j ]
-                        # and the distance so we can compare it to other points
-                        distance = posX_NEG.distanceTo( pts[ negX[ j ] ] )
-                # Now uses the next matching point, is that good enough?
-                if index != -1:
-                    sym_neg.append( index )
-                else:
-                    mc.warning( 'aniMeta Mirror Skin: Can not find a matching -X vertex for index ', i )
-                    sym_neg.append( None )
+            x = pts[ i ][ 0 ]
 
-            return posX, sym_neg, nulX
+            if x > self.tol:
+                posX.append( i )
+            elif x < -self.tol:
+                negX.append( i )
+            else:
+                nulX.append( i )
+
+        sym_neg = [ ]
+
+        # Loop over the indices on +X
+        for i in range( len( posX ) ):
+
+            # Set an initial high distance
+            distance = 100.0
+            # Set an initial "bad" index
+            index = -1
+
+            # Create a Point on -X based on +X
+            posX_NEG = om.MPoint( -pts[ posX[ i ] ][ 0 ], pts[ posX[ i ] ][ 1 ], pts[ posX[ i ] ][ 2 ] )
+
+            # Loop over the inidces on -X
+            for j in range( len( negX ) ):
+                # Compare the current distance to the saved distance
+                if posX_NEG.distanceTo( pts[ negX[ j ] ] ) < distance:
+                    # If it is closer, save the index of that point
+                    index = negX[ j ]
+                    # and the distance so we can compare it to other points
+                    distance = posX_NEG.distanceTo( pts[ negX[ j ] ] )
+            # Now uses the next matching point, is that good enough?
+            if index != -1:
+                sym_neg.append( index )
+            else:
+                mc.warning( 'aniMeta Mirror Skin: Can not find a matching -X vertex for index ', i )
+                sym_neg.append( None )
+
+        # print 'Length sym', len(posX), len(negX), len(sym_neg)
+        return posX, sym_neg, nulX 
 
     def specify_symmetry_file_ui(self, *args ):
 
@@ -9602,15 +9629,20 @@ class Model(Transform):
         for geo in geos:
             if mc.nodeType( geo ) == 'transform':
                 shapes = mc.listRelatives( geo, shapes=True ) or []
+
                 if shapes:
-                    if mc.nodeType( shapes[0]) == 'mesh':
+                    if mc.nodeType( shapes[0]) == 'mesh' or mc.nodeType( shapes[0]) == 'nurbsSurface':
                         geo = shapes[0]
 
-            if mc.nodeType(geo) == 'mesh':
+            if mc.nodeType(geo) == 'mesh' or mc.nodeType(geo) == 'nurbsSurface':
+
                 if not mc.attributeQuery( 'aniMetaSymFile', node=geo, exists=True ):
                     mc.addAttr( geo, ln='aniMetaSymFile', dt='string' )
 
                 mc.setAttr( geo + '.aniMetaSymFile', fileName, type='string' )
+
+            else:
+                print('nope')
 
 
     def export_symmetry_ui( self, *args ):
@@ -9636,12 +9668,24 @@ class Model(Transform):
                 for i in range( len( sym[ 0 ] ) ):
                     sym_list.append( str( sym[ 0 ][ i ] ) + '<>' + str( sym[ 1 ][ i ] ) )
 
+                vtx_count = 0
+
+                if mc.nodeType( shape.fullPathName() ) == 'mesh':
+                    vtx_count = mc.polyEvaluate( shape.fullPathName(), vertex = True )
+
+                elif mc.nodeType( shape.fullPathName() ) == 'nurbsSurface':
+                    surf_fn = om.MFnNurbsSurface( shape )
+                    vtx_count = surf_fn.numCVsInU * surf_fn.numCVsInV
+
+
+
                 dict = {
                     'Meta': {}
                 }
                 dict['Meta']['Geo'] = geo
-                dict['Meta']['VertexCount'] = mc.polyEvaluate( shape.fullPathName(), vertex = True )
+                dict['Meta']['VertexCount'] = vtx_count
                 dict['Symmetry'] = { 'Sides': sym_list, 'Centre': sym[2] }
+                dict['Meta']['Type'] = mc.nodeType( shape.fullPathName() )
 
                 flat = json.dumps( dict, indent= 4 )
 
@@ -11108,57 +11152,69 @@ class aniMetaSkinMirror( om.MPxCommand ):
         return compObj
 
     def get_model_sides( self, modelPath = om.MDagPath ):
+
+        print ( mc.nodeType( modelPath.fullPathName() ) )
+
         if mc.nodeType( modelPath.fullPathName() ) == 'mesh':
 
-            posX = [ ]
-            negX = [ ]
-            nulX = [ ]
-
             meshFn = om.MFnMesh( modelPath )
-
             pts = meshFn.getPoints( space = om.MSpace.kObject )
 
-            for i in range( len( pts ) ):
+            return self.find_sym_points( pts )
+        if mc.nodeType( modelPath.fullPathName() ) == 'nurbsSurface':
+            print ( 'nurbs' )
+            meshFn = om.MFnNurbsSurface( modelPath )
+            pts = meshFn.cvPositions( )
 
-                x = pts[ i ][ 0 ]
+            return self.find_sym_points( pts )
 
-                if x > self.tol:
-                    posX.append( i )
-                elif x < -self.tol:
-                    negX.append( i )
-                else:
-                    nulX.append( i )
+    def find_sym_points( self, pts=[] ):
+        print ( 'find_sym_points', pts )
+        posX = [ ]
+        negX = [ ]
+        nulX = [ ]
 
-            sym_neg = [ ]
+        for i in range( len( pts ) ):
 
-            # Loop over the indices on +X
-            for i in range( len( posX ) ):
+            x = pts[ i ][ 0 ]
 
-                # Set an initial high distance
-                distance = 100.0
-                # Set an initial "bad" index
-                index = -1
+            if x > self.tol:
+                posX.append( i )
+            elif x < -self.tol:
+                negX.append( i )
+            else:
+                nulX.append( i )
 
-                # Create a Point on -X based on +X
-                posX_NEG = om.MPoint( -pts[ posX[ i ] ][ 0 ], pts[ posX[ i ] ][ 1 ], pts[ posX[ i ] ][ 2 ] )
+        sym_neg = [ ]
 
-                # Loop over the indices on -X
-                for j in range( len( negX ) ):
-                    # Compare the current distance to the saved distance
-                    if posX_NEG.distanceTo( pts[ negX[ j ] ] ) < distance:
-                        # If it is closer, save the index of that point
-                        index = negX[ j ]
-                        # and the distance so we can compare it to other points
-                        distance = posX_NEG.distanceTo( pts[ negX[ j ] ] )
-                # Now uses the next matching point, is that good enough?
-                if index != -1:
-                    sym_neg.append( index )
-                else:
-                    mc.warning( 'aniMeta Mirror Skin: Can not find a matching -X vertex for index ', i )
-                    sym_neg.append( None )
+        # Loop over the indices on +X
+        for i in range( len( posX ) ):
 
-            # print 'Length sym', len(posX), len(negX), len(sym_neg)
-            return posX, sym_neg, nulX
+            # Set an initial high distance
+            distance = 100.0
+            # Set an initial "bad" index
+            index = -1
+
+            # Create a Point on -X based on +X
+            posX_NEG = om.MPoint( -pts[ posX[ i ] ][ 0 ], pts[ posX[ i ] ][ 1 ], pts[ posX[ i ] ][ 2 ] )
+
+            # Loop over the indices on -X
+            for j in range( len( negX ) ):
+                # Compare the current distance to the saved distance
+                if posX_NEG.distanceTo( pts[ negX[ j ] ] ) < distance:
+                    # If it is closer, save the index of that point
+                    index = negX[ j ]
+                    # and the distance so we can compare it to other points
+                    distance = posX_NEG.distanceTo( pts[ negX[ j ] ] )
+            # Now uses the next matching point, is that good enough?
+            if index != -1:
+                sym_neg.append( index )
+            else:
+                mc.warning( 'aniMeta Mirror Skin: Can not find a matching -X vertex for index ', i )
+                sym_neg.append( None )
+
+        # print 'Length sym', len(posX), len(negX), len(sym_neg)
+        return posX, sym_neg, nulX
 
     def get_comp_list( self, vtxCount ):
         compFn = om.MFnSingleIndexedComponent()
