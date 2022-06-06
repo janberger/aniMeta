@@ -58,7 +58,7 @@ from functools import partial
 px = omui.MQtUtil.dpiScale
 
 kPluginName    = 'aniMeta'
-kPluginVersion = '01.00.136'
+kPluginVersion = '01.00.137'
 
 kLeft, kRight, kCenter, kAll, kSelection = range( 5 )
 kHandle, kIKHandle, kJoint, kMain, kBodyGuide, kBipedRoot, kQuadrupedRoot, kCustomHandle, kBodyGuideLock, kBipedRootUE = range(10)
@@ -142,7 +142,7 @@ class AniMeta( object ):
 
         self.ui = AniMetaUI()
         self.update_ui()
-        
+
     def find_node( self, root, nodeName ):
         '''
         Finds a DAG node within the specified character node, useful when multiple rigs are present.
@@ -279,7 +279,7 @@ class AniMeta( object ):
                 matches.append( node )
         matches = sorted( matches )
         return matches
-    
+
     def get_mobject( self, node ):
 
         if isinstance( node, om.MDagPath ):
@@ -564,7 +564,7 @@ class Menu(AniMeta):
         # Misc
         #
         ##################################################################################
-     
+
         # Menu
         #
         ######################################################################################
@@ -751,7 +751,7 @@ class Transform(AniMeta):
         else:
             # there is no angle
             pa.normalize()
-            
+
             L4 = L2 + pa
             V4 = L4 - L2
             '''
@@ -803,7 +803,7 @@ class Transform(AniMeta):
             outMat = poleOffset.asMatrix() * dag2WorldTMat
 
             worldTrans = self.get_translate( outMat )
-            
+
             '''
         return self.create_matrix(translate=worldTrans)
 
@@ -1850,12 +1850,15 @@ class Rig( Transform ):
         if parent is not None:
             grp = mc.parent( grp, parent.fullPathName() )[0]
 
-
         target = constraintNode
 
         # Is this good? Not Really in the case of Hips UpVector Control
         if target is None:
             target = matchTransform
+
+        # If a constraint node is specified but not the constraint type, use parentConstraint as default
+        if constraintNode is not None:
+            constraint = self.kParent
 
         if constraint is not None and target is not None:
 
@@ -1865,7 +1868,7 @@ class Rig( Transform ):
             if constraint == self.kAim:
                 mc.aimConstraint( ctrl_path.fullPathName(), target.fullPathName(), mo=maintainOffset, upVector=upVec, aimVector=aimVec)
 
-        mc.select(cl=True)
+        mc.select( cl=True )
 
         return ctrl_path
 
@@ -2121,7 +2124,7 @@ class Rig( Transform ):
             parents=[]
             for node in nodes:
                 con = mc.listConnections(node+'.t', s=True)
-                if con: 
+                if con:
                     if mc.nodeType(con[0]) == 'parentConstraint':
 
                         parents.append( con[0])
@@ -2379,7 +2382,7 @@ class Rig( Transform ):
         handles = [ ]
 
         if side == kAll:
-            
+
             handles = self.get_char_handles( character, { 'Type': kHandle, 'Side': kAll } )
 
             # Add the Main Control to the list
@@ -2691,7 +2694,7 @@ class Rig( Transform ):
                     pass
 
     def set_pose( self, pose, handles=kAll, space=kLocal ):
-  
+
         char = self.get_active_char()
 
         if 'data' in pose[ 'aniMeta' ][ 1 ]:
@@ -3012,10 +3015,11 @@ class Rig( Transform ):
 
         for attr in ['rx','ry','rz']:
             mc.setAttr( parent + '.' + attr, l=0)
+            mc.setAttr( node.fullPathName() + '.' + attr, l=0)
 
         mc.setAttr(parent + '.r', 0, 0, 0)
 
-        mc.setAttr(node.fullPathName() + '.r', r[0], r[1], r[2])
+        mc.setAttr( node.fullPathName() + '.r', r[0], r[1], r[2] )
 
     def skeleton_export_dialog( self, *args, **kwargs ):
         jnts = mc.ls( sl = True ) or [ ]
@@ -3123,26 +3127,22 @@ class Char( Rig ):
         guideDict = args[3]
         data      = args[4]
 
-        swap_rot = True
+        # Setting this to True causes issues with the A-Pose
+        swap_rot = False
+
         if len(args)>5:
             swap_rot = args[5]
 
         rot_offset = om.MEulerRotation( 0,0,0 )
         metaData = self.get_metaData( charRoot )
 
-        '''
-        # We probably need individual rot offsets
-        if 'RigType' in metaData:
-            rigType = metaData['RigType']
-            if rigType == kBipedUE:
-                rot_offset = om.MEulerRotation( 0, math.radians(  90 ),math.radians(  -90 ) )
-        '''
         ctrlDict['offsetMatrix'] = rot_offset.asMatrix()
 
         if guideList:
             for guide in guideList:
                 ctrlDict[ 'name' ] = guide[ 0 ]
                 ctrlDict[ 'matchTransform' ] = guide[ 1 ]
+                ctrlDict[ 'constraint' ] = self.kParent
 
                 if len( guide ) > 4:
                     ctrlDict[ 'offsetMatrix' ] = guide[ 4 ]
@@ -3154,82 +3154,90 @@ class Char( Rig ):
                 else:
                     ctrlDict[ 'parent' ] = guide[ 2 ]
 
+                # This returns a string if the node exists
                 guide_ctrl = self.find_node( charRoot, guide[ 0 ] )
 
+
+                # Create the Guide Control if it doesn`t exist, yet
                 if guide_ctrl is not None:
-                    continue
+                    if mc.objExists( guide[1] ):
+                        mc.parentConstraint( guide[ 0 ], guide[ 1 ] )
+                    # From now on we want an MDagPath
+                    guide_ctrl = self.get_path( guide[ 0 ] )
                 else:
                     guide_ctrl = self.create_handle( **ctrlDict )
 
+                    # Check whether we need to build the right side for a left-sided guide
+                    if 'Lft' in ctrlDict['name']:
+
+                        # Right side version of the guide´s name
+                        rgt_name = ctrlDict['name'].replace( 'Lft', 'Rgt' )
+
+                        # Get the parents DAG path
+                        parent_rgt = ctrlDict[ 'parent' ]
+
+                        if 'Lft' in ctrlDict[ 'parent' ].partialPathName():
+                            #parent_rgt = ctrlDict[ 'parent' ].fullPathName().replace( 'Lft', 'Rgt')
+                            parent_rgt = self.short_name( ctrlDict[ 'parent' ].fullPathName() ).replace( 'Lft', 'Rgt')
+                            parent_rgt = self.find_node( charRoot, parent_rgt )
+                            parent_rgt = self.get_path( parent_rgt )
+
+                        #######################################################################################
+                        # Create right side guide groups and symConstraints
+                        # To make symConstraints work, we need to create them for the guides and their parents
+                        # in this section we create additional transforms above the right side guides
+
+                        # Get the parent
+                        parent_grp_lft = mc.listRelatives( guide_ctrl.fullPathName(), p=True )[0]
+
+                        #if self.short_name(parent_rgt) != 'Guides_Body_Grp':
+
+                        # Get the short name
+                        parent_grp_lft_short = self.short_name( parent_grp_lft )
+
+                        # Get the right side version of this name
+                        parent_grp_rgt_short = parent_grp_lft_short.replace( 'Lft', 'Rgt' )
+
+                        # Get the parent`s parent of this group so we can parent the new group
+                        grandparent_grp_lft = mc.listRelatives( parent_grp_lft, p=True, pa=True )[0]
+
+                        # Get the short name of the grandparent
+                        grandparent_grp_lft_short = self.short_name( grandparent_grp_lft )
+
+                        # Get the right side version of this name
+                        grandparent_grp_rgt_short = grandparent_grp_lft_short.replace( 'Lft', 'Rgt' )
+
+                        # Get the long DAG path
+                        grandparent_grp_rgt = self.find_node( charRoot, grandparent_grp_rgt_short )
+
+                        parent_rgt_node = mc.createNode( 'transform', name=parent_grp_rgt_short, parent=grandparent_grp_rgt, ss=True )
+
+                        # Add an offset matrix to first nodes off the centre to make the symConstraints work with standard transforms, the offset is 180 on rx
+                        if not 'Lft' in grandparent_grp_lft_short:
+                            offset_matrix = [1.0, 0.0, 0.0, 0.0, 0.0, -1, 0.0, 0.0, 0.0, 0.0, -1, 0.0, 0.0, 0.0, 0.0, 1.0]
+
+                            mc.setAttr(  parent_rgt_node+ '.offsetParentMatrix', offset_matrix, typ='matrix')
+
+                        self.create_sym_constraint( parent_grp_lft , parent_rgt_node )
+
+                        # Create right side guide groups and symConstraints
+                        #######################################################################################
+
+                        guide_rgt = mc.createNode( 'transform', name=rgt_name, parent=parent_rgt_node, ss=True )
+
+                        self.create_sym_constraint( guide_ctrl, guide_rgt )
+
                 guideDict[ ctrlDict[ 'name' ] ] = guide_ctrl
 
-                if mc.objExists( guide_ctrl.fullPathName() ):
-                    if swap_rot:
-                        self.swap_rotation_with_parent( guide_ctrl )
-                    self.lock_attrs( guide_ctrl, guide[ 3 ] )
-                    self.set_metaData( guide_ctrl , data )
-                else:
-                    mc.warning( 'aniMeta: There was a problem creating guide', guide[ 0 ] )
+                if guide_ctrl is not None:
+                    if mc.objExists( guide_ctrl.fullPathName() ):
+                        if swap_rot:
+                            self.swap_rotation_with_parent( guide_ctrl )
+                        self.lock_attrs( guide_ctrl, guide[ 3 ] )
+                        self.set_metaData( guide_ctrl , data )
+                    else:
+                        mc.warning( 'aniMeta: There was a problem creating guide', guide[ 0 ] )
 
-                if 'Lft' in ctrlDict['name']:
-
-                    # Right side version of the guide´s name
-                    rgt_name = ctrlDict['name'].replace( 'Lft', 'Rgt' )
-
-                    # Get the parents DAG path
-                    parent_rgt = ctrlDict[ 'parent' ]
-
-                    if 'Lft' in ctrlDict[ 'parent' ].partialPathName():
-                        #parent_rgt = ctrlDict[ 'parent' ].fullPathName().replace( 'Lft', 'Rgt')
-                        parent_rgt = self.short_name( ctrlDict[ 'parent' ].fullPathName() ).replace( 'Lft', 'Rgt')
-                        parent_rgt = self.find_node( charRoot, parent_rgt )
-                        parent_rgt = self.get_path( parent_rgt )
-
-
-                    #######################################################################################
-                    # Create right side guide groups and symConstraints
-                    # To make symConstraints work, we need to create them for the guides and their parents
-                    # in this section we create additional transforms above the right side guides
-
-                    # Get the parent
-                    parent_grp_lft = mc.listRelatives( guide_ctrl.fullPathName(), p=True )[0]
-
-                    #if self.short_name(parent_rgt) != 'Guides_Body_Grp':
-
-                    # Get the short name
-                    parent_grp_lft_short = self.short_name( parent_grp_lft )
-
-                    # Get the right side version of this name
-                    parent_grp_rgt_short = parent_grp_lft_short.replace( 'Lft', 'Rgt' )
-
-                    # Get the parent`s parent of this group so we can parent the new group
-                    grandparent_grp_lft = mc.listRelatives( parent_grp_lft, p=True, pa=True )[0]
-
-                    # Get the short name of the grandparent
-                    grandparent_grp_lft_short = self.short_name( grandparent_grp_lft )
-
-                    # Get the right side version of this name
-                    grandparent_grp_rgt_short = grandparent_grp_lft_short.replace( 'Lft', 'Rgt' )
-
-                    # Get the long DAG path
-                    grandparent_grp_rgt = self.find_node( charRoot, grandparent_grp_rgt_short )
-
-                    parent_rgt_node = mc.createNode( 'transform', name=parent_grp_rgt_short, parent=grandparent_grp_rgt, ss=True )
-
-                    # Add an offset matrix to first nodes off the centre to make the symConstraints work with standard transforms, the offset is 180 on rx
-                    if not 'Lft' in grandparent_grp_lft_short:
-                        offset_matrix = [1.0, 0.0, 0.0, 0.0, 0.0, -1, 0.0, 0.0, 0.0, 0.0, -1, 0.0, 0.0, 0.0, 0.0, 1.0]
-
-                        mc.setAttr(  parent_rgt_node+ '.offsetParentMatrix', offset_matrix, typ='matrix')
-
-                    self.create_sym_constraint( parent_grp_lft , parent_rgt_node )
-
-                    # Create right side guide groups and symConstraints
-                    #######################################################################################
-
-                    guide_rgt = mc.createNode( 'transform', name=rgt_name, parent=parent_rgt_node, ss=True )
-
-                    self.create_sym_constraint( guide_ctrl, guide_rgt )
 
         return guideDict
 
@@ -3256,7 +3264,6 @@ class Char( Rig ):
         if type == kBipedRoot:
             type = kBiped
 
-        #print 'build_body_guides', charRoot, kRigTypeString[type]
         if not charRoot:
             mc.warning( 'Please select a Biped Root Group.' )
         else:
@@ -3368,7 +3375,7 @@ class Char( Rig ):
 
             self.set_metaData( guideGrp, data )
 
-            attrList = [ 'tx', 'ry', 'rx', 'sx', 'sy', 'sz', 'v' ]
+            attrList = [ 'sx', 'sy', 'sz', 'v' ]
 
             guideDict = { }
 
@@ -3386,7 +3393,7 @@ class Char( Rig ):
 
             if type == kBipedUE:
 
-                attrList = [ 'tz', 'ry', 'rx', 'sx', 'sy', 'sz', 'v' ]
+                attrList = [ 'sx', 'sy', 'sz', 'v' ]
 
                 rot_offset_1 = om.MEulerRotation( 0, math.radians(  90 ),math.radians(  -90 ) ).asMatrix()
                 rot_offset_2 = om.MEulerRotation( 0, math.radians(  90 ),math.radians(  0 ) ).asMatrix()
@@ -3414,16 +3421,16 @@ class Char( Rig ):
                 guideList.append( [ 'Head'+guide_sfx, 'head', 'Neck'+guide_sfx, attrList, rot_offset_1 ] )
 
                 # clavicle_l
-                guideList.append( [ 'Clavicle_Lft'+guide_sfx, 'clavicle_l', 'Spine3'+guide_sfx, [ 'sx', 'sy', 'sz', 'v' ], rot_offset_3  ] )
+                guideList.append( [ 'Clavicle_Lft'+guide_sfx, 'clavicle_l', 'Spine3'+guide_sfx, attrList, rot_offset_3  ] )
 
                 # upperarm_l
-                guideList.append( [ 'ArmUp_Lft'+guide_sfx, 'upperarm_l', 'Clavicle_Lft'+guide_sfx, [ 'sx', 'sy', 'sz', 'v' ], rot_offset_3  ] )
+                guideList.append( [ 'ArmUp_Lft'+guide_sfx, 'upperarm_l', 'Clavicle_Lft'+guide_sfx, attrList, rot_offset_3  ] )
 
                 # lowerarm_l
-                guideList.append( [ 'ArmLo_Lft'+guide_sfx, 'lowerarm_l', 'ArmUp_Lft'+guide_sfx, [ 'ty', 'tz', 'rx', 'ry', 'sx', 'sy', 'sz', 'v' ], rot_offset_3  ] )
+                guideList.append( [ 'ArmLo_Lft'+guide_sfx, 'lowerarm_l', 'ArmUp_Lft'+guide_sfx, attrList, rot_offset_3  ] )
 
                 # hand_l
-                guideList.append( [ 'Hand_Lft'+guide_sfx, 'hand_l', 'ArmLo_Lft'+guide_sfx, [ 'ty', 'tz', 'sx', 'sy', 'sz', 'v' ], rot_offset_4  ] )
+                guideList.append( [ 'Hand_Lft'+guide_sfx, 'hand_l', 'ArmLo_Lft'+guide_sfx, attrList, rot_offset_4  ] )
 
                 # thigh_l
                 guideList.append( [ 'LegUp_Lft'+guide_sfx, 'thigh_l', 'Hips'+guide_sfx, attrList, rot_offset_1 ] )
@@ -3438,10 +3445,10 @@ class Char( Rig ):
                 guideList.append( [ 'Ball_Lft'+guide_sfx, 'ball_l', 'Foot_Lft'+guide_sfx, attrList, rot_offset_2  ])
 
                 # Shoulder Up Vec
-                guideList.append( [ 'Shoulder_Lft_upVec'+guide_sfx, 'Shoulder_Lft_upVec', 'Clavicle_Lft'+guide_sfx, [ 'sx', 'sy', 'sz', 'v' ], rot_offset_1 ] )
+                guideList.append( [ 'Shoulder_Lft_upVec'+guide_sfx, 'Shoulder_Lft_upVec', 'Clavicle_Lft'+guide_sfx, attrList, rot_offset_1 ] )
 
                 # Hips Up Vec
-                guideList.append( [ 'Hips_Lft_upVec'+guide_sfx, 'Hips_Lft_upVec', 'Hips'+guide_sfx, [ 'sx', 'sy', 'sz', 'v' ], rot_offset_1 ] )
+                guideList.append( [ 'Hips_Lft_upVec'+guide_sfx, 'Hips_Lft_upVec', 'Hips'+guide_sfx, attrList, rot_offset_1 ] )
 
                 # Heel Lft
                 guideList.append( [ 'Heel_Lft'+guide_sfx, 'Heel_Lft',  'Foot_Lft'+guide_sfx, attrList, rot_offset_1 ] )
@@ -3455,6 +3462,11 @@ class Char( Rig ):
 
                 for j in range( len ( fngr_1 )):
                     for i in range( 1, 4 ):
+
+                        # Skip the 4th thumb digit as we only want three of them
+                        if j == 0 and i == 3:
+                            continue
+
                         name       = fngr_1[j] + '_0'+str( i ) + '_l'
                         guide_name = fngr_2[j] + str( i ) + '_Lft'+guide_sfx
 
@@ -3463,7 +3475,7 @@ class Char( Rig ):
                         else:
                             parent = fngr_2[j] + str( i-1 ) + '_Lft'+guide_sfx
 
-                        guideList.append( [ guide_name, name, parent, [  'sx', 'sy', 'sz', 'v' ], rot_offset_4 ] )
+                        guideList.append( [ guide_name, name, parent, attrList, rot_offset_4 ] )
 
                 guideDict = self.build_guides( charRoot, guideList, ctrlDict, guideDict, data, False )
 
@@ -3513,13 +3525,13 @@ class Char( Rig ):
                 guideList.append( [ 'Shoulder_Lft_upVec_Guide', 'Shoulder_Lft_upVec', 'Clavicle_Lft_Guide', [ 'sx', 'sy', 'sz', 'v' ] ] )
 
                 # ArmLo Lft
-                guideList.append( [ 'ArmLo_Lft_Guide', 'ArmLo_Lft_Jnt', 'ArmUp_Lft_Guide', [ 'ty', 'tz', 'rx', 'rz', 'sx', 'sy', 'sz', 'v' ] ] )
+                guideList.append( [ 'ArmLo_Lft_Guide', 'ArmLo_Lft_Jnt', 'ArmUp_Lft_Guide', ['sx', 'sy', 'sz', 'v' ] ] )
 
                 # Hand Lft
-                guideList.append(  [ 'Hand_Lft_Guide', 'Hand_Lft_Jnt', 'ArmLo_Lft_Guide', [ 'ty', 'tz', 'sx', 'sy', 'sz', 'v' ] ] )
+                guideList.append(  [ 'Hand_Lft_Guide', 'Hand_Lft_Jnt', 'ArmLo_Lft_Guide', [ 'sx', 'sy', 'sz', 'v' ] ] )
 
                 # Palm Lft
-                guideList.append( [ 'Palm_Lft_Guide', 'Palm_Lft_Jnt', 'Hand_Lft_Guide', [ 'ty', 'tz', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz', 'v' ] ] )
+                guideList.append( [ 'Palm_Lft_Guide', 'Palm_Lft_Jnt', 'Hand_Lft_Guide', [ 'sx', 'sy', 'sz', 'v' ] ] )
 
                 # Prop Lft
                 guideList.append( [ 'Prop_Lft_Guide', 'Prop_Lft_Jnt', 'Palm_Lft_Guide',  [ 'sx', 'sy', 'sz', 'v' ]  ] )
@@ -3531,12 +3543,12 @@ class Char( Rig ):
                 guideList.append( [ 'Hips_Lft_upVec_Guide', 'Hips_Lft_upVec', 'Hips_Guide', [ 'sx', 'sy', 'sz', 'v' ] ] )
 
                 # LegLo Lft
-                guideList.append( [ 'LegLo_Lft_Guide', 'LegLo_Lft_Jnt', 'LegUp_Lft_Guide', [ 'tx', 'tz', 'ry', 'rz', 'sx', 'sy', 'sz', 'v' ] ] )
+                guideList.append( [ 'LegLo_Lft_Guide', 'LegLo_Lft_Jnt', 'LegUp_Lft_Guide', [ 'sx', 'sy', 'sz', 'v' ] ] )
 
                 # Foot Lft
-                guideList.append(  [ 'Foot_Lft_Guide', 'Foot_Lft_Jnt', 'LegLo_Lft_Guide', [ 'tx', 'tz', 'sx', 'sy', 'sz', 'v' ] ] )
+                guideList.append(  [ 'Foot_Lft_Guide', 'Foot_Lft_Jnt', 'LegLo_Lft_Guide', [ 'sx', 'sy', 'sz', 'v' ] ] )
 
-                attrList = [ 'tx', 'sx', 'sy', 'sz', 'v' ]
+                attrList = [ 'sx', 'sy', 'sz', 'v' ]
 
                 # Toes Lft
                 guideList.append( [ 'Ball_Lft_Guide', 'Toes_Lft_Jnt', 'Foot_Lft_Guide', attrList ] )
@@ -4184,7 +4196,7 @@ class Char( Rig ):
         hikProperties = mc.createNode("HIKProperty2State", name=char + "_hikProperties")
         mc.connectAttr(hikProperties + ".message", hikCharacter + ".propertyState")
         '''
-        prefix = '' 
+        prefix = ''
         hikNodes = {}
 
         hikNodes['Reference']         = 'Root_Jnt'
@@ -4702,7 +4714,7 @@ class Char( Rig ):
                             parents.append( c  )
             if parents:
                 try:
-                    if len( parents ) > 0: 
+                    if len( parents ) > 0:
                         self.delete_nodes( charRoot, parents )
                 except:
                     pass
@@ -4712,7 +4724,7 @@ class Char( Rig ):
                     try:
                         if len( nodes ) > 0:
                             self.delete_nodes( charRoot, nodes )
-    
+
                     except:
                         pass
                 else:
@@ -5905,684 +5917,807 @@ class Char( Rig ):
             return {
                 "Skeleton": {
                     "Joints": {
-                        "Shoulder_Lft_upVec": {
-                            "nodeType": "transform",
-                            "parent": "clavicle_l",
-                            "tx": 20,
-                            "tz": 8
-                        },
-                        "Shoulder_Rgt_upVec": {
-                            "nodeType": "transform",
-                            "parent": "clavicle_r",
-                            "tx": -20,
-                            "tz": -8
-                        },
-                        "Hips_Lft_upVec": {
-                            "nodeType": "transform",
-                            "tz": -20,
-                            "parent": "pelvis"
-                        },
-                        "Heel_Lft": {
-                            "nodeType": "transform",
-                            "tx": -13,
-                            "ty": 5,
-                            "parent": "foot_l"
-                        },
-                        "ToesTip_Lft": {
-                            "nodeType": "transform",
-                            "tx": 6.65,
-                            "ty": -2,
-                            "ry": 90,
-                            "parent": "ball_l"
-                        },
-                        "Heel_Rgt": {
-                            "nodeType": "transform",
-                            "tx": 0.0,
-                            "ty":  12.874,
-                            "tz":  6.8,
-                            "parent": "foot_r"
-                        },
-                        "ToesTip_Rgt": {
-                            "nodeType": "transform",
-                            "tx": -6.65,
-                            "ty": 2,
-                            "parent": "ball_r"
-                        },
-                        "Hips_Rgt_upVec": {
-                            "nodeType": "transform",
-                            "tx": -20,
-                            "parent": "pelvis"
-                        },
-                        "thumb_02_l": {
-                            "nodeType": "joint",
-                            "tx": 3.8697,
-                            "parent": "thumb_01_l",
-                            "jox": 1.6131,
-                            "joy": 9.8332,
-                            "joz": 15.1513,
-                            "radius": 3.0
-                        },
-                        "thigh_r": {
-                            "tz": 9.0058,
-                            "parent": "pelvis",
-                            "tx": -1.4486,
-                            "ty": -0.5314,
-                            "jox": 8.5635,
-                            "joy": -7.0323,
-                            "joz": 178.4845,
+                        "root": {
+                            "jox": -90,
                             "radius": 3.0,
-                            "nodeType": "joint"
-                        },
-                        "pinky_01_r": {
-                            "tz": -4.6431,
-                            "parent": "hand_r",
-                            "tx": -10.1406,
-                            "ty": -2.2634,
-                            "jox": -18.7246,
-                            "joy": -18.934,
-                            "joz": 20.1859,
-                            "radius": 3.0,
-                            "nodeType": "joint"
-                        },
-                        "hand_r": {
-                            "nodeType": "joint",
-                            "tx": -26.9752,
-                            "parent": "lowerarm_r",
-                            "jox": -76.3562,
-                            "joy": 2.4998,
-                            "joz": -0.4126,
-                            "radius": 3.0
-                        },
-                        "thumb_03_l": {
-                            "nodeType": "joint",
-                            "tx": 4.0622,
-                            "parent": "thumb_02_l",
-                            "jox": 2.4148,
-                            "joy": 0.4792,
-                            "joz": -12.3857,
-                            "radius": 3.0
-                        },
-                        "hand_l": {
-                            "nodeType": "joint",
-                            "tx": 26.9751,
-                            "parent": "lowerarm_l",
-                            "jox": -76.3562,
-                            "joy": 2.4998,
-                            "joz": -0.4126,
-                            "radius": 3.0
-                        },
-                        "spine_01": {
-                            "nodeType": "joint",
-                            "tx": 10.8089,
-                            "parent": "pelvis",
-                            "ty": -0.8514,
-                            "joz": -7.1539,
-                            "radius": 3.0
-                        },
-                        "spine_02": {
-                            "nodeType": "joint",
-                            "tx": 18.8753,
-                            "parent": "spine_01",
-                            "ty": 3.8012,
-                            "joz": 14.0636,
-                            "radius": 3.0
-                        },
-                        "spine_03": {
-                            "nodeType": "joint",
-                            "tx": 13.4073,
-                            "parent": "spine_02",
-                            "ty": 0.4205,
-                            "joz": 2.7794,
-                            "radius": 3.0
-                        },
-                        "thumb_02_r": {
-                            "tz": 0.0001,
-                            "parent": "thumb_01_r",
-                            "tx": -3.8696,
-                            "ty": 0.0001,
-                            "jox": 1.6131,
-                            "joy": 9.8332,
-                            "joz": 15.1513,
-                            "radius": 3.0,
+                            "parent": "Joint_Grp",
                             "nodeType": "joint"
                         },
                         "pelvis": {
-                            "tz": 96.7506,
+                            "ty": -2.3795,
+                            "tz": 98.6932,
+                            "rx": -90.0,
+                            "ry": -86.3974,
+                            "rz": 90.0,
+                            "radius": 3.0,
                             "parent": "root",
-                            "ty": 1.0562,
-                            "jox": 89.9981,
-                            "joy": -89.7906,
-                            "joz": -89.9981,
-                            "radius": 3.0,
                             "nodeType": "joint"
                         },
-                        "thigh_twist_01_l": {
-                            "nodeType": "joint",
-                            "tx": -22.0942,
-                            "parent": "thigh_l",
-                            "jox": -5.4387,
-                            "joy": -0.0002,
-                            "joz": -0.0563,
-                            "radius": 3.0
-                        },
-                        "pinky_03_r": {
-                            "nodeType": "joint",
-                            "parent": "pinky_02_r",
-                            "tx": -2.9854,
-                            "ty": 0.0003,
-                            "jox": 0.4457,
-                            "joy": 3.8697,
-                            "joz": 1.039,
-                            "radius": 3.0
-                        },
-                        "calf_twist_01_l": {
-                            "nodeType": "joint",
-                            "tx": -20.4768,
-                            "parent": "calf_l",
-                            "jox": 0.3236,
-                            "joy": -0.2191,
-                            "joz": -0.873,
-                            "radius": 3.0
-                        },
-                        "upperarm_r": {
-                            "nodeType": "joint",
-                            "tx": -15.7848,
-                            "parent": "clavicle_r",
-                            "jox": 7.6739,
-                            "joy": 40.3005,
-                            "joz": -17.021,
-                            "radius": 3.0
-                        },
-                        "ik_foot_root": {
-                            "nodeType": "joint",
+                        "spine_01": {
+                            "tx": 2.4719,
+                            "rx": 0.0001,
+                            "rz": -17.2467,
                             "radius": 3.0,
-                            "parent": "root"
-                        },
-                        "index_01_l": {
-                            "tz": -2.1094,
-                            "parent": "hand_l",
-                            "tx": 12.0681,
-                            "ty": 1.7635,
-                            "jox": 14.867,
-                            "joy": -3.7638,
-                            "joz": 25.5369,
-                            "radius": 3.0,
+                            "parent": "pelvis",
                             "nodeType": "joint"
                         },
-                        "clavicle_l": {
-                            "tz": -3.782,
+                        "spine_02": {
+                            "tx": 4.9875,
+                            "rx": -0.0002,
+                            "rz": 6.825,
+                            "radius": 3.0,
+                            "parent": "spine_01",
+                            "nodeType": "joint"
+                        },
+                        "spine_03": {
+                            "tx": 7.6259,
+                            "rx": 0.0002,
+                            "rz": 10.3212,
+                            "radius": 3.0,
+                            "parent": "spine_02",
+                            "nodeType": "joint"
+                        },
+                        "spine_04": {
+                            "tx": 8.8511,
+                            "rx": 0.0002,
+                            "rz": 8.4786,
+                            "radius": 3.0,
                             "parent": "spine_03",
-                            "tx": 11.8837,
-                            "ty": -2.7321,
-                            "jox": 108.7192,
-                            "joy": 61.8536,
-                            "joz": 101.5409,
-                            "radius": 3.0,
                             "nodeType": "joint"
                         },
-                        "calf_r": {
-                            "nodeType": "joint",
-                            "tx": 42.5723,
-                            "parent": "thigh_r",
-                            "jox": -5.736,
-                            "joy": 1.7873,
-                            "joz": -7.6136,
-                            "radius": 3.0
-                        },
-                        "upperarm_twist_01_r": {
+                        "spine_05": {
+                            "tx": 17.4988,
+                            "rx": -0.0002,
+                            "rz": 0.2585,
                             "radius": 3.0,
-                            "nodeType": "joint",
-                            "parent": "upperarm_r",
-                            "tx": -15
-                        },
-                        "index_02_l": {
-                            "nodeType": "joint",
-                            "tx": 4.2875,
-                            "parent": "index_01_l",
-                            "jox": 1.3378,
-                            "joy": -0.4753,
-                            "joz": 11.9861,
-                            "radius": 3.0
-                        },
-                        "ik_hand_gun": {
-                            "tz": 111.6797,
-                            "parent": "ik_hand_root",
-                            "tx": -56.6461,
-                            "ty": 0.3354,
-                            "jox": 74.068,
-                            "joy": -35.1726,
-                            "joz": 32.7511,
-                            "radius": 3.0,
-                            "nodeType": "joint"
-                        },
-                        "middle_02_l": {
-                            "nodeType": "joint",
-                            "tx": 4.6404,
-                            "parent": "middle_01_l",
-                            "jox": -2.025,
-                            "joy": 1.1368,
-                            "joz": 12.2807,
-                            "radius": 3.0
-                        },
-                        "index_03_l": {
-                            "nodeType": "joint",
-                            "tx": 3.3938,
-                            "parent": "index_02_l",
-                            "jox": 1.1374,
-                            "joy": 0.9973,
-                            "joz": -9.4963,
-                            "radius": 3.0
-                        },
-                        "index_02_r": {
-                            "tz": -0.0001,
-                            "parent": "index_01_r",
-                            "tx": -4.2877,
-                            "ty": 0.0001,
-                            "jox": 1.3378,
-                            "joy": -0.4753,
-                            "joz": 11.9861,
-                            "radius": 3.0,
-                            "nodeType": "joint"
-                        },
-                        "upperarm_twist_01_l": {
-                            "nodeType": "joint",
-                            "radius": 3.0,
-                            "parent": "upperarm_l",
-                            "tx": 15
-                        },
-                        "clavicle_r": {
-                            "tz": 3.782,
-                            "parent": "spine_03",
-                            "tx": 11.8838,
-                            "ty": -2.7321,
-                            "jox": 108.7192,
-                            "joy": 61.8536,
-                            "joz": -78.459,
-                            "radius": 3.0,
-                            "nodeType": "joint"
-                        },
-                        "ball_l": {
-                            "tz": 0.0802,
-                            "parent": "foot_l",
-                            "tx": -10.4538,
-                            "ty": -16.5779,
-                            "jox": 0.0039,
-                            "joy": 0.009,
-                            "joz": -91.8836,
-                            "radius": 3.0,
+                            "parent": "spine_04",
                             "nodeType": "joint"
                         },
                         "neck_01": {
-                            "nodeType": "joint",
-                            "tx": 16.5588,
-                            "parent": "spine_03",
-                            "ty": -0.3553,
-                            "joz": -23.508,
-                            "radius": 3.0
-                        },
-                        "index_01_r": {
-                            "tz": 2.1094,
-                            "parent": "hand_r",
-                            "tx": -12.0679,
-                            "ty": -1.7637,
-                            "jox": 14.867,
-                            "joy": -3.7638,
-                            "joz": 25.5369,
+                            "tx": 11.915,
+                            "ry": -0.0001,
+                            "rz": -25.1344,
                             "radius": 3.0,
+                            "parent": "spine_05",
                             "nodeType": "joint"
                         },
-                        "calf_twist_01_r": {
-                            "nodeType": "joint",
-                            "tx": 20.4769,
-                            "parent": "calf_r",
-                            "jox": 0.3234,
-                            "joy": -0.2191,
-                            "joz": -0.873,
-                            "radius": 3.0
-                        },
-                        "upperarm_l": {
-                            "nodeType": "joint",
-                            "tx": 15.7849,
-                            "parent": "clavicle_l",
-                            "jox": 7.6739,
-                            "joy": 40.3005,
-                            "joz": -17.021,
-                            "radius": 3.0
-                        },
-                        "pinky_02_r": {
-                            "nodeType": "joint",
-                            "parent": "pinky_01_r",
-                            "tx": -3.5711,
-                            "ty": -0.0001,
-                            "jox": 1.0638,
-                            "joy": -1.3157,
-                            "joz": 11.2081,
-                            "radius": 3.0
-                        },
-                        "thigh_twist_01_r": {
-                            "nodeType": "joint",
-                            "tx": 22.0942,
-                            "parent": "thigh_r",
-                            "jox": -5.4389,
-                            "joy": -0.0002,
-                            "joz": -0.0563,
-                            "radius": 3.0
+                        "neck_02": {
+                            "tx": 5.8488,
+                            "rx": -0.0005,
+                            "rz": 0.604,
+                            "radius": 3.0,
+                            "parent": "neck_01",
+                            "nodeType": "joint"
                         },
                         "head": {
-                            "nodeType": "joint",
-                            "tx": 9.2836,
-                            "parent": "neck_01",
-                            "ty": 0.3642,
-                            "joz": 15.3486,
-                            "radius": 3.0
-                        },
-                        "middle_01_r": {
-                            "tz": -0.5711,
-                            "parent": "hand_r",
-                            "tx": -12.2441,
-                            "ty": -1.2937,
-                            "jox": 1.9179,
-                            "joy": -7.0406,
-                            "joz": 22.8259,
+                            "tx": 5.7585,
+                            "rx": 0.0003,
+                            "ry": -0.0001,
+                            "rz": 12.2912,
                             "radius": 3.0,
+                            "parent": "neck_02",
                             "nodeType": "joint"
                         },
-                        "thigh_l": {
-                            "tz": -9.0058,
-                            "parent": "pelvis",
-                            "tx": -1.4488,
-                            "ty": -0.5314,
-                            "jox": 8.5635,
-                            "joy": -7.0323,
-                            "joz": -1.5155,
+                        "clavicle_l": {
+                            "tx": 5.8309,
+                            "ty": 1.0048,
+                            "tz": -0.9314,
+                            "rx": 168.9537,
+                            "ry": 81.6483,
+                            "rz": 156.7854,
                             "radius": 3.0,
+                            "parent": "spine_05",
                             "nodeType": "joint"
                         },
-                        "lowerarm_twist_01_r": {
+                        "upperarm_l": {
+                            "tx": 15.2861,
+                            "rx": -4.581,
+                            "ry": 44.6755,
+                            "rz": -3.614,
                             "radius": 3.0,
-                            "nodeType": "joint",
-                            "jox": -13.5104,
-                            "parent": "lowerarm_r",
-                            "tx": -14.0
-                        },
-                        "index_03_r": {
-                            "nodeType": "joint",
-                            "parent": "index_02_r",
-                            "tx": -3.3938,
-                            "ty": 0.0001,
-                            "jox": 1.1374,
-                            "joy": 0.9973,
-                            "joz": -9.4963,
-                            "radius": 3.0
-                        },
-                        "ring_01_r": {
-                            "tz": -2.8469,
-                            "parent": "hand_r",
-                            "tx": -11.498,
-                            "ty": -1.7538,
-                            "jox": -13.5103,
-                            "joy": -10.9893,
-                            "joz": 23.2921,
-                            "radius": 3.0,
+                            "parent": "clavicle_l",
                             "nodeType": "joint"
                         },
-                        "foot_l": {
-                            "nodeType": "joint",
-                            "tx": -40.1967,
-                            "parent": "calf_l",
-                            "jox": -0.4154,
-                            "joy": 3.7049,
-                            "joz": 8.0596,
-                            "radius": 3.0
-                        },
-                        "ik_hand_r": {
-                            "nodeType": "joint",
+                        "lowerarm_l": {
+                            "tx": 27.0904,
+                            "rz": -36.7004,
                             "radius": 3.0,
-                            "parent": "ik_hand_gun"
-                        },
-                        "ik_foot_l": {
-                            "tz": 13.4657,
-                            "parent": "ik_foot_root",
-                            "tx": 17.0763,
-                            "ty": 8.0721,
-                            "jox": 141.821,
-                            "joy": -88.8778,
-                            "joz": -139.2072,
-                            "radius": 3.0,
+                            "parent": "upperarm_l",
                             "nodeType": "joint"
                         },
-                        "ik_hand_l": {
-                            "tz": 43.8695,
-                            "parent": "ik_hand_gun",
-                            "tx": 77.8854,
-                            "ty": -69.6019,
-                            "jox": -145.8003,
-                            "joy": -32.1687,
-                            "joz": -93.709,
-                            "radius": 3.0,
-                            "nodeType": "joint"
-                        },
-                        "ik_foot_r": {
-                            "tz": 13.4656,
-                            "parent": "ik_foot_root",
-                            "tx": -17.0763,
-                            "ty": 8.0721,
-                            "jox": -38.1789,
-                            "joy": 88.8778,
-                            "joz": 139.2072,
-                            "radius": 3.0,
-                            "nodeType": "joint"
-                        },
-                        "ring_01_l": {
-                            "tz": 2.8469,
-                            "parent": "hand_l",
-                            "tx": 11.4979,
-                            "ty": 1.7535,
-                            "jox": -13.5103,
-                            "joy": -10.9893,
-                            "joz": 23.2921,
-                            "radius": 3.0,
-                            "nodeType": "joint"
-                        },
-                        "foot_r": {
-                            "nodeType": "joint",
-                            "tx": 40.1968,
-                            "parent": "calf_r",
-                            "jox": -0.4154,
-                            "joy": 3.7049,
-                            "joz": 8.0596,
-                            "radius": 3.0
-                        },
-                        "lowerarm_twist_01_l": {
-                            "nodeType": "joint",
+                        "lowerarm_twist_02_l": {
+                            "tx": 8.6984,
+                            "rx": 0.1429,
+                            "ry": -0.192,
+                            "rz": 0.0669,
                             "radius": 3.0,
                             "parent": "lowerarm_l",
-                            "tx": 14.0
+                            "nodeType": "joint"
+                        },
+                        "lowerarm_twist_01_l": {
+                            "tx": 17.3968,
+                            "rx": 0.1429,
+                            "ry": -0.192,
+                            "rz": 0.0669,
+                            "radius": 3.0,
+                            "parent": "lowerarm_l",
+                            "nodeType": "joint"
+                        },
+                        "hand_l": {
+                            "tx": 26.0952,
+                            "rx": -72.649,
+                            "ry": 10.4382,
+                            "rz": 3.7481,
+                            "radius": 3.0,
+                            "parent": "lowerarm_l",
+                            "nodeType": "joint"
+                        },
+                        "middle_metacarpal_l": {
+                            "tx": 3.1166,
+                            "ty": -0.0677,
+                            "tz": -0.3645,
+                            "rx": 0.1733,
+                            "ry": -2.0096,
+                            "rz": -7.1628,
+                            "radius": 3.0,
+                            "parent": "hand_l",
+                            "nodeType": "joint"
                         },
                         "middle_01_l": {
-                            "tz": 0.5712,
-                            "parent": "hand_l",
-                            "tx": 12.2443,
-                            "ty": 1.2936,
-                            "jox": 1.9179,
-                            "joy": -7.0406,
-                            "joz": 22.8259,
+                            "tx": 5.5605,
+                            "rx": -3.6731,
+                            "ry": -4.2859,
+                            "rz": 24.0416,
                             "radius": 3.0,
+                            "parent": "middle_metacarpal_l",
                             "nodeType": "joint"
                         },
-                        "ring_02_r": {
-                            "nodeType": "joint",
-                            "parent": "ring_01_r",
-                            "tx": -4.4299,
-                            "ty": 0.0001,
-                            "jox": 0.3014,
-                            "joy": -1.6697,
-                            "joz": 13.3155,
-                            "radius": 3.0
-                        },
-                        "ik_hand_root": {
-                            "nodeType": "joint",
+                        "middle_02_l": {
+                            "tx": 4.9197,
+                            "rx": 0.0919,
+                            "ry": 0.4761,
+                            "rz": 19.1529,
                             "radius": 3.0,
-                            "parent": "root"
-                        },
-                        "pinky_03_l": {
-                            "nodeType": "joint",
-                            "tx": 2.9856,
-                            "parent": "pinky_02_l",
-                            "jox": 0.4457,
-                            "joy": 3.8697,
-                            "joz": 1.039,
-                            "radius": 3.0
-                        },
-                        "lowerarm_r": {
-                            "nodeType": "joint",
-                            "tx": -30.34,
-                            "parent": "upperarm_r",
-                            "jox": -3.6133,
-                            "joy": -10.3973,
-                            "joz": -30.3609,
-                            "radius": 3.0
-                        },
-                        "thumb_03_r": {
-                            "nodeType": "joint",
-                            "tx": -4.0622,
-                            "parent": "thumb_02_r",
-                            "jox": 2.4148,
-                            "joy": 0.4792,
-                            "joz": -12.3857,
-                            "radius": 3.0
+                            "parent": "middle_01_l",
+                            "nodeType": "joint"
                         },
                         "middle_03_l": {
-                            "nodeType": "joint",
-                            "tx": 3.6488,
-                            "parent": "middle_02_l",
-                            "jox": 0.7814,
-                            "joy": -4.39,
-                            "joz": -15.3998,
-                            "radius": 3.0
-                        },
-                        "middle_02_r": {
-                            "nodeType": "joint",
-                            "parent": "middle_01_r",
-                            "tx": -4.6406,
-                            "ty": -0.0001,
-                            "jox": -2.025,
-                            "joy": 1.1368,
-                            "joz": 12.2807,
-                            "radius": 3.0
-                        },
-                        "pinky_02_l": {
-                            "nodeType": "joint",
-                            "tx": 3.571,
-                            "parent": "pinky_01_l",
-                            "jox": 1.0638,
-                            "joy": -1.3157,
-                            "joz": 11.2081,
-                            "radius": 3.0
-                        },
-                        "ring_03_r": {
-                            "nodeType": "joint",
-                            "parent": "ring_02_r",
-                            "tx": -3.4767,
-                            "ty": 0.0001,
-                            "jox": -0.3608,
-                            "joy": 2.9877,
-                            "joz": -12.8997,
-                            "radius": 3.0
-                        },
-                        "thumb_01_r": {
-                            "tz": 2.5378,
-                            "parent": "hand_r",
-                            "tx": -4.7621,
-                            "ty": -2.3751,
-                            "jox": 95.0691,
-                            "joy": 36.919,
-                            "joz": 27.0562,
+                            "tx": 2.9021,
+                            "rx": -0.0109,
+                            "ry": -0.2186,
+                            "rz": 2.8503,
                             "radius": 3.0,
+                            "parent": "middle_02_l",
                             "nodeType": "joint"
                         },
-                        "thumb_01_l": {
-                            "tz": -2.5378,
-                            "parent": "hand_l",
-                            "tx": 4.762,
-                            "ty": 2.375,
-                            "jox": 95.0691,
-                            "joy": 36.919,
-                            "joz": 27.0562,
+                        "pinky_metacarpal_l": {
+                            "tx": 2.9831,
+                            "ty": 0.242,
+                            "tz": 1.9275,
+                            "rx": -25.3734,
+                            "ry": -21.6206,
+                            "rz": 9.1694,
                             "radius": 3.0,
+                            "parent": "hand_l",
                             "nodeType": "joint"
                         },
                         "pinky_01_l": {
-                            "tz": 4.6431,
-                            "parent": "hand_l",
-                            "tx": 10.1407,
-                            "ty": 2.2632,
-                            "jox": -18.7246,
-                            "joy": -18.934,
-                            "joz": 20.1859,
+                            "tx": 4.7179,
+                            "rx": 0.2654,
+                            "ry": 1.1126,
+                            "rz": 11.7384,
                             "radius": 3.0,
+                            "parent": "pinky_metacarpal_l",
+                            "nodeType": "joint"
+                        },
+                        "pinky_02_l": {
+                            "tx": 2.8933,
+                            "rx": -0.1015,
+                            "ry": -0.1857,
+                            "rz": 20.2972,
+                            "radius": 3.0,
+                            "parent": "pinky_01_l",
+                            "nodeType": "joint"
+                        },
+                        "pinky_03_l": {
+                            "tx": 1.7915,
+                            "rx": -0.0053,
+                            "ry": -0.0838,
+                            "rz": 3.2541,
+                            "radius": 3.0,
+                            "parent": "pinky_02_l",
+                            "nodeType": "joint"
+                        },
+                        "ring_metacarpal_l": {
+                            "tx": 3.1086,
+                            "ty": 0.0603,
+                            "tz": 0.8014,
+                            "rx": -10.1363,
+                            "ry": -13.6762,
+                            "rz": -2.8714,
+                            "radius": 3.0,
+                            "parent": "hand_l",
+                            "nodeType": "joint"
+                        },
+                        "ring_01_l": {
+                            "tx": 4.9928,
+                            "rx": -0.6691,
+                            "ry": 0.7738,
+                            "rz": 17.9148,
+                            "radius": 3.0,
+                            "parent": "ring_metacarpal_l",
                             "nodeType": "joint"
                         },
                         "ring_02_l": {
-                            "nodeType": "joint",
-                            "tx": 4.4302,
+                            "tx": 4.2514,
+                            "rx": 0.0396,
+                            "ry": 0.4462,
+                            "rz": 26.3775,
+                            "radius": 3.0,
                             "parent": "ring_01_l",
-                            "jox": 0.3014,
-                            "joy": -1.6697,
-                            "joz": 13.3155,
-                            "radius": 3.0
-                        },
-                        "middle_03_r": {
-                            "nodeType": "joint",
-                            "tx": -3.6489,
-                            "parent": "middle_02_r",
-                            "jox": 0.7814,
-                            "joy": -4.39,
-                            "joz": -15.3998,
-                            "radius": 3.0
-                        },
-                        "lowerarm_l": {
-                            "nodeType": "joint",
-                            "tx": 30.3399,
-                            "parent": "upperarm_l",
-                            "jox": -3.6133,
-                            "joy": -10.3973,
-                            "joz": -30.3609,
-                            "radius": 3.0
-                        },
-                        "calf_l": {
-                            "nodeType": "joint",
-                            "tx": -42.572,
-                            "parent": "thigh_l",
-                            "jox": -5.736,
-                            "joy": 1.7873,
-                            "joz": -7.6136,
-                            "radius": 3.0
+                            "nodeType": "joint"
                         },
                         "ring_03_l": {
-                            "nodeType": "joint",
-                            "tx": 3.4767,
-                            "parent": "ring_02_l",
-                            "jox": -0.3608,
-                            "joy": 2.9877,
-                            "joz": -12.8997,
-                            "radius": 3.0
-                        },
-                        "root": {
-                            "nodeType": "joint",
+                            "tx": 3.2348,
+                            "rx": -0.0303,
+                            "ry": -0.3676,
+                            "rz": 4.6278,
                             "radius": 3.0,
-                            "jox": -90,
-                            "parent": "Joint_Grp"
+                            "parent": "ring_02_l",
+                            "nodeType": "joint"
+                        },
+                        "thumb_01_l": {
+                            "tx": 2.31,
+                            "ty": 1.4519,
+                            "tz": -2.5471,
+                            "rx": 81.9997,
+                            "ry": 33.1928,
+                            "rz": 20.2681,
+                            "radius": 3.0,
+                            "parent": "hand_l",
+                            "nodeType": "joint"
+                        },
+                        "thumb_02_l": {
+                            "tx": 4.6318,
+                            "rx": -1.0676,
+                            "ry": -6.2937,
+                            "rz": 20.2302,
+                            "radius": 3.0,
+                            "parent": "thumb_01_l",
+                            "nodeType": "joint"
+                        },
+                        "thumb_03_l": {
+                            "tx": 2.7106,
+                            "rx": 0.0305,
+                            "ry": 0.195,
+                            "rz": 8.4044,
+                            "radius": 3.0,
+                            "parent": "thumb_02_l",
+                            "nodeType": "joint"
+                        },
+                        "index_metacarpal_l": {
+                            "tx": 3.4527,
+                            "ty": 0.1128,
+                            "tz": -2.0519,
+                            "rx": 17.5598,
+                            "ry": 5.6408,
+                            "rz": -3.8649,
+                            "radius": 3.0,
+                            "parent": "hand_l",
+                            "nodeType": "joint"
+                        },
+                        "index_01_l": {
+                            "tx": 5.3769,
+                            "rx": -10.6019,
+                            "ry": -4.4455,
+                            "rz": 19.2285,
+                            "radius": 3.0,
+                            "parent": "index_metacarpal_l",
+                            "nodeType": "joint"
+                        },
+                        "index_02_l": {
+                            "tx": 4.5645,
+                            "rx": 0.0651,
+                            "ry": 0.2475,
+                            "rz": 11.7142,
+                            "radius": 3.0,
+                            "parent": "index_01_l",
+                            "nodeType": "joint"
+                        },
+                        "index_03_l": {
+                            "tx": 2.4865,
+                            "ry": 0.0602,
+                            "rz": -0.0124,
+                            "radius": 3.0,
+                            "parent": "index_02_l",
+                            "nodeType": "joint"
+                        },
+                        "upperarm_twist_01_l": {
+                            "tx": 9.0301,
+                            "ry": -0.2393,
+                            "rz": 0.0137,
+                            "radius": 3.0,
+                            "parent": "upperarm_l",
+                            "nodeType": "joint"
+                        },
+                        "upperarm_twist_02_l": {
+                            "tx": 18.0602,
+                            "radius": 3.0,
+                            "parent": "upperarm_l",
+                            "nodeType": "joint"
+                        },
+                        "clavicle_r": {
+                            "tx": 5.8304,
+                            "ty": 1.0049,
+                            "tz": 0.9314,
+                            "rx": 168.9521,
+                            "ry": 81.6482,
+                            "rz": -23.2162,
+                            "radius": 3.0,
+                            "parent": "spine_05",
+                            "nodeType": "joint"
+                        },
+                        "upperarm_r": {
+                            "tx": -15.286,
+                            "tz": -0.0004,
+                            "rx": -4.581,
+                            "ry": 44.6755,
+                            "rz": -3.614,
+                            "radius": 3.0,
+                            "parent": "clavicle_r",
+                            "nodeType": "joint"
+                        },
+                        "lowerarm_r": {
+                            "tx": -27.0899,
+                            "rz": -36.7004,
+                            "radius": 3.0,
+                            "parent": "upperarm_r",
+                            "nodeType": "joint"
+                        },
+                        "lowerarm_twist_02_r": {
+                            "tx": -8.6985,
+                            "rx": 0.1429,
+                            "ry": -0.192,
+                            "rz": 0.0669,
+                            "radius": 3.0,
+                            "parent": "lowerarm_r",
+                            "nodeType": "joint"
+                        },
+                        "lowerarm_twist_01_r": {
+                            "tx": -17.397,
+                            "rx": 0.1429,
+                            "ry": -0.192,
+                            "rz": 0.0669,
+                            "radius": 3.0,
+                            "parent": "lowerarm_r",
+                            "nodeType": "joint"
+                        },
+                        "hand_r": {
+                            "tx": -26.0955,
+                            "rx": -72.649,
+                            "ry": 10.4382,
+                            "rz": 3.7481,
+                            "radius": 3.0,
+                            "parent": "lowerarm_r",
+                            "nodeType": "joint"
+                        },
+                        "middle_metacarpal_r": {
+                            "tx": -3.1166,
+                            "ty": 0.0677,
+                            "tz": 0.3642,
+                            "rx": 0.1733,
+                            "ry": -2.0096,
+                            "rz": -7.1628,
+                            "radius": 3.0,
+                            "parent": "hand_r",
+                            "nodeType": "joint"
+                        },
+                        "middle_01_r": {
+                            "tx": -5.5606,
+                            "rx": -3.6731,
+                            "ry": -4.2859,
+                            "rz": 24.0416,
+                            "radius": 3.0,
+                            "parent": "middle_metacarpal_r",
+                            "nodeType": "joint"
+                        },
+                        "middle_02_r": {
+                            "tx": -4.9196,
+                            "rx": 0.0919,
+                            "ry": 0.4761,
+                            "rz": 19.1529,
+                            "radius": 3.0,
+                            "parent": "middle_01_r",
+                            "nodeType": "joint"
+                        },
+                        "middle_03_r": {
+                            "tx": -2.9021,
+                            "rx": -0.0109,
+                            "ry": -0.2186,
+                            "rz": 2.8503,
+                            "radius": 3.0,
+                            "parent": "middle_02_r",
+                            "nodeType": "joint"
+                        },
+                        "pinky_metacarpal_r": {
+                            "tx": -2.9831,
+                            "ty": -0.242,
+                            "tz": -1.9278,
+                            "rx": -25.3734,
+                            "ry": -21.6206,
+                            "rz": 9.1694,
+                            "radius": 3.0,
+                            "parent": "hand_r",
+                            "nodeType": "joint"
+                        },
+                        "pinky_01_r": {
+                            "tx": -4.718,
+                            "rx": 0.2654,
+                            "ry": 1.1126,
+                            "rz": 11.7384,
+                            "radius": 3.0,
+                            "parent": "pinky_metacarpal_r",
+                            "nodeType": "joint"
+                        },
+                        "pinky_02_r": {
+                            "tx": -2.8933,
+                            "tz": 0.0001,
+                            "rx": -0.1015,
+                            "ry": -0.1857,
+                            "rz": 20.2972,
+                            "radius": 3.0,
+                            "parent": "pinky_01_r",
+                            "nodeType": "joint"
+                        },
+                        "pinky_03_r": {
+                            "tx": -1.7915,
+                            "rx": -0.0053,
+                            "ry": -0.0838,
+                            "rz": 3.2541,
+                            "radius": 3.0,
+                            "parent": "pinky_02_r",
+                            "nodeType": "joint"
+                        },
+                        "ring_metacarpal_r": {
+                            "tx": -3.1086,
+                            "ty": -0.0604,
+                            "tz": -0.8016,
+                            "rx": -10.1363,
+                            "ry": -13.6762,
+                            "rz": -2.8714,
+                            "radius": 3.0,
+                            "parent": "hand_r",
+                            "nodeType": "joint"
+                        },
+                        "ring_01_r": {
+                            "tx": -4.9928,
+                            "ty": 0.0001,
+                            "rx": -0.6691,
+                            "ry": 0.7738,
+                            "rz": 17.9148,
+                            "radius": 3.0,
+                            "parent": "ring_metacarpal_r",
+                            "nodeType": "joint"
+                        },
+                        "ring_02_r": {
+                            "tx": -4.2514,
+                            "ty": -0.0001,
+                            "rx": 0.0396,
+                            "ry": 0.4462,
+                            "rz": 26.3775,
+                            "radius": 3.0,
+                            "parent": "ring_01_r",
+                            "nodeType": "joint"
+                        },
+                        "ring_03_r": {
+                            "tx": -3.2347,
+                            "ty": 0.0001,
+                            "rx": -0.0303,
+                            "ry": -0.3676,
+                            "rz": 4.6278,
+                            "radius": 3.0,
+                            "parent": "ring_02_r",
+                            "nodeType": "joint"
+                        },
+                        "thumb_01_r": {
+                            "tx": -2.3101,
+                            "ty": -1.4519,
+                            "tz": 2.5468,
+                            "rx": 81.9997,
+                            "ry": 33.1928,
+                            "rz": 20.2681,
+                            "radius": 3.0,
+                            "parent": "hand_r",
+                            "nodeType": "joint"
+                        },
+                        "thumb_02_r": {
+                            "tx": -4.6318,
+                            "rx": -1.0676,
+                            "ry": -6.2937,
+                            "rz": 20.2302,
+                            "radius": 3.0,
+                            "parent": "thumb_01_r",
+                            "nodeType": "joint"
+                        },
+                        "thumb_03_r": {
+                            "tx": -2.7106,
+                            "ty": -0.0001,
+                            "rx": 0.0305,
+                            "ry": 0.195,
+                            "rz": 8.4044,
+                            "radius": 3.0,
+                            "parent": "thumb_02_r",
+                            "nodeType": "joint"
+                        },
+                        "index_metacarpal_r": {
+                            "tx": -3.4527,
+                            "ty": -0.1128,
+                            "tz": 2.0516,
+                            "rx": 17.5598,
+                            "ry": 5.6408,
+                            "rz": -3.8649,
+                            "radius": 3.0,
+                            "parent": "hand_r",
+                            "nodeType": "joint"
+                        },
+                        "index_01_r": {
+                            "tx": -5.3769,
+                            "rx": -10.6019,
+                            "ry": -4.4455,
+                            "rz": 19.2285,
+                            "radius": 3.0,
+                            "parent": "index_metacarpal_r",
+                            "nodeType": "joint"
+                        },
+                        "index_02_r": {
+                            "tx": -4.5646,
+                            "ty": 0.0001,
+                            "rx": 0.0651,
+                            "ry": 0.2475,
+                            "rz": 11.7142,
+                            "radius": 3.0,
+                            "parent": "index_01_r",
+                            "nodeType": "joint"
+                        },
+                        "index_03_r": {
+                            "tx": -2.4864,
+                            "ry": 0.0602,
+                            "rz": -0.0124,
+                            "radius": 3.0,
+                            "parent": "index_02_r",
+                            "nodeType": "joint"
+                        },
+                        "upperarm_twist_01_r": {
+                            "tx": -9.03,
+                            "tz": -0.0001,
+                            "ry": -0.2393,
+                            "rz": 0.0137,
+                            "radius": 3.0,
+                            "parent": "upperarm_r",
+                            "nodeType": "joint"
+                        },
+                        "upperarm_twist_02_r": {
+                            "tx": -18.0599,
+                            "tz": -0.0003,
+                            "radius": 3.0,
+                            "parent": "upperarm_r",
+                            "nodeType": "joint"
+                        },
+                        "thigh_r": {
+                            "tx": -3.232,
+                            "ty": -0.068,
+                            "tz": 11.1546,
+                            "rx": 8.4755,
+                            "ry": -2.3902,
+                            "rz": 175.2025,
+                            "radius": 3.0,
+                            "parent": "pelvis",
+                            "nodeType": "joint"
+                        },
+                        "calf_r": {
+                            "tx": 45.7519,
+                            "rz": -1.0935,
+                            "radius": 3.0,
+                            "parent": "thigh_r",
+                            "nodeType": "joint"
+                        },
+                        "foot_r": {
+                            "tx": 41.7055,
+                            "rx": 0.0051,
+                            "ry": 2.5398,
+                            "rz": 0.1138,
+                            "radius": 3.0,
+                            "parent": "calf_r",
+                            "nodeType": "joint"
                         },
                         "ball_r": {
-                            "tz": -0.0802,
-                            "parent": "foot_r",
-                            "tx": 10.4538,
-                            "ty": 16.5778,
-                            "jox": 0.0039,
-                            "joy": 0.009,
-                            "joz": -91.8836,
+                            "tx": 6.5368,
+                            "ty": 13.6292,
+                            "tz": -0.0439,
+                            "rz": -90.0,
                             "radius": 3.0,
+                            "parent": "foot_r",
+                            "nodeType": "joint"
+                        },
+                        "calf_twist_02_r": {
+                            "tx": 13.9018,
+                            "tz": 0.05,
+                            "rx": 0.005,
+                            "ry": -0.2832,
+                            "rz": 0.1135,
+                            "radius": 3.0,
+                            "parent": "calf_r",
+                            "nodeType": "joint"
+                        },
+                        "calf_twist_01_r": {
+                            "tx": 27.8036,
+                            "tz": 0.1,
+                            "rx": 0.005,
+                            "ry": -0.2832,
+                            "rz": 0.1135,
+                            "radius": 3.0,
+                            "parent": "calf_r",
+                            "nodeType": "joint"
+                        },
+                        "thigh_twist_01_r": {
+                            "tx": 15.2506,
+                            "rx": -0.0001,
+                            "ry": -0.2833,
+                            "rz": 0.0533,
+                            "radius": 3.0,
+                            "parent": "thigh_r",
+                            "nodeType": "joint"
+                        },
+                        "thigh_twist_02_r": {
+                            "tx": 30.5013,
+                            "rx": -0.0001,
+                            "ry": -0.2833,
+                            "rz": 0.0533,
+                            "radius": 3.0,
+                            "parent": "thigh_r",
+                            "nodeType": "joint"
+                        },
+                        "thigh_l": {
+                            "tx": -3.232,
+                            "ty": -0.068,
+                            "tz": -11.1546,
+                            "rx": 8.4755,
+                            "ry": -2.3902,
+                            "rz": -4.7975,
+                            "radius": 3.0,
+                            "parent": "pelvis",
+                            "nodeType": "joint"
+                        },
+                        "calf_l": {
+                            "tx": -45.752,
+                            "rz": -1.0935,
+                            "radius": 3.0,
+                            "parent": "thigh_l",
+                            "nodeType": "joint"
+                        },
+                        "foot_l": {
+                            "tx": -41.7054,
+                            "rx": 0.0051,
+                            "ry": 2.5398,
+                            "rz": 0.1138,
+                            "radius": 3.0,
+                            "parent": "calf_l",
+                            "nodeType": "joint"
+                        },
+                        "ball_l": {
+                            "tx": -6.5368,
+                            "ty": -13.6292,
+                            "tz": 0.0439,
+                            "rz": -90.0,
+                            "radius": 3.0,
+                            "parent": "foot_l",
+                            "nodeType": "joint"
+                        },
+                        "calf_twist_02_l": {
+                            "tx": -13.9018,
+                            "tz": -0.05,
+                            "rx": 0.005,
+                            "ry": -0.2832,
+                            "rz": 0.1135,
+                            "radius": 3.0,
+                            "parent": "calf_l",
+                            "nodeType": "joint"
+                        },
+                        "calf_twist_01_l": {
+                            "tx": -27.8036,
+                            "tz": -0.1,
+                            "rx": 0.005,
+                            "ry": -0.2832,
+                            "rz": 0.1135,
+                            "radius": 3.0,
+                            "parent": "calf_l",
+                            "nodeType": "joint"
+                        },
+                        "thigh_twist_01_l": {
+                            "tx": -15.2507,
+                            "rx": -0.0001,
+                            "ry": -0.2833,
+                            "rz": 0.0533,
+                            "radius": 3.0,
+                            "parent": "thigh_l",
+                            "nodeType": "joint"
+                        },
+                        "thigh_twist_02_l": {
+                            "tx": -30.5014,
+                            "rx": -0.0001,
+                            "ry": -0.2833,
+                            "rz": 0.0533,
+                            "radius": 3.0,
+                            "parent": "thigh_l",
+                            "nodeType": "joint"
+                        },
+                        "ik_foot_root": {
+                            "radius": 3.0,
+                            "parent": "root",
+                            "nodeType": "joint"
+                        },
+                        "ik_foot_l": {
+                            "tx": 14.7118,
+                            "ty": -0.0415,
+                            "tz": 8.1438,
+                            "rx": 65.8119,
+                            "ry": -89.3347,
+                            "rz": -60.6186,
+                            "radius": 3.0,
+                            "parent": "ik_foot_root",
+                            "nodeType": "joint"
+                        },
+                        "ik_foot_r": {
+                            "tx": -14.7118,
+                            "ty": -0.0414,
+                            "tz": 8.1438,
+                            "rx": -114.1877,
+                            "ry": 89.3347,
+                            "rz": 60.619,
+                            "radius": 3.0,
+                            "parent": "ik_foot_root",
+                            "nodeType": "joint"
+                        },
+                        "ik_hand_root": {
+                            "radius": 3.0,
+                            "parent": "root",
+                            "nodeType": "joint"
+                        },
+                        "ik_hand_gun": {
+                            "tx": -45.5549,
+                            "ty": -14.4006,
+                            "tz": 105.6407,
+                            "rx": 71.6563,
+                            "ry": -51.6072,
+                            "rz": 34.7704,
+                            "radius": 3.0,
+                            "parent": "ik_hand_root",
+                            "nodeType": "joint"
+                        },
+                        "ik_hand_l": {
+                            "tx": 46.4804,
+                            "ty": -72.0305,
+                            "tz": 30.8576,
+                            "rx": -145.2021,
+                            "ry": -20.2165,
+                            "rz": -120.7276,
+                            "radius": 3.0,
+                            "parent": "ik_hand_gun",
+                            "nodeType": "joint"
+                        },
+                        "ik_hand_r": {
+                            "radius": 3.0,
+                            "parent": "ik_hand_gun",
+                            "nodeType": "joint"
+                        },
+                        "interaction": {
+                            "radius": 3.0,
+                            "parent": "root",
+                            "nodeType": "joint"
+                        },
+                        "center_of_mass": {
+                            "radius": 3.0,
+                            "parent": "root",
                             "nodeType": "joint"
                         }
                     }
@@ -7176,6 +7311,7 @@ class Char( Rig ):
 
                     # create guides
                     self.build_body_guides( charRoot, type )
+
                     om.MGlobal.displayInfo( 'aniMeta: ' + charRoot + ' is now in guide mode.' )
 
                     # Set the previous values to the display attributes
@@ -7197,7 +7333,7 @@ class Char( Rig ):
                 elif rigState == kRigStateGuide:
 
                     # delete guides
-                    # Dont do it because we need them for rigging
+                    # Dont delete the actual guides because we need them for rigging
                     self.delete_body_guides( charRoot, deleteOnlyConstraints=True )
 
                     # create control rig
@@ -7416,8 +7552,11 @@ class Biped( Char ):
                 joints['Spine1_Ctr_Ctrl']  = self.get_path( self.find_node( rootNode, 'spine_01' ))
                 joints['Spine2_Ctr_Ctrl']  = self.get_path( self.find_node( rootNode, 'spine_02' ))
                 joints['Spine3_Ctr_Ctrl']  = self.get_path( self.find_node( rootNode, 'spine_03' ))
+                joints['Spine4_Ctr_Ctrl']  = self.get_path( self.find_node( rootNode, 'spine_04' ))
+                joints['Spine5_Ctr_Ctrl']  = self.get_path( self.find_node( rootNode, 'spine_05' ))
                 joints['Chest_Ctr_Ctrl']   = None
                 joints['Neck_Ctr_Ctrl']    = self.get_path( self.find_node( rootNode, 'neck_01' ))
+                joints['Neck2_Ctr_Ctrl']   = self.get_path( self.find_node( rootNode, 'neck_02' ))
                 joints['Head_Ctr_Ctrl']    = self.get_path( self.find_node( rootNode, 'head' ))
                 joints['Jaw_Ctr_Ctrl']     = None
 
@@ -7543,6 +7682,7 @@ class Biped( Char ):
                 if i == 1:
                     offset_matrix = Transform().create_matrix( rotate=om.MEulerRotation( math.radians(180),0,0 ))
                     handleDict[ 'Foot_IK_' + SIDES[ i ] + '_Ctrl' ]['offsetMatrix'] = offset_matrix
+
                 handleDict[ 'Heel_IK_' + SIDES[ i ] + '_Ctrl' ] = {
                     'name': 'Heel_IK_' + SIDES[ i ] + '_Ctrl',
                     'parent': 'Foot_IK_' + SIDES[ i ] + '_Ctrl',
@@ -8119,7 +8259,12 @@ class Biped( Char ):
                 # root = 'Main_Ctr_Ctrl'
                 # node = 'ArmUp_FK_Lft_Ctrl'
                 root = self.find_node( rootNode, root )
+
                 node = self.find_node( rootNode, node )
+
+                if node is None:
+                    return None
+
                 parent = mc.listRelatives(node, p=True, pa=True)[0]
 
                 node_path = self.get_path( node )
@@ -8196,8 +8341,8 @@ class Biped( Char ):
                              'FootLift_IK_' + SIDE + '_Ctrl', 'Toes_IK_' + SIDE + '_Ctrl',
                              'ToesTip_IK_' + SIDE + '_Ctrl', 'LegPole_IK_' + SIDE + '_Ctrl',
                              'Heel_IK_' + SIDE + '_Ctrl']:
-
-                    mc.parent(ik_loc.fullPathName(), controls[node].fullPathName(), add=True, shape=True)
+                    if node in controls:
+                        mc.parent( ik_loc.fullPathName(), controls[node].fullPathName(), add=True, shape=True)
 
                 # IK Grp
                 if self.DEBUG:
@@ -9434,7 +9579,6 @@ class Model(Transform):
                     mc.warning( 'aniMeta Mirror Skin: Can not find a matching -X vertex for index ', i )
                     sym_neg.append( None )
 
-            # print 'Length sym', len(posX), len(negX), len(sym_neg)
             return posX, sym_neg, nulX
 
     def specify_symmetry_file_ui(self, *args ):
@@ -9604,7 +9748,7 @@ class Skin(Transform):
                 infs = []
 
                 for joint in joints:
-                    inf = self.find_node( char, joint ) 
+                    inf = self.find_node( char, joint )
                     if inf is not None:
                         infs.append( inf )
 
