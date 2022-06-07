@@ -1,6 +1,6 @@
 # -*- coding: UTF-8 -*-
 '''
-Copyright (c) 2018-2021 Prof. Jan Berger, Hochschule fuer Technik und Wirtschaft Berlin, Germany
+Copyright (c) 2018-2023 Prof. Jan Berger, Hochschule fuer Technik und Wirtschaft Berlin, Germany
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
 associated documentation files (the "Software"), to deal in the Software without restriction, including
 without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
@@ -20,7 +20,7 @@ Autodesk® Maya® is a registered trademark of Autodesk Inc.
 All other brand names, product names or trademarks belong to their respective holders.
 
 Supported Maya Versions:
-2020-2022
+2020-2023
 
 Supported OS:
 Any OS supported by Maya
@@ -1582,7 +1582,7 @@ class Rig( Transform ):
 
                 for a in ['tx', 'ty', 'tz', 'rx', 'ry', 'rz']:
                     mc.setAttr( ctrl.fullPathName() + '.' + a, l=False)
-                mc.parentConstraint( parent, ctrl.fullPathName(), mo=True )
+                mc.parentConstraint( parent, ctrl_grp, mo=True )
                 ctrls.append( ctrl )
 
             return ctrls
