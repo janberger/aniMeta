@@ -58,7 +58,7 @@ from functools import partial
 px = omui.MQtUtil.dpiScale
 
 kPluginName    = 'aniMeta'
-kPluginVersion = '01.00.137'
+kPluginVersion = '01.00.138'
 
 kLeft, kRight, kCenter, kAll, kSelection = range( 5 )
 kHandle, kIKHandle, kJoint, kMain, kBodyGuide, kBipedRoot, kQuadrupedRoot, kCustomHandle, kBodyGuideLock, kBipedRootUE = range(10)
@@ -1578,11 +1578,11 @@ class Rig( Transform ):
                 ctrlDict['constraintNode'] = s
                 ctrl = self.create_handle(**ctrlDict)
 
-                self.set_metaData( ctrl[0], data)
+                self.set_metaData( ctrl.fullPathName(), data)
 
                 for a in ['tx', 'ty', 'tz', 'rx', 'ry', 'rz']:
-                    mc.setAttr( ctrl[1] + '.' + a, l=False)
-                mc.parentConstraint( parent, ctrl[1], mo=True )
+                    mc.setAttr( ctrl.fullPathName() + '.' + a, l=False)
+                mc.parentConstraint( parent, ctrl.fullPathName(), mo=True )
                 ctrls.append( ctrl )
 
             return ctrls
@@ -8687,10 +8687,13 @@ class Biped( Char ):
                 print ('Create Meta Data')
 
             def set_data ( handles, data ):
+                print ( data)
                 for handle in handles:
                     self.set_metaData(handle, data)
 
             for SIDE in ['Lft', 'Rgt']:
+
+                print ( 'Set Meta Data', SIDE )
 
                 data = {}
                 data['Type'] = kHandle
@@ -8700,20 +8703,21 @@ class Biped( Char ):
                 else:
                     data['Side'] = kLeft
 
-                handles_Rgt = [ iks['Arm_IK_'+SIDE], iks['Leg_IK_'+SIDE] ]
-                set_data( handles_Rgt, data )
+                handles = [ iks['Arm_IK_'+SIDE], iks['Leg_IK_'+SIDE] ]
+
+                set_data( handles, data )
 
                 data['Mirror'] = kSymmetricRotation
 
-                handles_Rgt = []
+                handles = []
 
                 for ctl in controls.keys():
                     if SIDE in ctl:
-                        handles_Rgt.append( controls[ctl] )
+                        handles.append( controls[ctl] )
 
-                set_data(  handles_Rgt, data )
+                set_data(  handles, data )
 
-                handles_Rgt = [
+                handles = [
                     controls['LegPole_IK_'+SIDE+'_Ctrl'],
                     controls['ShoulderUpVec_'+SIDE+'_Ctrl'],
                     controls['Hand_IK_'+SIDE+'_Ctrl'],
@@ -8721,29 +8725,30 @@ class Biped( Char ):
                     controls['HipsUpVec_'+SIDE+'_Ctrl']
                 ]
 
-                set_data(  handles_Rgt, data )
+                set_data(  handles, data )
 
                 data['Mirror'] = kBasic
                 data['Limb'] = 'Leg'
                 data['Kinematic'] = 'IK'
-                handles_ik_Rgt = [controls['Foot_IK_'+SIDE+'_Ctrl'], controls['LegPole_IK_'+SIDE+'_Ctrl'] ]
-                set_data(  handles_ik_Rgt, data )
+                handles_ik = [controls['Foot_IK_'+SIDE+'_Ctrl'], controls['LegPole_IK_'+SIDE+'_Ctrl'] ]
+                set_data(  handles_ik, data )
 
                 data['Mirror'] = kSymmetricRotation
-                handles_ik_Rgt = [controls['FootLift_IK_'+SIDE+'_Ctrl'],  controls['Toes_IK_'+SIDE+'_Ctrl'], controls['ToesTip_IK_'+SIDE+'_Ctrl'], controls['Heel_IK_'+SIDE+'_Ctrl'] ]
+                handles_ik = [controls['FootLift_IK_'+SIDE+'_Ctrl'],  controls['Toes_IK_'+SIDE+'_Ctrl'], controls['ToesTip_IK_'+SIDE+'_Ctrl'], controls['Heel_IK_'+SIDE+'_Ctrl'] ]
 
-                set_data(  handles_ik_Rgt, data )
+                set_data(  handles_ik, data )
 
                 data['Kinematic'] = 'FK'
-                handles_fk_Rgt = [controls['LegUp_FK_'+SIDE+'_Ctrl'], controls['LegLo_FK_'+SIDE+'_Ctrl'], controls['Foot_FK_'+SIDE+'_Ctrl'], controls['Toes_FK_'+SIDE+'_Ctrl'] ]
-                set_data( handles_fk_Rgt, data )
+                handles_fk = [controls['LegUp_FK_'+SIDE+'_Ctrl'], controls['LegLo_FK_'+SIDE+'_Ctrl'], controls['Foot_FK_'+SIDE+'_Ctrl'], controls['Toes_FK_'+SIDE+'_Ctrl'] ]
+
+                set_data( handles_fk, data )
 
             data['Side'] = kCenter
             data['Mirror'] = kBasic
 
             handles_Ctr = []
             for ctl in controls.keys():
-                if 'Ctr' in ctl:
+                if '_Ctr_' in ctl:
                     handles_Ctr.append( controls[ctl] )
 
             set_data(  handles_Ctr, data )
@@ -8854,22 +8859,6 @@ class Biped( Char ):
             nodes.extend( dict['Arms'] )
             nodes.extend( dict['Finger'] )
             nodes.extend( dict['Head'] )
-            for node in nodes:
-                if node in controls:
-                    node = controls[node].fullPathName()
-                    for attr in ['tx','ty','tz','sx','sy','sz']:
-                        if mc.objExists( node ):
-                            try:
-                                mc.setAttr( node + '.' + attr, l=True, k=False )
-                            except:
-                                pass
-                            rgtNode = node.replace('Lft', 'Rgt')
-                            rgtNode = self.find_node( rootNode, rgtNode )
-                            if mc.objExists(rgtNode):
-                                try:
-                                    mc.setAttr( rgtNode + '.' + attr, l=True, k=False)
-                                except:
-                                    pass
 
             nodes = ['LegPole_IK_Lft_Ctrl', 'ShoulderUpVec_Lft_Ctrl', 'HipsUpVec_Lft_Ctrl',
                      'ArmPole_IK_Lft_Ctrl']
