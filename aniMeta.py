@@ -58,7 +58,7 @@ from functools import partial
 px = omui.MQtUtil.dpiScale
 
 kPluginName    = 'aniMeta'
-kPluginVersion = '01.00.138'
+kPluginVersion = '01.00.139'
 
 kLeft, kRight, kCenter, kAll, kSelection = range( 5 )
 kHandle, kIKHandle, kJoint, kMain, kBodyGuide, kBipedRoot, kQuadrupedRoot, kCustomHandle, kBodyGuideLock, kBipedRootUE = range(10)
@@ -537,7 +537,7 @@ class Menu(AniMeta):
         mc.menuItem( label = 'Split BlendShape', c = BlendShapeSplitter, parent = model_menu )
         mc.menuItem( d = True, dl = 'Symmetry' )
         mc.menuItem( label = 'Flip Points', c = model.flip_geo, parent = model_menu )
-        mc.menuItem( label = 'Mirror Points', c = model.mirror_geo, parent = model_menu )
+        mc.menuItem( label = 'Mirror Points', c = model.mirror_points, parent = model_menu )
         mc.menuItem( label = 'Export Symmetry...', c = model.export_symmetry_ui, parent = model_menu )
         mc.menuItem( label = 'Specify Symmetry File ...', c = model.specify_symmetry_file_ui, parent = model_menu )
 
@@ -9411,7 +9411,9 @@ class Model(Transform):
                 if abs(pos[0]) < myTolerence:
                     mergePoints.append(mesh[0] + '.vtx[' + str(i) + ']')
 
-            mc.polyMergeVertex(mergePoints, distance=0.001)
+            mc.polyMergeVertex(mergePoints, distance=0.001, ch=False)
+
+            mc.select ( mesh, r=True )
 
     def flip_geo(self, *args ):
 
@@ -9461,7 +9463,7 @@ class Model(Transform):
         destFn.setPoints( dest_pts )
 
 
-    def mirror_geo(self, *args, **kwargs ):
+    def mirror_points(self, *args, **kwargs ):
 
         sel = mc.ls(sl=True)
 
