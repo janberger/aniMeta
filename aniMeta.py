@@ -58,7 +58,7 @@ from functools import partial
 px = omui.MQtUtil.dpiScale
 
 kPluginName    = 'aniMeta'
-kPluginVersion = '01.00.139'
+kPluginVersion = '01.00.140'
 
 kLeft, kRight, kCenter, kAll, kSelection = range( 5 )
 kHandle, kIKHandle, kJoint, kMain, kBodyGuide, kBipedRoot, kQuadrupedRoot, kCustomHandle, kBodyGuideLock, kBipedRootUE = range(10)
@@ -9465,71 +9465,15 @@ class Model(Transform):
 
     def mirror_points(self, *args, **kwargs ):
 
-        sel = mc.ls(sl=True)
+        sel = mc.ls( sl=True )
 
-        if len ( sel ) > 0:
-            if len( sel ) == 2:
-                source = sel[0]
-                dest = sel[1]
-            else:
-                source = sel[0]
-                dest = sel[0]
+        if len( sel ) > 0:
 
-            source_path = self.get_path( source )
-            dest_path = self.get_path( dest )
+            for s in sel:
+                mc.aniMetaMirrorGeo( mesh=s  )
+        else:
+            print( "aniMeta: Please select a mesh with a skinCluster to mirror.")
 
-            source_path.extendToShape()
-            dest_path.extendToShape()
-
-            file = mc.getAttr( source_path.fullPathName() + '.aniMetaSymFile' )
-
-            plusX, negX, ctr = self.import_symmetry( file )
-
-            if mc.nodeType ( source_path.fullPathName() ) == 'mesh':
-
-                sourceFn = om.MFnMesh( source_path )
-                destFn = om.MFnMesh( dest_path )
-
-                source_pts = sourceFn.getPoints( om.MSpace.kObject )
-                dest_pts = sourceFn.getPoints( om.MSpace.kObject )
-
-                for i in range( len ( plusX )):
-                    px = source_pts[ plusX[ i ] ]
-                    px.cartesianize()
-                    px.x *= -1
-                    dest_pts[negX[i]]  = px
-
-                for i in range(len(ctr)):
-                    px = source_pts[ ctr[ i ] ]
-                    px.x = 0.0
-                    dest_pts[ctr[i]] = px
-
-                destFn.setPoints( dest_pts )
-
-            if mc.nodeType( source_path.fullPathName() ) == 'nurbsSurface':
-
-                sourceFn = om.MFnNurbsSurface( source_path )
-                destFn = om.MFnNurbsSurface( dest_path )
-
-                source_pts = sourceFn.cvPositions(  )
-                dest_pts = sourceFn.cvPositions(  )
-
-                for i in range( len( plusX ) ):
-                    px = source_pts[ plusX[ i ] ]
-                    px.cartesianize()
-                    dest_pts[ plusX[ i ] ] = px
-
-                    px.x *= -1
-                    dest_pts[ negX[ i ] ] = px
-
-                for i in range( len( ctr ) ):
-                    px = source_pts[ ctr[ i ] ]
-                    px.x = 0.0
-                    dest_pts[ ctr[ i ] ] = px
-
-                destFn.setCVPositions( dest_pts, om.MSpace.kWorld )
-
-                destFn.updateSurface()
 
     def get_model_sides( self, modelPath = om.MDagPath ):
 
@@ -9798,9 +9742,6 @@ class Skin(Transform):
                     print ( "aniMeta: Bound geometry to skin. "  + str( geos ) )
         else:
             print( "aniMeta: Please select a mesh with a skinCluster to mirror.")
-
-
-
 
     def mirror(self, *args):
 
@@ -10075,6 +10016,226 @@ class Skin(Transform):
 # Skin
 #
 ######################################################################################
+
+########################################################################################################################################################################################
+#
+# aniMetaMirrorGeo
+
+class aniMetaMirrorGeo( om.MPxCommand ):
+    __oldPoints = om.MPointArray()
+    __destPath  = om.MDagPath()
+
+    cmdName      = 'aniMetaMirrorGeo'
+    version      = '1.0'
+
+    meshFlag     = '-m'
+    meshFlagLong = '-mesh'
+
+    fileFlag     = '-f'
+    fileFlagLong = '-file'
+
+    def __init__( self ):
+        om.MPxCommand.__init__( self )
+        self.__mesh = None
+        self.__file = None
+
+    def isUndoable( self ):
+        return True
+
+    @staticmethod
+    def creator():
+        return aniMetaMirrorGeo()
+
+    @staticmethod
+    def createSyntax():
+        syntax = om.MSyntax()
+
+        syntax.addFlag( aniMetaSkinExport.meshFlag, aniMetaSkinExport.meshFlagLong, om.MSyntax.kString )
+        syntax.addFlag( aniMetaSkinExport.fileFlag, aniMetaSkinExport.fileFlagLong, om.MSyntax.kString )
+
+        return syntax
+
+    def doIt( self, args ):
+
+        arg2 = om.MArgList()
+
+        try:
+            # Get an MArgParser
+            argData = om.MArgDatabase( self.syntax(), args )
+
+        except RuntimeError:
+
+            om.MGlobal.displayError(
+                'Error while parsing arguments:\n#\t# If passing in list of nodes, also check that node names exist in scene.' )
+            raise
+
+        if argData.isFlagSet( self.meshFlag ):
+            self.__mesh = argData.flagArgumentString( self.meshFlag, 0 )
+        if argData.isFlagSet( self.fileFlag ):
+            self.__file = argData.flagArgumentString( self.fileFlag, 0 )
+
+        # print ('Mesh:', self.__mesh)
+        # print ('File:', self.__file)
+
+        self.redoIt()
+
+    def redoIt( self ):
+
+        sel = mc.ls(sl=True)
+
+        if len ( sel ) > 0:
+            if len( sel ) == 2:
+                source = sel[0]
+                dest = sel[1]
+            else:
+                source = sel[0]
+                dest = sel[0]
+
+            source_path = self.get_path( source )
+            dest_path = self.get_path( dest )
+
+            self.__destPath = dest_path
+
+            source_path.extendToShape()
+            dest_path.extendToShape()
+
+            file = mc.getAttr( source_path.fullPathName() + '.aniMetaSymFile' )
+
+            plusX, negX, ctr = self.import_symmetry( file )
+
+            if mc.nodeType ( source_path.fullPathName() ) == 'mesh':
+
+                sourceFn = om.MFnMesh( source_path )
+                destFn = om.MFnMesh( dest_path )
+
+                self.__oldPoints = destFn.getPoints( om.MSpace.kObject )
+
+                source_pts = sourceFn.getPoints( om.MSpace.kObject )
+                dest_pts = sourceFn.getPoints( om.MSpace.kObject )
+
+                for i in range( len ( plusX )):
+                    px = source_pts[ plusX[ i ] ]
+                    px.cartesianize()
+                    px.x *= -1
+                    dest_pts[negX[i]]  = px
+
+                for i in range(len(ctr)):
+                    px = source_pts[ ctr[ i ] ]
+                    px.x = 0.0
+                    dest_pts[ctr[i]] = px
+
+                destFn.setPoints( dest_pts )
+
+            if mc.nodeType( source_path.fullPathName() ) == 'nurbsSurface':
+
+                sourceFn = om.MFnNurbsSurface( source_path )
+                destFn = om.MFnNurbsSurface( dest_path )
+
+                self.__oldPoints = destFn.cvPositions(  )
+
+                source_pts = sourceFn.cvPositions(  )
+                dest_pts = sourceFn.cvPositions(  )
+
+                for i in range( len( plusX ) ):
+                    px = source_pts[ plusX[ i ] ]
+                    px.cartesianize()
+                    dest_pts[ plusX[ i ] ] = px
+
+                    px.x *= -1
+                    dest_pts[ negX[ i ] ] = px
+
+                for i in range( len( ctr ) ):
+                    px = source_pts[ ctr[ i ] ]
+                    px.x = 0.0
+                    dest_pts[ ctr[ i ] ] = px
+
+                destFn.setCVPositions( dest_pts, om.MSpace.kWorld )
+
+                destFn.updateSurface()
+
+    def undoIt(self):
+        print ( 'undo it')
+        destFn = om.MFnMesh( self.__destPath )
+        destFn.setPoints( self.__oldPoints )
+
+    def get_mobject( self, node ):
+
+        try:
+            list = om.MSelectionList()
+
+            list.add( str( node ) )
+
+            obj = list.getDependNode( 0 )
+
+            depFn = om.MFnDependencyNode( obj )
+
+            return obj
+
+        except:
+            # om.MGlobal.displayError('Can not get an MObject from '+ node )
+            pass
+
+        return None
+
+    def get_path( self, nodeName ):
+        '''
+        Returns the MDagPath of a given maya node`s string name, the verbose flag enables/disables warnings
+        :rtype:
+        '''
+
+        obj = self.get_mobject( nodeName )
+
+        if obj is not None:
+
+            dagPath = om.MDagPath()
+
+            if obj != om.MObject().kNullObj:
+                dagPath = om.MDagPath.getAPathTo( obj )
+                return dagPath
+
+            else:
+                print( 'get_path: can not get a valid MDagPath:', nodeName )
+
+            return dagPath
+        return None
+
+    def import_symmetry( self, *args ):
+
+        file_name = args[0]
+
+        if os.path.isfile( file_name ):
+
+            with open( file_name, 'r' ) as read_file:
+                data = read_file.read()
+
+            data = json.loads( data )
+
+            sides = data[ 'Symmetry' ][ 'Sides' ]
+
+            length = len(sides )
+
+            list_pos = [ ]
+            list_neg = [ ]
+
+            for i in range( length ):
+
+                try:
+                    buff = sides[ i ].split( '<>' )
+                    if len( buff ) == 2:
+                        list_pos.append( int(buff[ 0 ]) )
+                        list_neg.append( int(buff[ 1 ]) )
+                except:
+                    pass
+
+
+            return list_pos, list_neg, data['Symmetry']['Centre']
+        else:
+            mc.warning('aniMeta import symmetry file, invalid file path:', file_name)
+# aniMetaMirrorGeo
+#
+########################################################################################################################################################################################
+
+
 
 
 ########################################################################################################################################################################################
@@ -11493,6 +11654,12 @@ def initializePlugin( mobject ):
     #reload( aniMeta )
 
     try:
+        mplugin.registerCommand( aniMetaMirrorGeo.cmdName, aniMetaMirrorGeo.creator, aniMetaMirrorGeo.createSyntax )
+    except:
+        sys.stderr.write( "Failed to register command: %s\n" % aniMetaMirrorGeo.cmdName )
+        raise
+
+    try:
         mplugin.registerCommand( aniMetaSkinExport.cmdName, aniMetaSkinExport.creator, aniMetaSkinExport.createSyntax )
     except:
         sys.stderr.write( "Failed to register command: %s\n" % aniMetaSkinExport.cmdName )
@@ -11554,6 +11721,11 @@ def uninitializePlugin( mobject ):
         sys.stderr.write( "Failed to unregister command: %s\n" % aniMetaSkinExport.cmdName )
         raise
 
+    try:
+        mplugin.deregisterCommand( aniMetaMirrorGeo.cmdName )
+    except:
+        sys.stderr.write( "Failed to unregister command: %s\n" % aniMetaMirrorGeo.cmdName )
+        raise
     try:
         mplugin.deregisterCommand( aniMetaSkinImport.cmdName )
     except:
