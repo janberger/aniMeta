@@ -1,6 +1,6 @@
 # -*- coding: UTF-8 -*-
 '''
-Copyright (c) 2018-2023 Prof. Jan Berger, Hochschule fuer Technik und Wirtschaft Berlin, Germany
+Copyright (c) 2018-2022 Prof. Jan Berger, Hochschule fuer Technik und Wirtschaft Berlin, Germany
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
 associated documentation files (the "Software"), to deal in the Software without restriction, including
 without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
