@@ -58,7 +58,7 @@ from functools import partial
 px = omui.MQtUtil.dpiScale
 
 kPluginName    = 'aniMeta'
-kPluginVersion = '01.00.140'
+kPluginVersion = '01.00.142'
 
 kLeft, kRight, kCenter, kAll, kSelection = range( 5 )
 kHandle, kIKHandle, kJoint, kMain, kBodyGuide, kBipedRoot, kQuadrupedRoot, kCustomHandle, kBodyGuideLock, kBipedRootUE = range(10)
@@ -684,7 +684,7 @@ class Transform(AniMeta):
         matrixT = om.MTransformationMatrix( matrix )
         return matrixT.rotation()
 
-    def get_polevector_position(self, dagPath_1, dagPath_2, dagPath_3, preferredAngle=(0.0, 0.0, 0.0)):
+    def get_polevector_position(self, dagPath_1, dagPath_2, dagPath_3, preferredAngle=(45.0, 0.0, 0.0)):
         '''
         Calulates the Position for the Pole Vector
         :param dagPath_1: Start IK node ( ie Upper Leg )
@@ -703,7 +703,6 @@ class Transform(AniMeta):
         dag1WorldTMat  = self.get_matrix( dagPath_1, kWorld )
         dag2WorldTMat  = self.get_matrix( dagPath_2, kWorld )
         dag3WorldTMat  = self.get_matrix( dagPath_3, kWorld )
-        #dag4WorldTMat  = self.get_matrix( dagPath_4, kWorld )
 
         # Redundant? Should be just identity ...
         m1 = dag1WorldTMat
@@ -713,40 +712,51 @@ class Transform(AniMeta):
         L1 = self.get_translate( m1 )
         L2 = self.get_translate( m2 )
         L3 = self.get_translate( m3 )
-
+ 
         V1 = self.get_translate( m2 ) #- L1
         V2 = L3 - L2
         V3 = self.get_translate( m3 ) #L1 - L3
 
         angle = V1.angle(V2)
 
-        multi = 1.0
         angle = round( angle, 4 )
 
-        worldTrans = om.MVector()
-
         if abs(angle) > 0.001:
-            # there is an angle
-            a = V1.length()
-            b = V2.length()
-            c = V3.length()
+            # There is an angle
 
-            V3.normalize()
+            a_vec = self.get_translate( m2 )
+            c_vec = self.get_translate( m3 )
 
-            # Half the distance
-            V3  =  V3 * ( c * 0.5 )
+            # Get the angle beta
+            beta = a_vec.angle(c_vec)
 
-            # Get the Vector to the knee
-            V4 = V1 - V3
+            # Get the length of the sides
+            a = a_vec.length()
+            c = c_vec.length()
 
-            V4.normalize()
-            # Scale the Vector to have it clearly in front of the knee
-            V4 *= ( a+b ) * 0.75
+            # Trigonometry derived from sin(alpha)= h / b
+            h = math.sin( beta ) * a
 
-            pole_pos_mat = self.create_matrix(translate=V3+V4)
+            # q is the length along c to the point that divides the triangle into two square triangles
+            q = math.cos( beta ) * a
 
+            # scale vector c so it has the length q
+
+            c_vec.normalize()
+            c_vec *= q
+
+            # Calculate the vector h to get the axis along the height of the triangle and scale it so it has the length of c
+            h_vec = a_vec - c_vec
+            h_vec.normalize()
+            h_vec *= c
+            # The pole vector position is the sum of the vectors h and c
+            pole_pos = h_vec + c_vec
+
+            # This is the relative pole Position in relation to the root joint
+            pole_pos_mat = self.create_matrix(translate=pole_pos)
+
+            # Pole vector position in world space
             return  pole_pos_mat * dag1WorldTMat
-
 
         else:
             # there is no angle
@@ -754,19 +764,11 @@ class Transform(AniMeta):
 
             L4 = L2 + pa
             V4 = L4 - L2
-            '''
-            print ''
-            print 'pa',pa
-            print 'L2', L2
-            print 'L4', L4
-            print 'V4', V4
-            '''
+
             cross = om.MVector()
             cross.x = V2.y * V4.z - V4.y * V2.z
             cross.y = V4.x * V2.z - V2.x * V4.z
             cross.z = V2.x * V4.y - V2.y * V4.x
-
-            #print 'cross', cross
 
             poleOffset = om.MTransformationMatrix()
             poleOffset.setTranslation(cross, om.MSpace.kWorld)
@@ -774,10 +776,6 @@ class Transform(AniMeta):
             outMat = poleOffset.asMatrix() * dag2WorldTMat
 
             worldTrans = self.get_translate( outMat )
-
-            #self.print_matrix( poleOffset.asMatrix(), 'Pole Offset'   )
-            #self.print_matrix( dag2WorldTMat,         'dag2WorldTMat' )
-            #self.print_matrix( outMat,                'outMat'        )
 
             ''', 'PoleOffset
 
@@ -2825,7 +2823,6 @@ class Rig( Transform ):
 
                 ik_dict[ik] = data
 
-
             handles_Lft = self.get_char_handles( char_Lft, { 'Side': kLeft } )
             handles_Rgt = self.get_char_handles( char_Rgt, { 'Side': kRight } )
             handles_Ctr = self.get_char_handles( char, { 'Side': kCenter } )
@@ -2871,31 +2868,6 @@ class Rig( Transform ):
 
             mirror_mats = {}
 
-            for handle in handles_Ctr:
-                mirror = self.mirror_matrix( mats[ handle ], mode = kBasic, space = kLocal )
-
-                # cmd  += 'mc.spaceLocator()\n'
-                self.set_matrix( handle, mirror, kLocal )
-
-            for handle in handles_Rgt:
-                dataDict = self.get_metaData( handle )
-                if 'Rgt' in handle:
-                    nameLft = handle.replace( 'Rgt', 'Lft' )
-
-                    if nameLft in mats:
-                        if 'Mirror' in dataDict:
-                            mirror = self.mirror_matrix( mats[ nameLft ], mode = dataDict[ 'Mirror' ], space = kLocal )
-                            self.set_matrix( handle, mirror, kLocal )
-
-            for handle in handles_Lft:
-                dataDict = self.get_metaData( handle )
-                if 'Lft' in handle:
-                    nameRgt = handle.replace( 'Lft', 'Rgt' )
-                    if nameRgt in mats:
-                        if 'Mirror' in dataDict:
-                            mirror = self.mirror_matrix( mats[ nameRgt ], mode = dataDict[ 'Mirror' ], space = kLocal )
-                            self.set_matrix( handle, mirror, kLocal )
-
             # IK
             if len(iks):
                 for ik in iks:
@@ -2914,6 +2886,54 @@ class Rig( Transform ):
                 self.flip_tangents( )
             if mode == 'sel':
                 self.flip_tangents( handles_Ctr+ handles_Rgt+ handles_Lft )
+
+            for handle in handles_Ctr:
+                mirror = self.mirror_matrix( mats[ handle ], mode = kBasic, space = kLocal )
+
+                # cmd  += 'mc.spaceLocator()\n'
+                self.set_matrix( handle, mirror, kLocal )
+
+            for handle in handles_Rgt:
+                print( 'R', handle)
+                dataDict = self.get_metaData( handle )
+                if 'Rgt' in handle and 'Pole' not in handle:
+                    nameLft = handle.replace( 'Rgt', 'Lft' )
+
+                    if nameLft in mats:
+                        if 'Mirror' in dataDict:
+                            mirror = self.mirror_matrix( mats[ nameLft ], mode = dataDict[ 'Mirror' ], space = kLocal )
+                            self.set_matrix( handle, mirror, kLocal )
+
+            for handle in handles_Lft:
+                print( 'L', handle)
+                dataDict = self.get_metaData( handle )
+                if 'Lft' in handle and 'Pole' not in handle:
+                    nameRgt = handle.replace( 'Lft', 'Rgt' )
+                    if nameRgt in mats:
+                        if 'Mirror' in dataDict:
+                            mirror = self.mirror_matrix( mats[ nameRgt ], mode = dataDict[ 'Mirror' ], space = kLocal )
+                            self.set_matrix( handle, mirror, kLocal )
+
+            for handle in handles_Rgt:
+                dataDict = self.get_metaData( handle )
+                if 'Rgt' in handle and 'Pole' in handle:
+                    nameLft = handle.replace( 'Rgt', 'Lft' )
+
+                    if nameLft in mats:
+                        print( 'Pole R', handle)
+                        if 'Mirror' in dataDict:
+                            mirror = self.mirror_matrix( mats[ nameLft ], mode = dataDict[ 'Mirror' ], space = kLocal )
+                            self.set_matrix( handle, mirror, kLocal )
+
+            for handle in handles_Lft:
+                dataDict = self.get_metaData( handle )
+                if 'Lft' in handle and 'Pole'  in handle:
+                    print( 'Pole L', handle)
+                    nameRgt = handle.replace( 'Lft', 'Rgt' )
+                    if nameRgt in mats:
+                        if 'Mirror' in dataDict:
+                            mirror = self.mirror_matrix( mats[ nameRgt ], mode = dataDict[ 'Mirror' ], space = kLocal )
+                            self.set_matrix( handle, mirror, kLocal )
 
         elif symMode == 'mirror':
 
@@ -8014,13 +8034,22 @@ class Biped( Char ):
                     #legLo_jnt = controls[ eff_ctrls[i] +SIDE+'_Ctrl' ]
                     #foot_jnt  = controls[ hndl_ctrls[i]+SIDE+'_Ctrl' ]
 
-                    #legUp_jnt = self.find_node( controls[ root_ctrls[i]+SIDE+'_Ctrl' ] )
+                    legUp_jnt = controls[ root_ctrls[i]+SIDE+'_Ctrl' ]
                     legLo_jnt = controls[ eff_ctrls[i] +SIDE+'_Ctrl' ]
                     foot_jnt  = controls[ hndl_ctrls[i]+SIDE+'_Ctrl' ]
 
                     # Redundant? Wird beim IK Setup besser passen...
-                    '''
+
+                    preferred_angle = None
+
+                    if 'Leg' in legUp_jnt.partialPathName():
+                        preferred_angle = leg_preferred_angle
+                    else:
+                        preferred_angle = arm_preferred_angle
+
                     pole_matrix = self.get_polevector_position( legUp_jnt, legLo_jnt, foot_jnt, preferred_angle )
+
+                    self.print_matrix( pole_matrix, 'Pole')
 
                     parent = mc.listRelatives ( controls[ poles[i]+SIDE+'_Ctrl' ].fullPathName(), p=True )[0]
                     parent = mc.listRelatives ( parent, p=True )[0]
@@ -8029,7 +8058,7 @@ class Biped( Char ):
 
                     for attr in ['tx', 'ty', 'tz', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz'  ]:
                         mc.setAttr( parent + '.'+attr, l=True)
-                    '''
+
             if self.DEBUG:
                 print ( 'Position Pole Vector done' )
 
