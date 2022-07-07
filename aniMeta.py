@@ -58,7 +58,7 @@ from functools import partial
 px = omui.MQtUtil.dpiScale
 
 kPluginName    = 'aniMeta'
-kPluginVersion = '01.00.142'
+kPluginVersion = '01.00.143'
 
 kLeft, kRight, kCenter, kAll, kSelection = range( 5 )
 kHandle, kIKHandle, kJoint, kMain, kBodyGuide, kBipedRoot, kQuadrupedRoot, kCustomHandle, kBodyGuideLock, kBipedRootUE = range(10)
@@ -7506,15 +7506,15 @@ class Biped( Char ):
                 leg_preferred_angle = [ 45,0,0 ]
                 arm_preferred_angle = [ 0,-45,0 ]
 
-                joints['Root_Ctrl']        = self.get_path( self.find_node( rootNode, 'Root_Jnt' ))
-                joints['Hips']             = self.get_path( self.find_node( rootNode, 'Hips_Jnt' ))
-                joints['Spine1_Ctr_Ctrl']  = self.get_path( self.find_node( rootNode, 'Spine1_Jnt' ))
-                joints['Spine2_Ctr_Ctrl']  = self.get_path( self.find_node( rootNode, 'Spine2_Jnt' ))
-                joints['Spine3_Ctr_Ctrl']  = self.get_path( self.find_node( rootNode, 'Spine3_Jnt' ))
-                joints['Chest_Ctr_Ctrl']   = self.get_path( self.find_node( rootNode, 'Chest_Jnt' ))
-                joints['Neck_Ctr_Ctrl']    = self.get_path( self.find_node( rootNode, 'Neck_Jnt' ))
-                joints['Head_Ctr_Ctrl']    = self.get_path( self.find_node( rootNode, 'Head_Jnt' ))
-                joints['Jaw_Ctr_Ctrl']     = self.get_path( self.find_node( rootNode, 'Jaw_Jnt' ))
+                joints['Root_Ctr']    = self.get_path( self.find_node( rootNode, 'Root_Jnt' ))
+                joints['Hips_Ctr']    = self.get_path( self.find_node( rootNode, 'Hips_Jnt' ))
+                joints['Spine1_Ctr']  = self.get_path( self.find_node( rootNode, 'Spine1_Jnt' ))
+                joints['Spine2_Ctr']  = self.get_path( self.find_node( rootNode, 'Spine2_Jnt' ))
+                joints['Spine3_Ctr']  = self.get_path( self.find_node( rootNode, 'Spine3_Jnt' ))
+                joints['Chest_Ctr']   = self.get_path( self.find_node( rootNode, 'Chest_Jnt' ))
+                joints['Neck_Ctr']    = self.get_path( self.find_node( rootNode, 'Neck_Jnt' ))
+                joints['Head_Ctr']    = self.get_path( self.find_node( rootNode, 'Head_Jnt' ))
+                joints['Jaw_Ctr']     = self.get_path( self.find_node( rootNode, 'Jaw_Jnt' ))
 
                 for i in range( 2 ):
 
@@ -7535,18 +7535,18 @@ class Biped( Char ):
                 leg_preferred_angle = [ 0,0,-45 ]
                 arm_preferred_angle = [ 0,-45,0 ]
 
-                joints['Root_Ctrl']        = self.get_path( self.find_node( rootNode, 'root' ))
-                joints['Hips']             = self.get_path( self.find_node( rootNode, 'pelvis' ))
-                joints['Spine1_Ctr_Ctrl']  = self.get_path( self.find_node( rootNode, 'spine_01' ))
-                joints['Spine2_Ctr_Ctrl']  = self.get_path( self.find_node( rootNode, 'spine_02' ))
-                joints['Spine3_Ctr_Ctrl']  = self.get_path( self.find_node( rootNode, 'spine_03' ))
-                joints['Spine4_Ctr_Ctrl']  = self.get_path( self.find_node( rootNode, 'spine_04' ))
-                joints['Spine5_Ctr_Ctrl']  = self.get_path( self.find_node( rootNode, 'spine_05' ))
-                joints['Chest_Ctr_Ctrl']   = None
-                joints['Neck_Ctr_Ctrl']    = self.get_path( self.find_node( rootNode, 'neck_01' ))
-                joints['Neck2_Ctr_Ctrl']   = self.get_path( self.find_node( rootNode, 'neck_02' ))
-                joints['Head_Ctr_Ctrl']    = self.get_path( self.find_node( rootNode, 'head' ))
-                joints['Jaw_Ctr_Ctrl']     = None
+                joints['Root_Ctr']    = self.get_path( self.find_node( rootNode, 'root' ))
+                joints['Hips_Ctr']    = self.get_path( self.find_node( rootNode, 'pelvis' ))
+                joints['Spine1_Ctr']  = self.get_path( self.find_node( rootNode, 'spine_01' ))
+                joints['Spine2_Ctr']  = self.get_path( self.find_node( rootNode, 'spine_02' ))
+                joints['Spine3_Ctr']  = self.get_path( self.find_node( rootNode, 'spine_03' ))
+                joints['Spine4_Ctr']  = self.get_path( self.find_node( rootNode, 'spine_04' ))
+                joints['Spine5_Ctr']  = self.get_path( self.find_node( rootNode, 'spine_05' ))
+                joints['Chest_Ctr']   = None
+                joints['Neck_Ctr']    = self.get_path( self.find_node( rootNode, 'neck_01' ))
+                joints['Neck2_Ctr']   = self.get_path( self.find_node( rootNode, 'neck_02' ))
+                joints['Head_Ctr']    = self.get_path( self.find_node( rootNode, 'head' ))
+                joints['Jaw_Ctr']     = None
 
                 for i in range( 2 ):
 
@@ -7579,7 +7579,7 @@ class Biped( Char ):
                 'matchTransform': 'Spine1_Guide',
                 'size': [ 20, 2, 20 ],
                 'constraint': self.kParent,
-                'constraintNode': joints['Hips'],
+                'constraintNode': joints['Hips_Ctr'],
                 'maintainOffset': True
             }
             handleDict[ 'Spine1_Ctr_Ctrl' ] = {
@@ -7588,7 +7588,7 @@ class Biped( Char ):
                 'matchTransform': 'Spine1_Guide',
                 'size': [ 20, 2, 2 ],
                 'constraint': self.kParent,
-                'constraintNode': joints['Spine1_Ctr_Ctrl'] ,
+                'constraintNode': joints['Spine1_Ctr'] ,
                 'maintainOffset': True
             }
             handleDict[ 'Spine2_Ctr_Ctrl' ] = {
@@ -7597,7 +7597,7 @@ class Biped( Char ):
                 'matchTransform': 'Spine2_Guide',
                 'size': [ 20, 2, 2 ],
                 'constraint': self.kParent,
-                'constraintNode':  joints['Spine2_Ctr_Ctrl'],
+                'constraintNode':  joints['Spine2_Ctr'],
                 'maintainOffset': True
             }
             handleDict[ 'Spine3_Ctr_Ctrl' ] = {
@@ -7606,7 +7606,7 @@ class Biped( Char ):
                 'matchTransform': 'Spine3_Guide',
                 'size': [ 20, 2, 2 ],
                 'constraint': self.kParent,
-                'constraintNode':  joints['Spine3_Ctr_Ctrl'] ,
+                'constraintNode':  joints['Spine3_Ctr'] ,
                 'maintainOffset': True
             }
             if type == kBiped:
@@ -7616,7 +7616,7 @@ class Biped( Char ):
                     'matchTransform': 'Chest_Guide',
                     'size': [ 25, 4, 4 ],
                     'constraint': self.kParent,
-                    'constraintNode':  joints['Chest_Ctr_Ctrl'] ,
+                    'constraintNode':  joints['Chest_Ctr'] ,
                     'maintainOffset': True
                 }
                 handleDict[ 'Jaw_Ctr_Ctrl' ] = {
@@ -7625,7 +7625,7 @@ class Biped( Char ):
                     'matchTransform': 'Jaw_Guide',
                     'size': [ 25, 4, 4 ],
                     'constraint': self.kParent,
-                    'constraintNode':  joints['Jaw_Ctr_Ctrl'] ,
+                    'constraintNode':  joints['Jaw_Ctr'] ,
                     'maintainOffset': True
                 }
             handleDict[ 'Neck_Ctr_Ctrl' ] = {
@@ -7634,11 +7634,11 @@ class Biped( Char ):
                 'matchTransform': 'Neck_Guide',
                 'size': [ 20, 2, 2 ],
                 'constraint': self.kParent,
-                'constraintNode':joints['Neck_Ctr_Ctrl'],
+                'constraintNode':joints['Neck_Ctr'],
                 'maintainOffset': True
             }
             if type == kBipedUE:
-                handleDict[ 'Neck_Ctr_Ctrl' ]['parent'] = 'Spine3_Ctr_Ctrl'
+                handleDict[ 'Neck_Ctr_Ctrl' ]['parent'] = 'Spine3_Ctr'
 
             handleDict[ 'Head_Ctr_Ctrl' ] = {
                 'name': 'Head_Ctr_Ctrl',
@@ -7646,16 +7646,16 @@ class Biped( Char ):
                 'matchTransform': 'Head_Guide',
                 'size': [ 20, 2, 2 ],
                 'constraint': self.kParent,
-                'constraintNode':joints['Head_Ctr_Ctrl'],
+                'constraintNode':joints['Head_Ctr'],
                 'maintainOffset': True
             }
-            handleDict[ 'Root_Ctrl' ] = {
-                'name': 'Root_Ctrl',
+            handleDict[ 'Root_Ctr_Ctrl' ] = {
+                'name': 'Root_Ctr_Ctrl',
                 'parent': 'Main_Ctr_Ctrl',
                 'matchTransform': 'root',
                 'size': [ 5, 5, 5 ],
                 'constraint': self.kParent,
-                'constraintNode':'Hips_' + SIDES[ i ] + '_upVec',
+                'constraintNode':joints['Root_Ctr'],
                 'maintainOffset': True
             }
             for i in range( 2 ):
@@ -8286,7 +8286,7 @@ class Biped( Char ):
                 ######################################################################
                 # Leg
 
-                hipsJnt  = joints[ 'Hips' ]
+                hipsJnt  = joints[ 'Hips_Ctr' ]
                 legUpJnt = joints[ 'LegUp_' + SIDE  ]
                 legLoJnt = joints[ 'LegLo_' + SIDE  ]
                 footJnt  = joints[ 'Foot_'  + SIDE  ]
@@ -10045,8 +10045,6 @@ class aniMetaMirrorGeo( om.MPxCommand ):
 
     def doIt( self, args ):
 
-        arg2 = om.MArgList()
-
         try:
             # Get an MArgParser
             argData = om.MArgDatabase( self.syntax(), args )
@@ -10142,7 +10140,7 @@ class aniMetaMirrorGeo( om.MPxCommand ):
                 destFn.updateSurface()
 
     def undoIt(self):
-        print ( 'undo it')
+
         destFn = om.MFnMesh( self.__destPath )
         destFn.setPoints( self.__oldPoints )
 
@@ -10153,14 +10151,10 @@ class aniMetaMirrorGeo( om.MPxCommand ):
 
             list.add( str( node ) )
 
-            obj = list.getDependNode( 0 )
-
-            depFn = om.MFnDependencyNode( obj )
-
-            return obj
+            return list.getDependNode( 0 )
 
         except:
-            # om.MGlobal.displayError('Can not get an MObject from '+ node )
+
             pass
 
         return None
@@ -13326,7 +13320,7 @@ class MainTab( QWidget ):
         self.button_Toes_FK_R.clicked.connect(partial(self.picker_cmd,    {'Nodes': ['Toes_FK_Rgt_Ctrl']}))
 
         # Root
-        self.button_Root.clicked.connect(partial(self.picker_cmd,      {'Nodes': ['Root_Ctrl']}))
+        self.button_Root.clicked.connect(partial(self.picker_cmd,      {'Nodes': ['Root_Ctr_Ctrl']}))
         self.button_Main.clicked.connect(partial(self.picker_cmd,      {'Nodes': ['Main_Ctr_Ctrl']}))
 
         # Limbs
