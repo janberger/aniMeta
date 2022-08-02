@@ -58,7 +58,7 @@ from functools import partial
 px = omui.MQtUtil.dpiScale
 
 kPluginName    = 'aniMeta'
-kPluginVersion = '01.00.143'
+kPluginVersion = '01.00.144'
 
 kLeft, kRight, kCenter, kAll, kSelection = range( 5 )
 kHandle, kIKHandle, kJoint, kMain, kBodyGuide, kBipedRoot, kQuadrupedRoot, kCustomHandle, kBodyGuideLock, kBipedRootUE = range(10)
@@ -883,9 +883,10 @@ class Transform(AniMeta):
 
         if sel is not None and xDict is not None:
 
-            keys = xDict.keys()
+            # Python3
+            keys = list( xDict.keys() )
 
-            # if there is only one transform in the dict, apply to all elected objects
+            # if there is only one transform in the dict, apply to all selected objects
             if len( keys ) == 1:
                 for s in sel:
                     self.set_matrix( node = s, matrix = xDict[ keys[ 0 ] ], space = kWorld )
@@ -2553,7 +2554,7 @@ class Rig( Transform ):
                             #print( 'Issue loading:',  jnt + '.' + attr )
                             pass
                     else:
-                        if attr in ['sx', 'sy', 'sz']:
+                        if attr in ['sx', 'sy', 'sz', 'radius']:
                             try:
                                 mc.setAttr( jnt + '.' + attr, l=False )
                                 mc.setAttr( jnt + '.' + attr, 1.0 )
@@ -4244,8 +4245,8 @@ class Char( Rig ):
             mc.connectAttr( ctrl + '.worldOrient', multi + '.input2X' )
             mc.connectAttr( multi + '.outputX' , con[0] )
 
-
     def build_pair_blends( self, rootNode, type ):
+
         if type == kBiped:
             # Head
             node = self.find_node( rootNode, 'Head_Jnt_Blend' )
@@ -4271,9 +4272,7 @@ class Char( Rig ):
                 self.create_pair_blend( node, inNode, mode, weight )
 
                 inNode = self.find_node( rootNode, 'ArmLo_' + SIDE + '_Jnt' )
-                weight = 0.25
-                mode = kPairBlendTranslate
-                self.create_pair_blend( node, inNode, mode, weight )
+                mc.connectAttr( inNode + '.t', node + '.t', f = True )
 
                 # ArmUp_Aux3_Lft_Jnt
                 node = self.find_node( rootNode, 'ArmUp_Aux2_' + SIDE + '_Jnt' )
@@ -4289,10 +4288,7 @@ class Char( Rig ):
 
                 # ArmUp_Aux1_Lft_Jnt
                 node = self.find_node( rootNode, 'ArmUp_Aux1_' + SIDE + '_Jnt' )
-                inNode = self.find_node( rootNode, 'ArmLo_' + SIDE + '_Jnt' )
-                weight = 0.75
-                mode = kPairBlendTranslate
-                self.create_pair_blend( node, inNode, mode, weight )
+                mc.setAttr( node + '.t', 0,0,0 )
 
                 # ArmLo_Blend_Lft_Jnt self.find_node( rootNode, 'Head_Jnt_Blend' )
                 mc.connectAttr(
@@ -4318,11 +4314,7 @@ class Char( Rig ):
                 mode = kPairBlendRotate
                 weight = 0.9
                 self.create_pair_blend( node, inNode, mode, weight )
-
-                inNode = self.find_node( rootNode, 'Hand_' + SIDE + '_Jnt' )
-                weight = 0.75
-                mode = kPairBlendTranslate
-                self.create_pair_blend( node, inNode, mode, weight )
+                mc.setAttr( node + '.t', 0,0,0 )
 
                 # ArmUp_Aux3_Lft_Jnt
                 node = self.find_node( rootNode, 'ArmLo_Aux2_' + SIDE + '_Jnt' )
@@ -4339,9 +4331,7 @@ class Char( Rig ):
                 # ArmUp_Aux1_Lft_Jnt
                 node = self.find_node( rootNode, 'ArmLo_Aux3_' + SIDE + '_Jnt' )
                 inNode = self.find_node( rootNode, 'Hand_' + SIDE + '_Jnt' )
-                weight = 0.25
-                mode = kPairBlendTranslate
-                self.create_pair_blend( node, inNode, mode, weight )
+                mc.connectAttr( inNode + '.t', node + '.t', f = True )
 
                 # ArmUp_Aux3_Lft_Jnt
                 node = self.find_node( rootNode, 'ArmLo_Blend_' + SIDE + '_Jnt' )
