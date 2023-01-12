@@ -58,7 +58,7 @@ from functools import partial
 px = omui.MQtUtil.dpiScale
 
 kPluginName    = 'aniMeta'
-kPluginVersion = '01.00.144'
+kPluginVersion = '01.00.145'
 
 kLeft, kRight, kCenter, kAll, kSelection = range( 5 )
 kHandle, kIKHandle, kJoint, kMain, kBodyGuide, kBipedRoot, kQuadrupedRoot, kCustomHandle, kBodyGuideLock, kBipedRootUE = range(10)
@@ -465,6 +465,9 @@ class Menu(AniMeta):
         mc.menuItem( label = 'Delete Custom Control', c = rig.delete_custom_control )
         mc.menuItem( d = True, dl = 'Grouping' )
         mc.menuItem( label = 'Create Null', c = rig.create_nul )
+        mc.menuItem( d = True, dl = 'Symmetry Constraint' )
+        mc.menuItem( label = 'Create', c = rig.create_sym_con )
+        mc.menuItem( label = 'Hierarchy', c = rig.create_sym_con_hier )
 
         mc.menuItem( d = True, dl = 'Hierarchy I/O' )
         mc.menuItem( label = 'Export Hierarchy ...', c = rig.export_joints_ui )
@@ -1852,8 +1855,11 @@ class Rig( Transform ):
         if constraint is not None and target is not None:
 
             if constraint == self.kParent:
-                mc.parentConstraint( ctrl_path.fullPathName(), target.fullPathName(), mo=maintainOffset)
-
+                try:
+                    mc.parentConstraint( ctrl_path.fullPathName(), target.fullPathName(), mo=maintainOffset)
+                except:
+                    pass
+                
             if constraint == self.kAim:
                 mc.aimConstraint( ctrl_path.fullPathName(), target.fullPathName(), mo=maintainOffset, upVector=upVec, aimVector=aimVec)
 
@@ -2000,6 +2006,31 @@ class Rig( Transform ):
                 mc.connectAttr( c + '.outColorR', cnst + '.' + w )
                 index += 1
 
+    def create_sym_con_hier(self, *args):
+
+        sel = mc.ls( sl=True )
+
+        if len ( sel ) == 1:
+
+            joints = mc.listRelatives( sel[0], typ='joint', ad=True )
+
+            for joint in joints:
+
+                short = self.short_name( joint )
+
+                if 'Lft' in short:
+
+                    joint_r = self.find_node( sel[0], short.replace('Lft', 'Rgt'))
+
+                    if joint_r:
+                        self.create_sym_constraint( joint, joint_r )
+
+    def create_sym_con(self, *args):
+
+        sel = mc.ls(sl=True)
+
+        if len( sel ) == 2:
+            return self.create_sym_constraint( sel[0], sel[1] )
 
     def create_sym_constraint(self, tgtNode='joint_Lft', cnstNode='joint_Rgt'):
 
@@ -3448,14 +3479,11 @@ class Char( Rig ):
                 # Fingers
                 fngr_1 = [ 'thumb', 'index', 'middle', 'ring', 'pinky'  ]
                 fngr_2 = [ 'Thumb', 'Index', 'Middle', 'Ring', 'Pinky'  ]
+                count = [ 3, 4, 4, 4, 4  ]
 
                 for j in range( len ( fngr_1 )):
-                    for i in range( 1, 4 ):
-
-                        # Skip the 4th thumb digit as we only want three of them
-                        if j == 0 and i == 3:
-                            continue
-
+                    for i in range( 1, count[j] ):
+                        print ( fngr_1[j], i )
                         name       = fngr_1[j] + '_0'+str( i ) + '_l'
                         guide_name = fngr_2[j] + str( i ) + '_Lft'+guide_sfx
 
@@ -3465,7 +3493,7 @@ class Char( Rig ):
                             parent = fngr_2[j] + str( i-1 ) + '_Lft'+guide_sfx
 
                         guideList.append( [ guide_name, name, parent, attrList, rot_offset_4 ] )
-
+                print ( guideList )
                 guideDict = self.build_guides( charRoot, guideList, ctrlDict, guideDict, data, False )
 
             if type == kBiped:
@@ -3575,6 +3603,10 @@ class Char( Rig ):
 
                 for j in range( len ( fngr )):
                     for i in range( 1, 5 ):
+
+                        if j == 4 and i == 4:
+                            continue
+
                         name       = fngr[j] + str( i ) + '_Lft_Jnt'
                         guide_name = fngr[j] + str( i ) + '_Lft'+guide_sfx
 
@@ -10417,10 +10449,11 @@ class aniMetaSkinExport( om.MPxCommand ):
             # Create Weighting Information Dictionary
             weightDict = { }
 
-            weightDict[ 'Weights' ]     = weighting
-            weightDict[ 'Influences' ]  = infList
-            weightDict[ 'VertexCount' ] = vtxCount
-            weightDict[ 'Name' ]        = skinFn.name()
+            weightDict[ 'Weights' ]        = weighting
+            weightDict[ 'Influences' ]     = infList
+            weightDict[ 'VertexCount' ]    = vtxCount
+            weightDict[ 'Name' ]           = skinFn.name()
+            weightDict[ 'SkinningMethod' ] = mc.getAttr( skinFn.name() + '.skinningMethod' )
 
             ################################################################################
             #
@@ -10567,6 +10600,7 @@ class aniMetaSkinImport( om.MPxCommand ):
         self.__vtxCount = skinWeightDict[ 'VertexCount' ]
         self.__weights = skinWeightDict[ 'Weights' ]
         self.__infs = skinWeightDict[ 'Influences' ]
+        self.__method = skinWeightDict.setdefault(  'SkinningMethod', 0 )
 
         #####################################################################
         # Get Skin
@@ -10733,9 +10767,7 @@ class aniMetaSkinImport( om.MPxCommand ):
 
         skinFn = oma.MFnSkinCluster( self.__skin )
 
-        #print 'self.meshPath', self.meshPath
-
-        #self.oldWeights = skinFn.getWeights( self.meshPath, self.compObj, self.infInts )
+        mc.setAttr( skinFn.name() + '.skinningMethod', self.__method )
 
         '''
         print 'Skin:      ', skinFn.name() 
