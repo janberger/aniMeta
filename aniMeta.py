@@ -543,6 +543,8 @@ class Menu(AniMeta):
         mc.menuItem( label = 'Mirror Points', c = model.mirror_points, parent = model_menu )
         mc.menuItem( label = 'Export Symmetry...', c = model.export_symmetry_ui, parent = model_menu )
         mc.menuItem( label = 'Specify Symmetry File ...', c = model.specify_symmetry_file_ui, parent = model_menu )
+        mc.menuItem( d = True, dl = '' )
+        mc.menuItem( label = 'Extract Faces', c = model.duplicate_extract_soften_faces, parent = model_menu )
 
         # Modeling
         #
@@ -9675,7 +9677,88 @@ class Model(Transform):
             return list_pos, list_neg, data['Symmetry']['Centre']
         else:
             mc.warning('aniMeta import symmetry file, invalid file path:', file_name)
-# Anim
+
+    def duplicate_extract_soften_faces(self, *args):
+        '''
+        This method extracts the selected faces of a poly objects and softens it's border
+        :return:
+        '''
+
+        mc.undoInfo(openChunk=True)
+
+        iterations = 6
+
+        selection = mc.ls(sl=True, fl=True)
+
+        face_list = []
+
+        obj = selection[0].split('.')[0]
+
+        for sel in selection:
+            face_list.append(int(sel.split('.')[1].split('[')[1].split(']')[0]))
+
+        dup = mc.duplicate(obj)[0]
+
+        cut_faces = []
+
+        face_count = mc.polyEvaluate(f=True)
+
+        for i in range(face_count):
+            if i not in face_list:
+                cut_faces.append(dup + '.f[' + str(i) + ']')
+
+        mc.delete(cut_faces)
+
+        face_count = mc.polyEvaluate(dup, f=True)
+
+        sel = mc.select(dup + '.f[0:' + str(face_count - 1) + ']', r=True)
+
+        selection = mc.ls(sl=True, fl=True)
+
+        border_edges = mc.ls(mc.polyListComponentConversion(selection, fromFace=True, bo=True, te=True), fl=True)
+
+        vtxs = mc.ls(mc.polyListComponentConversion(border_edges, fromEdge=True, tv=True), fl=True)
+
+        edge = {}
+
+        for i in range(len(border_edges)):
+            edge[border_edges[i]] = mc.ls(
+                mc.polyListComponentConversion(border_edges[i], fromEdge=True, bo=True, tv=True), fl=True)
+
+        vtx_neighbor = []
+        for i in range(len(vtxs)):
+            neighbor = []
+            for key in edge.keys():
+                if vtxs[i] in edge[key]:
+
+                    if vtxs[i] != edge[key][0]:
+                        neighbor.append(edge[key][0])
+                    elif vtxs[i] != edge[key][1]:
+                        neighbor.append(edge[key][1])
+            if len(neighbor) == 2:
+                vtx_neighbor.append(neighbor)
+
+        pos = {}
+        for i in range(len(vtxs)):
+            pos[str(vtxs[i])] = mc.xform(vtxs[i], q=1, t=1)
+        for k in range(iterations):
+            for i in range(len(vtxs)):
+                print(i)
+                pos[str(vtxs[i])][0] = pos[str(vtxs[i])][0] * 0.5 + pos[str(vtx_neighbor[i][0])][0] * 0.25 + \
+                                       pos[str(vtx_neighbor[i][1])][0] * 0.25
+                pos[str(vtxs[i])][1] = pos[str(vtxs[i])][1] * 0.5 + pos[str(vtx_neighbor[i][0])][1] * 0.25 + \
+                                       pos[str(vtx_neighbor[i][1])][1] * 0.25
+                pos[str(vtxs[i])][2] = pos[str(vtxs[i])][2] * 0.5 + pos[str(vtx_neighbor[i][0])][2] * 0.25 + \
+                                       pos[str(vtx_neighbor[i][1])][2] * 0.25
+
+        for i in range(len(vtxs)):
+            mc.xform(vtxs[i], t=(pos[str(vtxs[i])][0], pos[str(vtxs[i])][1], pos[str(vtxs[i])][2]))
+
+        mc.undoInfo(closeChunk=True)
+
+        mc.select(dup, r=True)
+        return dup
+    # Model
 #
 ######################################################################################
 
