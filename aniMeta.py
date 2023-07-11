@@ -58,7 +58,7 @@ from functools import partial
 px = omui.MQtUtil.dpiScale
 
 kPluginName    = 'aniMeta'
-kPluginVersion = '01.00.145'
+kPluginVersion = '01.00.146'
 
 kLeft, kRight, kCenter, kAll, kSelection = range( 5 )
 kHandle, kIKHandle, kJoint, kMain, kBodyGuide, kBipedRoot, kQuadrupedRoot, kCustomHandle, kBodyGuideLock, kBipedRootUE = range(10)
@@ -460,6 +460,7 @@ class Menu(AniMeta):
         rig  = Rig()
 
         mc.setParent( riggingMenu, menu = True )
+        mc.menuItem( label = 'Orient Transform', c = Orient_Transform_UI )
         mc.menuItem( d = True, dl = 'Control Handles' )
         mc.menuItem( label = 'Create Custom Control', c = rig.create_custom_control )
         mc.menuItem( label = 'Delete Custom Control', c = rig.delete_custom_control )
@@ -16715,6 +16716,159 @@ class BlendShapeSplitter():
             mc.button( self.splitButton, e=True, en=False )
         else:
             mc.button( self.splitButton, e=True, en=True )
+
+
+class Orient_Transform_UI():
+
+    def __init__(self, *args):
+
+        self.ui_name = 'aniMeta_Orient_Transform_UI'
+
+        self.create_ui()
+
+    def create_ui(self):
+
+        if mc.window(self.ui_name, exists=True):
+            mc.deleteUI(self.ui_name)
+
+        win = mc.window(self.ui_name, w=200, h=100, title='Orient Transform', sizeable=False)
+
+        layout = mc.rowColumnLayout(nc=1)
+
+        frame1 = mc.frameLayout(parent=layout, bv=True, nbg=True, labelAlign='center', label='Aim Vector')
+        self.rg1 = mc.radioButtonGrp(l='Axis', labelArray3=['X', 'Y', 'Z'], numberOfRadioButtons=3,
+                                     cw4=[100, 30, 30, 30], sl=1)
+
+        self.cb1 = mc.checkBoxGrp(l='Invert Aim', cw2=[100, 30])
+
+        frame2 = mc.frameLayout(parent=layout, bv=True, nbg=True, labelAlign='center', label='Up Vector')
+        self.rg2 = mc.radioButtonGrp(l='Axis', labelArray3=['X', 'Y', 'Z'], numberOfRadioButtons=3,
+                                     cw4=[100, 30, 30, 30], sl=2)
+
+        self.cb2 = mc.checkBoxGrp(l='Invert Up', cw2=[100, 30])
+        self.cb3 = mc.checkBoxGrp(l='Use Up Vec Object', cw2=[100, 30], cc=self.toggle_up_obj)
+
+        self.tfb = mc.textFieldButtonGrp(l='Up Object', bl='Select', cw3=[100, 130, 50], enable=False,
+                                         bc=self.set_up_obj)
+
+        button_row = mc.rowColumnLayout(nc=2, p=layout, w=300)
+        button = mc.button(label='Orient Transform', p=button_row, c=self.orient_joints, w=150)
+        button = mc.button(label='Toggle Axis Display', p=button_row, c=self.toggle_axis, w=150)
+
+        mc.showWindow()
+
+    def toggle_up_obj(self, *args):
+        mc.textFieldButtonGrp(self.tfb, enable=self.use_up_object(), edit=True)
+
+    def use_up_object(self):
+        return mc.checkBoxGrp(self.cb3, q=True, v1=True)
+
+    def set_up_obj(self, *args):
+
+        sel = mc.ls(sl=True)
+
+        if len(sel) == 1:
+            mc.textFieldButtonGrp(self.tfb, e=True, text=sel[0])
+        else:
+            mc.confirmDialog(m='Please select on up vector object')
+
+    def get_up_obj(self):
+        return mc.textFieldButtonGrp(self.tfb, q=True, text=True)
+
+    def toggle_axis(self, *args):
+
+        for s in mc.ls(sl=True):
+
+            if mc.attributeQuery('displayLocalAxis', node=s, exists=True):
+                state = mc.getAttr(s + '.displayLocalAxis')
+
+                mc.setAttr(s + '.displayLocalAxis', 1 - state)
+
+    def orient_joints(self, *args):
+
+        axis = [None, 'X', 'Y', 'Z']
+
+        aim_axis = axis[mc.radioButtonGrp(self.rg1, q=True, sl=True)]
+        up_axis = axis[mc.radioButtonGrp(self.rg2, q=True, sl=True)]
+
+        inv_aim = mc.checkBoxGrp(self.cb1, q=True, v1=True)
+        inv_up = mc.checkBoxGrp(self.cb2, q=True, v1=True)
+
+        selection = mc.ls(selection=True)
+
+        if len(selection) != 2:
+            mc.confirmDialog(m='Please select a target and the object to orient.', t='Orient Transforms')
+            return
+
+        source = selection[1]
+        target = selection[0]
+
+        aim_vec = [0, 0, 0]
+        up_vec = [0, 0, 0]
+
+        if aim_axis == 'X':
+            aim_vec[0] = 1
+        elif aim_axis == 'Y':
+            aim_vec[1] = 1
+        elif aim_axis == 'Z':
+            aim_vec[2] = 1
+
+        if up_axis == 'X':
+            up_vec[0] = 1
+        elif up_axis == 'Y':
+            up_vec[1] = 1
+        elif up_axis == 'Z':
+            up_vec[2] = 1
+
+        if inv_aim:
+            aim_vec[0] *= -1
+            aim_vec[1] *= -1
+            aim_vec[2] *= -1
+
+        if inv_up:
+            up_vec[0] *= -1
+            up_vec[1] *= -1
+            up_vec[2] *= -1
+
+        child_xform = []= []
+
+        tmp_locs = []
+        tmp_cons = []
+
+        at = Transform()
+
+        for child in mc.listRelatives(source, children=True):
+
+            if mc.nodeType(child) in ['transform', 'joint']:
+
+                loc = mc.spaceLocator()[0]
+
+                mc.matchTransform(loc, child)
+
+                con = mc.parentConstraint(loc, child)[0]
+
+                tmp_locs.append(loc)
+                tmp_cons.append(con)
+
+
+        loc = mc.spaceLocator(name='temp_loc')
+
+        mc.matchTransform(loc, target)
+
+        if self.use_up_object():
+            up_obj = self.get_up_obj()
+            aim = mc.aimConstraint(loc, source, aimVector=aim_vec, upVector=up_vec, wut='object', wuo=up_obj)
+
+        else:
+            aim = mc.aimConstraint(loc, source, aimVector=aim_vec, upVector=up_vec)
+
+        mc.matchTransform(target, loc)
+        mc.delete(loc, aim)
+        mc.dgdirty( a=True )
+        mc.delete( tmp_cons )
+        mc.delete( tmp_locs )
+        
+        mc.select(selection)
 
 
 #######################################################################################################################
