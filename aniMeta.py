@@ -58,7 +58,7 @@ from functools import partial
 px = omui.MQtUtil.dpiScale
 
 kPluginName    = 'aniMeta'
-kPluginVersion = '01.00.146'
+kPluginVersion = '01.00.148'
 
 kLeft, kRight, kCenter, kAll, kSelection = range( 5 )
 kHandle, kIKHandle, kJoint, kMain, kBodyGuide, kBipedRoot, kQuadrupedRoot, kCustomHandle, kBodyGuideLock, kBipedRootUE = range(10)
@@ -137,7 +137,6 @@ class AniMeta( object ):
             except:
                 mc.warning('aniMeta: There was a problem creating folder', folder)
 
-
     def create_ui( self, *args ):
 
         self.ui = AniMetaUI()
@@ -177,7 +176,6 @@ class AniMeta( object ):
 
                 return node
         return None
-
 
     def get_active_char( self ):
         '''
@@ -228,7 +226,6 @@ class AniMeta( object ):
             return None
 
         return list
-
 
     def get_metaData( self, node, attr = aniMetaDataAttrName ):
         data = { }
@@ -294,7 +291,6 @@ class AniMeta( object ):
         except:
             print ( 'Can not get an MObject from ', node )
             return None
-
 
     def get_path ( self, nodeName, showWarnings=True ):
         '''
@@ -469,6 +465,9 @@ class Menu(AniMeta):
         mc.menuItem( d = True, dl = 'Symmetry Constraint' )
         mc.menuItem( label = 'Create', c = rig.create_sym_con )
         mc.menuItem( label = 'Hierarchy', c = rig.create_sym_con_hier )
+
+        mc.menuItem( d = True, dl = 'Joystick Widgets' )
+        mc.menuItem( label = 'Create ...', c = rig.create_joystick_widget_ui )
 
         mc.menuItem( d = True, dl = 'Hierarchy I/O' )
         mc.menuItem( label = 'Export Hierarchy ...', c = rig.export_joints_ui )
@@ -1869,6 +1868,165 @@ class Rig( Transform ):
         mc.select( cl=True )
 
         return ctrl_path
+
+    def create_joystick_widget_ui(self, *args, **kwargs):
+
+        self.joystick_ui = 'aniMetaJoystickUI'
+
+        if mc.window(self.joystick_ui, exists=True):
+            mc.deleteUI(self.joystick_ui)
+
+        mc.window(self.joystick_ui, title='Create Joystick', w=200, h=100, rtf=True)
+
+        mc.rowColumnLayout(numberOfColumns=1, rs=[1, 10], ro=[1, 'top', 10])
+
+        self.joystick_ui_name_ctrl = mc.textFieldGrp(label='Name')
+
+        row2 = mc.rowColumnLayout(numberOfColumns=2, cs=[1, 10])
+        mc.rowColumnLayout(row2, e=True, cs=[2, 10])
+
+        mc.button(label='Create', width=120, command=self.create_joystick_widget_doit)
+        mc.button(label='Cancel', width=120, command=partial(self.close_joystick_dialog, self.joystick_ui))
+
+        mc.showWindow()
+
+    def close_joystick_dialog(self, *args):
+
+        print( args )
+
+    def create_joystick_widget_doit(self, *args):
+
+        name = mc.textFieldGrp(self.joystick_ui_name_ctrl, q=True, text=True)
+        self.create_joystick_widget( name )
+
+
+    def create_joystick_widget(self, control_name = 'brow_L' ):
+
+        if mc.objExists( control_name ):
+            mc.confirmDialog(m='An object with this name exists, please choose a unique name.' )
+
+        grp = mc.createNode ( 'transform', name=control_name+'_grp', ss=True )
+
+        title = mc.textCurves( name=control_name+"Text", ch=1, f="Courier", t=control_name.replace('_', ' ' ))[0]
+
+        mc.setAttr( title + '.t', -1, -1.5, 0 )
+        mc.setAttr( title + '.s', .5, .5, .5 )
+        mc.setAttr( title + '.overrideEnabled', True )
+        mc.setAttr( title + '.overrideDisplayType', 1 )
+        control = mc.circle( name=control_name, nr=[0,0,1], sw=360, r=0.1, d=3, ut=0, tol=0.01, s=8, ch=False )[0]
+
+        mc.transformLimits( control, etx=(1,1), ety=(1,1), tx=(-1,1), ty=(-1,1))
+
+        for attr in ( 'tz', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz', 'v' ):
+            mc.setAttr( control + '.' + attr, l=1, k=0 )
+
+        plane = mc.polyPlane( name=control_name+'_Widget', w=2, h=2, sx=1, sy=1, ax=(0,0,1), cuv=1, ch=0 )[0]
+
+        mc.parent( control, plane, title, grp )
+
+        mc.setAttr( plane + '.overrideEnabled', True )
+        mc.setAttr( plane + '.overrideDisplayType', 1 )
+
+        prefix = 'joystick'
+
+        source_attr_x = 'translateX'
+        source_attr_y = 'translateY'
+
+        for attr in ['NW', 'NE', 'SW', 'SE' ]:
+            if not mc.attributeQuery( attr, node = control, exists=True ):
+                mc.addAttr( control, ln = attr, keyable=0, min=0, max=1, dv=1, at='double' )
+
+        ###########################################################################################
+        # Up
+
+        js_up_unitCon_1 = mc.createNode( 'unitConversion', name=prefix+'Up_unitCon_1', ss=True )
+        mc.setAttr( js_up_unitCon_1 + '.conversionFactor', -1 )
+        mc.connectAttr( control + '.' + source_attr_x, js_up_unitCon_1 + '.input' )
+
+        js_up_add_1 =  mc.createNode( 'plusMinusAverage', name=prefix+'Up_add_1', ss=True )
+        mc.setAttr( js_up_add_1 + '.input1D[0]', 1 )
+        mc.connectAttr( control + '.' + source_attr_x, js_up_add_1 + '.input1D[1]' )
+
+        js_up_add_2 =  mc.createNode( 'plusMinusAverage', name=prefix+'Up_add_2', ss=True )
+        mc.setAttr( js_up_add_2 + '.input1D[0]', 1 )
+        mc.connectAttr( js_up_unitCon_1 + '.output', js_up_add_2 + '.input1D[1]' )
+
+        js_up_cond_1 = mc.createNode( 'condition', name=prefix+'Up_cond_1', ss=True )
+        mc.setAttr( js_up_cond_1 + '.operation', 2 )
+        mc.setAttr( js_up_cond_1 + '.colorIfTrueR', 1 )
+        mc.setAttr( js_up_cond_1 + '.colorIfFalseG', 1 )
+        mc.connectAttr( js_up_add_1 + '.output1D', js_up_cond_1 + '.colorIfFalseR' )
+        mc.connectAttr( js_up_add_2 + '.output1D', js_up_cond_1 + '.colorIfTrueG' )
+        mc.connectAttr( control + '.translateX', js_up_cond_1 + '.firstTerm' )
+
+        js_up_multi_1 = mc.createNode( 'multiplyDivide', name=prefix+'Up_multi_1', ss=True )
+        mc.connectAttr( control + '.translateY', js_up_multi_1 + '.input1X' )
+        mc.connectAttr( control + '.translateY', js_up_multi_1 + '.input1Y' )
+        mc.connectAttr( js_up_cond_1 + '.outColorR', js_up_multi_1 + '.input2X' )
+        mc.connectAttr( js_up_cond_1 + '.outColorG', js_up_multi_1 + '.input2Y' )
+
+        js_up_clamp_1 = mc.createNode( 'clamp', name=prefix+'Up_clamp_1', ss=True )
+        mc.setAttr( js_up_clamp_1 + '.minR', 0 )
+        mc.setAttr( js_up_clamp_1 + '.minG', 0 )
+        mc.setAttr( js_up_clamp_1 + '.maxR', 1 )
+        mc.setAttr( js_up_clamp_1 + '.maxG', 1 )
+        mc.connectAttr( js_up_multi_1 + '.outputX', js_up_clamp_1 + '.inputR' )
+        mc.connectAttr( js_up_multi_1 + '.outputY', js_up_clamp_1 + '.inputG' )
+
+        mc.connectAttr( js_up_clamp_1 + '.outputR', control + '.NW' )
+        mc.connectAttr( js_up_clamp_1 + '.outputG', control + '.NE' )
+
+        # Up
+        ###########################################################################################
+
+        ###########################################################################################
+        # Lo
+        js_lo_unitCon_1 = mc.createNode( 'unitConversion', name=prefix+'Lo_unitCon_1', ss=True )
+        mc.setAttr( js_lo_unitCon_1 + '.conversionFactor', -1 )
+        mc.connectAttr( control + '.' + source_attr_x, js_lo_unitCon_1 + '.input' )
+
+        js_lo_add_1 =  mc.createNode( 'plusMinusAverage', name=prefix+'Lo_add_1', ss=True )
+        mc.setAttr( js_lo_add_1 + '.input1D[0]', 1 )
+        mc.connectAttr( control + '.' + source_attr_x, js_lo_add_1 + '.input1D[1]' )
+
+        js_lo_add_2 =  mc.createNode( 'plusMinusAverage', name=prefix+'Lo_add_2', ss=True )
+        mc.setAttr( js_lo_add_2 + '.input1D[0]', 1 )
+        mc.connectAttr( js_lo_unitCon_1 + '.output', js_lo_add_2 + '.input1D[1]' )
+
+        js_lo_cond_1 = mc.createNode( 'condition', name=prefix+'Lo_cond_1', ss=True )
+        mc.setAttr( js_lo_cond_1 + '.operation', 2 )
+        mc.setAttr( js_lo_cond_1 + '.colorIfTrueR', 1 )
+        mc.setAttr( js_lo_cond_1 + '.colorIfFalseG', 1 )
+        mc.connectAttr( js_lo_add_1 + '.output1D', js_lo_cond_1 + '.colorIfFalseR' )
+        mc.connectAttr( js_lo_add_2 + '.output1D', js_lo_cond_1 + '.colorIfTrueG' )
+        mc.connectAttr( control + '.translateX', js_lo_cond_1 + '.firstTerm' )
+
+        js_lo_multi_2 = mc.createNode( 'multiplyDivide', name=prefix+'Lo_multi_2', ss=True )
+        mc.setAttr( js_lo_multi_2 + '.input2X', -1 )
+        mc.setAttr( js_lo_multi_2 + '.input2Y', -1 )
+        mc.connectAttr( control + '.translateY', js_lo_multi_2 + '.input1X' )
+        mc.connectAttr( control + '.translateY', js_lo_multi_2 + '.input1Y' )
+
+        js_lo_multi_1 = mc.createNode( 'multiplyDivide', name=prefix+'Lo_multi_1', ss=True )
+        mc.connectAttr( js_lo_multi_2 + '.outputX', js_lo_multi_1 + '.input1X' )
+        mc.connectAttr( js_lo_multi_2 + '.outputY', js_lo_multi_1 + '.input1Y' )
+        mc.connectAttr( js_lo_cond_1 + '.outColorR', js_lo_multi_1 + '.input2X' )
+        mc.connectAttr( js_lo_cond_1 + '.outColorG', js_lo_multi_1 + '.input2Y' )
+
+        js_lo_clamp_1 = mc.createNode( 'clamp', name=prefix+'Lo_clamp_1', ss=True )
+        mc.setAttr( js_lo_clamp_1 + '.minR', 0 )
+        mc.setAttr( js_lo_clamp_1 + '.minG', 0 )
+        mc.setAttr( js_lo_clamp_1 + '.maxR', 1 )
+        mc.setAttr( js_lo_clamp_1 + '.maxG', 1 )
+        mc.connectAttr( js_lo_multi_1 + '.outputX', js_lo_clamp_1 + '.inputR' )
+        mc.connectAttr( js_lo_multi_1 + '.outputY', js_lo_clamp_1 + '.inputG' )
+
+        mc.connectAttr( js_lo_clamp_1 + '.outputR', control + '.SW' )
+        mc.connectAttr( js_lo_clamp_1 + '.outputG', control + '.SE' )
+
+        mc.select( grp )
+
+        return control, grp
 
     def create_nul(self, *args ):
 
@@ -4053,13 +4211,62 @@ class Char( Rig ):
             hikNodes['LeftArm']        = {'Matrix': 'ArmUp_FK_Lft_Ctrl', 'Parent': 'LeftShoulder', 'Ctrls': ['ArmUp_FK_Lft_Ctrl']}
             hikNodes['LeftForeArm']    = {'Matrix': 'ArmLo_FK_Lft_Ctrl', 'Parent': 'LeftArm', 'Ctrls': ['ArmLo_FK_Lft_Ctrl']}
             hikNodes['LeftHand']       = {'Matrix': 'Hand_FK_Lft_Ctrl', 'Parent': 'LeftForeArm', 'Ctrls': ['Hand_FK_Lft_Ctrl']}
-            hikNodes['LeftFingerBase'] = {'Matrix': 'Palm_Lft_Jnt', 'Parent': 'LeftHand', 'Ctrls': []}
+            #hikNodes['LeftFingerBase'] = {'Matrix': 'Palm_Lft_Jnt', 'Parent': 'LeftHand', 'Ctrls': []}
+
+            hikNodes['LeftHandIndex'] = {'Matrix': 'Index1_Lft_Ctrl', 'Parent': 'LeftHand', 'Ctrls': ['Index1_Lft_Ctrl']}
+            hikNodes['LeftHandIndex1'] = {'Matrix': 'Index2_Lft_Ctrl', 'Parent': 'LeftHandIndex', 'Ctrls': ['Index2_Lft_Ctrl']}
+            hikNodes['LeftHandIndex2'] = {'Matrix': 'Index3_Lft_Ctrl', 'Parent': 'LeftHandIndex1', 'Ctrls': ['Index3_Lft_Ctrl']}
+            hikNodes['LeftHandIndex3'] = {'Matrix': 'Index4_Lft_Ctrl', 'Parent': 'LeftHandIndex2', 'Ctrls': ['Index4_Lft_Ctrl']}
+
+            hikNodes['LeftHandMiddle'] = {'Matrix': 'Middle1_Lft_Ctrl', 'Parent': 'LeftHand', 'Ctrls': ['Middle1_Lft_Ctrl']}
+            hikNodes['LeftHandMiddle1'] = {'Matrix': 'Middle2_Lft_Ctrl', 'Parent': 'LeftHandMiddle', 'Ctrls': ['Middle2_Lft_Ctrl']}
+            hikNodes['LeftHandMiddle2'] = {'Matrix': 'Middle3_Lft_Ctrl', 'Parent': 'LeftHandMiddle1', 'Ctrls': ['Middle3_Lft_Ctrl']}
+            hikNodes['LeftHandMiddle3'] = {'Matrix': 'Middle4_Lft_Ctrl', 'Parent': 'LeftHandMiddle2', 'Ctrls': ['Middle4_Lft_Ctrl']}
+
+            hikNodes['LeftHandRing'] = {'Matrix': 'Ring1_Lft_Ctrl', 'Parent': 'LeftHand', 'Ctrls': ['Ring1_Lft_Ctrl']}
+            hikNodes['LeftHandRing1'] = {'Matrix': 'Ring2_Lft_Ctrl', 'Parent': 'LeftHandRing', 'Ctrls': ['Ring2_Lft_Ctrl']}
+            hikNodes['LeftHandRing2'] = {'Matrix': 'Ring3_Lft_Ctrl', 'Parent': 'LeftHandRing1', 'Ctrls': ['Ring3_Lft_Ctrl']}
+            hikNodes['LeftHandRing3'] = {'Matrix': 'Ring4_Lft_Ctrl', 'Parent': 'LeftHandRing2', 'Ctrls': ['Ring4_Lft_Ctrl']}
+
+            hikNodes['LeftHandPinky'] = {'Matrix': 'Pinky1_Lft_Ctrl', 'Parent': 'LeftHand', 'Ctrls': ['Pinky1_Lft_Ctrl']}
+            hikNodes['LeftHandPinky1'] = {'Matrix': 'Pinky2_Lft_Ctrl', 'Parent': 'LeftHandPinky', 'Ctrls': ['Pinky2_Lft_Ctrl']}
+            hikNodes['LeftHandPinky2'] = {'Matrix': 'Pinky3_Lft_Ctrl', 'Parent': 'LeftHandPinky1', 'Ctrls': ['Pinky3_Lft_Ctrl']}
+            hikNodes['LeftHandPinky3'] = {'Matrix': 'Pinky4_Lft_Ctrl', 'Parent': 'LeftHandPinky2', 'Ctrls': ['Pinky4_Lft_Ctrl']}
+
+            hikNodes['LeftHandThumb1'] = {'Matrix': 'Thumb1_Lft_Ctrl', 'Parent': 'LeftHand', 'Ctrls': ['Thumb1_Lft_Ctrl']}
+            hikNodes['LeftHandThumb2'] = {'Matrix': 'Thumb2_Lft_Ctrl', 'Parent': 'LeftHandThumb1', 'Ctrls': ['Thumb2_Lft_Ctrl']}
+            hikNodes['LeftHandThumb3'] = {'Matrix': 'Thumb3_Lft_Ctrl', 'Parent': 'LeftHandThumb2', 'Ctrls': ['Thumb3_Lft_Ctrl']}
 
             hikNodes['RightShoulder']  = {'Matrix': 'Clavicle_Rgt_Ctrl', 'Parent': 'Spine3', 'Ctrls': ['Clavicle_Rgt_Ctrl']}
             hikNodes['RightArm']       = {'Matrix': 'ArmUp_FK_Rgt_Ctrl', 'Parent': 'RightShoulder', 'Ctrls': ['ArmUp_FK_Rgt_Ctrl']}
             hikNodes['RightForeArm']   = {'Matrix': 'ArmLo_FK_Rgt_Ctrl', 'Parent': 'RightArm', 'Ctrls': ['ArmLo_FK_Rgt_Ctrl']}
             hikNodes['RightHand']       = {'Matrix': 'Hand_FK_Rgt_Ctrl', 'Parent': 'RightForeArm', 'Ctrls': ['Hand_FK_Rgt_Ctrl']}
-            hikNodes['RightFingerBase'] = {'Matrix': 'Palm_Rgt_Jnt', 'Parent': 'RightHand', 'Ctrls': []}
+            #hikNodes['RightFingerBase'] = {'Matrix': 'Palm_Rgt_Jnt', 'Parent': 'RightHand', 'Ctrls': []}
+
+            hikNodes['RightHandIndex'] = {'Matrix': 'Index1_Rgt_Ctrl', 'Parent': 'RightHand', 'Ctrls': ['Index1_Rgt_Ctrl']}
+            hikNodes['RightHandIndex1'] = {'Matrix': 'Index2_Rgt_Ctrl', 'Parent': 'RightHandIndex', 'Ctrls': ['Index2_Rgt_Ctrl']}
+            hikNodes['RightHandIndex2'] = {'Matrix': 'Index3_Rgt_Ctrl', 'Parent': 'RightHandIndex1', 'Ctrls': ['Index3_Rgt_Ctrl']}
+            hikNodes['RightHandIndex3'] = {'Matrix': 'Index4_Rgt_Ctrl', 'Parent': 'RightHandIndex2', 'Ctrls': ['Index4_Rgt_Ctrl']}
+
+            hikNodes['RightHandMiddle'] = {'Matrix': 'Middle1_Rgt_Ctrl', 'Parent': 'RightHand', 'Ctrls': ['Middle1_Rgt_Ctrl']}
+            hikNodes['RightHandMiddle1'] = {'Matrix': 'Middle2_Rgt_Ctrl', 'Parent': 'RightHandMiddle', 'Ctrls': ['Middle2_Rgt_Ctrl']}
+            hikNodes['RightHandMiddle2'] = {'Matrix': 'Middle3_Rgt_Ctrl', 'Parent': 'RightHandMiddle1', 'Ctrls': ['Middle3_Rgt_Ctrl']}
+            hikNodes['RightHandMiddle3'] = {'Matrix': 'Middle4_Rgt_Ctrl', 'Parent': 'RightHandMiddle2', 'Ctrls': ['Middle4_Rgt_Ctrl']}
+
+            hikNodes['RightHandRing'] = {'Matrix': 'Ring1_Rgt_Ctrl', 'Parent': 'RightHand', 'Ctrls': ['Ring1_Rgt_Ctrl']}
+            hikNodes['RightHandRing1'] = {'Matrix': 'Ring2_Rgt_Ctrl', 'Parent': 'RightHandRing', 'Ctrls': ['Ring2_Rgt_Ctrl']}
+            hikNodes['RightHandRing2'] = {'Matrix': 'Ring3_Rgt_Ctrl', 'Parent': 'RightHandRing1', 'Ctrls': ['Ring3_Rgt_Ctrl']}
+            hikNodes['RightHandRing3'] = {'Matrix': 'Ring4_Rgt_Ctrl', 'Parent': 'RightHandRing2', 'Ctrls': ['Ring4_Rgt_Ctrl']}
+
+            hikNodes['RightHandPinky'] = {'Matrix': 'Pinky1_Rgt_Ctrl', 'Parent': 'RightHand', 'Ctrls': ['Pinky1_Rgt_Ctrl']}
+            hikNodes['RightHandPinky1'] = {'Matrix': 'Pinky2_Rgt_Ctrl', 'Parent': 'RightHandPinky', 'Ctrls': ['Pinky2_Rgt_Ctrl']}
+            hikNodes['RightHandPinky2'] = {'Matrix': 'Pinky3_Rgt_Ctrl', 'Parent': 'RightHandPinky1', 'Ctrls': ['Pinky3_Rgt_Ctrl']}
+            hikNodes['RightHandPinky3'] = {'Matrix': 'Pinky4_Rgt_Ctrl', 'Parent': 'RightHandPinky2', 'Ctrls': ['Pinky4_Rgt_Ctrl']}
+
+            hikNodes['RightHandThumb1'] = {'Matrix': 'Thumb1_Rgt_Ctrl', 'Parent': 'RightHand', 'Ctrls': ['Thumb1_Rgt_Ctrl']}
+            hikNodes['RightHandThumb2'] = {'Matrix': 'Thumb2_Rgt_Ctrl', 'Parent': 'RightHandThumb1', 'Ctrls': ['Thumb2_Rgt_Ctrl']}
+            hikNodes['RightHandThumb3'] = {'Matrix': 'Thumb3_Rgt_Ctrl', 'Parent': 'RightHandThumb2', 'Ctrls': ['Thumb3_Rgt_Ctrl']}
+
         elif type == kBipedUE:
 
             hikNodes['Reference']  = {'Matrix': 'Main_Ctr_Ctrl', 'Parent': None, 'Ctrls': ['Main_Ctr_Ctrl']}
@@ -4215,50 +4422,31 @@ class Char( Rig ):
                 mc.setAttr( joint + '.r', 0,0,0 )
                 mc.setAttr( joint + '.jo', 0,0,0 )
 
-        # name = 'Joshi'
+        # HumanIK Definition
         hikCharacter = mc.createNode("HIKCharacterNode", name=char+'_HIK')
         hikProperties = mc.createNode("HIKProperty2State", name=char + "_hikProperties")
         mc.connectAttr(hikProperties + ".message", hikCharacter + ".propertyState")
-        '''
-        prefix = ''
-        hikNodes = {}
 
-        hikNodes['Reference']         = 'Root_Jnt'
-        hikNodes['Hips']              = 'Hips_Jnt'
-        hikNodes['LeftUpLeg']         = 'LegUp_Lft_Jnt'
-        hikNodes['LeftLeg']           = 'LegLo_Lft_Jnt'
-        hikNodes['LeftFoot']          = 'Foot_Lft_Jnt'
-        hikNodes['RightUpLeg']        = 'LegUp_Rgt_Jnt'
-        hikNodes['RightLeg']          = 'LegLo_Rgt_Jnt'
-        hikNodes['RightFoot']         = 'Foot_Rgt_Jnt'
-        hikNodes['Spine']             = 'Spine1_Jnt'
-        hikNodes['LeftArm']           = 'ArmUp_Lft_Jnt'
-        hikNodes['LeftForeArm']       = 'ArmLo_Lft_Jnt'
-        hikNodes['LeftHand']          = 'Hand_Lft_Jnt'
-        hikNodes['RightArm']          = 'ArmUp_Rgt_Jnt'
-        hikNodes['RightForeArm']      = 'ArmLo_Rgt_Jnt'
-        hikNodes['RightHand']         = 'Hand_Rgt_Jnt'
-        hikNodes['Head']              = 'Head_Jnt'
-        hikNodes['LeftToeBase']       = 'Toes_Lft_Jnt'
-        hikNodes['RightToeBase']      = 'Toes_Rgt_Jnt'
-        hikNodes['LeftShoulder']      = 'Clavicle_Lft_Jnt'
-        hikNodes['RightShoulder']     = 'Clavicle_Rgt_Jnt'
-        hikNodes['Neck']              = 'Neck_Jnt'
-        hikNodes['LeftFingerBase']    = 'Palm_Lft_Jnt'
-        hikNodes['RightFingerBase']   = 'Palm_Rgt_Jnt'
-        hikNodes['Spine1']            = 'Spine2_Jnt'
-        hikNodes['Spine2']            = 'Spine3_Jnt'
-        hikNodes['Spine3']            = 'Chest_Jnt'
-        '''
         for key in hikNodes.keys():
 
             node = self.find_node(mocap_grp, hikNodes[key]['Joint'] )  # find the node
 
-            exists = mc.attributeQuery('Character', node=node, exists=True)
-
-            if not exists:
+            if not mc.attributeQuery('Character', node=node, exists=True):
                 mc.addAttr(node, shortName='ch', longName='Character', attributeType='message')
+
             try:
+                # The Meta Joints need an extra 'In' token
+                if  key.endswith('Thumb')  or \
+                    key.endswith('Index')  or \
+                    key.endswith('Middle') or \
+                    key.endswith('Ring')   or \
+                    key.endswith('Pinky'):
+
+                    if 'Left' in key:
+                        key = key.replace( 'Left', 'LeftIn' )
+                    if 'Right' in key:
+                        key = key.replace( 'Right', 'RightIn' )
+
                 mc.connectAttr( node + '.Character', hikCharacter + '.' + key, f=True)
             except:
                 pass
@@ -12296,7 +12484,7 @@ class MainTab( QWidget ):
         self.__options__()
 
         self.button_spacing = 0
-        self.picker_rows    = 32
+        self.picker_rows    = 38
         self.picker_height  = self.button_size * self.picker_rows
         self.maya_blue      = '#5285A6'
         self.blue           = '#6785A6'
@@ -12463,7 +12651,6 @@ class MainTab( QWidget ):
         self.showUpVecs = QCheckBox("Show Up Vectors", self )
         self.showUpVecs.clicked.connect(self.show_upVecs)
         layout.addWidget( self.showUpVecs )
-        # Show Geo?
 
         # Joint Display Type
         line = QHBoxLayout()
@@ -12582,6 +12769,21 @@ class MainTab( QWidget ):
     def paste_pose( self ):
 
         self.rig.set_pose( self.pose )
+
+    def set_mocap( self, mode=False ):
+
+        character = self.rig.get_active_char()
+
+        handles = [ ]
+
+        handles = self.rig.get_char_handles( character, { 'Type': kHandle, 'Side': kAll } )
+
+        for handle in handles:
+            if mc.attributeQuery( 'mocap', node=handle, exists=True ):
+                mc.setAttr( handle + '.mocap', mode )
+
+    def bake_mocap( self, mode=False ):
+        print('bake_mocap', mode )
 
     def dummy_create(self, *args, **kwargs):
 
@@ -12973,6 +13175,39 @@ class MainTab( QWidget ):
         self.button_pose_paste.setText('Paste Pose')
         self.set_style( self.button_pose_paste )
         self.button_pose_paste.clicked.connect(  self.paste_pose )
+
+        self.dummy_create( self.pickerLayout, 40, 0,  self.grey, 1, 1 )
+
+        text = QLabel('Mocap')
+        self.pickerLayout.addWidget( text, 41, 1, 1, 3)
+
+        text = QLabel('Bake')
+        self.pickerLayout.addWidget( text, 41, 7, 1, 3)
+    
+        self.set_mocap_on = self.button_create( self.pickerLayout, 42, 1,  self.red, 1, 3 )
+        self.set_mocap_on.setFixedWidth( three_units )
+        self.set_mocap_on.setText('Mocap On')
+        self.set_style( self.set_mocap_on )
+        self.set_mocap_on.clicked.connect(  partial( self.set_mocap, True ) )
+
+        self.set_mocap_off = self.button_create( self.pickerLayout, 42, 4,  self.red, 1, 3 )
+        self.set_mocap_off.setFixedWidth( three_units )
+        self.set_mocap_off.setText('Mocap Off')
+        self.set_style( self.set_mocap_off )
+        self.set_mocap_off.clicked.connect(  partial( self.set_mocap, False ) )
+
+        self.bake_mocap_1 = self.button_create( self.pickerLayout, 42, 7,  self.red, 1, 3 )
+        self.bake_mocap_1.setFixedWidth( three_units )
+        self.bake_mocap_1.setText('HIK >> Ctrl')
+        self.set_style( self.bake_mocap_1 )
+        self.bake_mocap_1.clicked.connect(  partial( self.bake_mocap, True ) )
+
+        self.bake_mocap_2 = self.button_create( self.pickerLayout, 42, 10,  self.red, 1, 3 )
+        self.bake_mocap_2.setFixedWidth( three_units )
+        self.bake_mocap_2.setText('Ctrl >> HIK')
+        self.set_style( self.bake_mocap_2 )
+        self.bake_mocap_2.clicked.connect(  partial( self.bake_mocap, False ) )
+
 
         ########################################################################################################
         # IK
@@ -16867,7 +17102,7 @@ class Orient_Transform_UI():
         mc.dgdirty( a=True )
         mc.delete( tmp_cons )
         mc.delete( tmp_locs )
-        
+
         mc.select(selection)
 
 
