@@ -544,7 +544,14 @@ class Menu(AniMeta):
         mc.menuItem( label = 'Export Symmetry...', c = model.export_symmetry_ui, parent = model_menu )
         mc.menuItem( label = 'Specify Symmetry File ...', c = model.specify_symmetry_file_ui, parent = model_menu )
         mc.menuItem( d = True, dl = '' )
-        mc.menuItem( label = 'Extract Faces', c = model.duplicate_extract_soften_faces, parent = model_menu )
+
+        smooth_border_ui =  SmoothBorderUI()
+        mc.menuItem( label = 'Smooth Border', c = smooth_border_ui.smooth_border )
+        mc.menuItem( optionBox = True, c = smooth_border_ui.ui )
+
+        chissel_curve_ui =  ChisselCurveUI()
+        mc.menuItem( label = 'Chissel Curve', c = chissel_curve_ui.chissel_curve )
+        mc.menuItem( optionBox = True, c = chissel_curve_ui.ui )
 
         # Modeling
         #
@@ -9867,15 +9874,13 @@ class Model(Transform):
         else:
             mc.warning('aniMeta import symmetry file, invalid file path:', file_name)
 
-    def duplicate_extract_soften_faces(self, *args):
+    def duplicate_extract_soften_faces(self, *args, **kwargs):
         '''
         This method extracts the selected faces of a poly objects and softens it's border
         :return:
         '''
-
+        iterations = kwargs.setdefault( 'iterations', 5 )
         mc.undoInfo(openChunk=True)
-
-        iterations = 6
 
         selection = mc.ls(sl=True, fl=True)
 
@@ -9906,14 +9911,89 @@ class Model(Transform):
 
         border_edges = mc.ls(mc.polyListComponentConversion(selection, fromFace=True, bo=True, te=True), fl=True)
 
+        edge = self.get_vertices_from_edges( border_edges )
+
         vtxs = mc.ls(mc.polyListComponentConversion(border_edges, fromEdge=True, tv=True), fl=True)
 
+        vtx_neighbor = self.get_neighbor_vertices( border_edges, edge)
+
+        pos = self.average_joint_positions( vtxs, vtx_neighbor, iterations )
+
+        for i in range(len(vtxs)):
+            mc.xform(vtxs[i], t=(pos[str(vtxs[i])][0], pos[str(vtxs[i])][1], pos[str(vtxs[i])][2]))
+
+        mc.undoInfo(closeChunk=True)
+
+        mc.select(dup, r=True)
+
+        return dup
+
+    def get_border_edges_of_selected_faces(self):
+        """
+        This algorithm takes the selected faces of a poly mesh and returns the border edges of the selection by finding all connected faces and writing them in a list
+        Then it searches the list and if an item is found only once, it is condifered a border edge.
+
+        """
+        # Get the selected faces
+        selected_faces = mc.ls(selection=True, flatten=True)
+
+        if not selected_faces:
+            mc.warning("Please select some faces.")
+            return
+
+        # Create an empty list to store the border edges
+        edges = []
+
+        # Iterate through each selected face
+        for face in selected_faces:
+            # Get the edges connected to the current face
+            connected_edges = mc.polyListComponentConversion(face, toEdge=True)
+            edge_list = mc.filterExpand(connected_edges, selectionMask=32)
+            if not edge_list:
+                mc.warning(f"No border edges found for face {face}.")
+                continue
+
+            # Add the border edges to the list
+            edges.extend(edge_list)
+
+        border_edges = []
+
+        for face in selected_faces:
+
+            connected_edges = mc.polyListComponentConversion(face, toEdge=True)
+            edge_list = mc.filterExpand(connected_edges, selectionMask=32)
+            if edge_list:
+                for edge in edge_list:
+                    count = edges.count( edge )
+                    if count == 1:
+                        border_edges.append( edge )
+
+        return border_edges
+
+    def soften_selection_border(self, *args, **kwargs):
+        iterations=kwargs.setdefault('iterations', 5)
+        mc.undoInfo(openChunk=True)
+        border_edges = self.get_border_edges_of_selected_faces()
+        edge = self.get_vertices_from_edges( border_edges )
+        vtxs = mc.ls(mc.polyListComponentConversion(border_edges, fromEdge=True, tv=True), fl=True)
+        vtx_neighbor = self.get_neighbor_vertices( border_edges, edge)
+        pos = self.average_joint_positions( vtxs=vtxs, vtx_neighbor=vtx_neighbor, iterations=iterations )
+        for i in range(len(vtxs)):
+            mc.xform(vtxs[i], t=(pos[str(vtxs[i])][0], pos[str(vtxs[i])][1], pos[str(vtxs[i])][2]))
+        mc.undoInfo(closeChunk=True)
+
+    def get_vertices_from_edges(self, edges=[]):
+
         edge = {}
+        for i in range(len(edges)):
+            edge[edges[i]] = mc.ls(
+                mc.polyListComponentConversion(edges[i], fromEdge=True, bo=True, tv=True), fl=True)
 
-        for i in range(len(border_edges)):
-            edge[border_edges[i]] = mc.ls(
-                mc.polyListComponentConversion(border_edges[i], fromEdge=True, bo=True, tv=True), fl=True)
+        return edge
 
+    def get_neighbor_vertices(self, border_edges, edge ):
+
+        vtxs = mc.ls(mc.polyListComponentConversion(border_edges, fromEdge=True, tv=True), fl=True)
         vtx_neighbor = []
         for i in range(len(vtxs)):
             neighbor = []
@@ -9926,31 +10006,362 @@ class Model(Transform):
                         neighbor.append(edge[key][1])
             if len(neighbor) == 2:
                 vtx_neighbor.append(neighbor)
+        return vtx_neighbor
+
+    def average_joint_positions(self, vtxs=[], vtx_neighbor={}, iterations=1):
 
         pos = {}
         for i in range(len(vtxs)):
             pos[str(vtxs[i])] = mc.xform(vtxs[i], q=1, t=1)
         for k in range(iterations):
+            print( k )
             for i in range(len(vtxs)):
-                print(i)
-                pos[str(vtxs[i])][0] = pos[str(vtxs[i])][0] * 0.5 + pos[str(vtx_neighbor[i][0])][0] * 0.25 + \
-                                       pos[str(vtx_neighbor[i][1])][0] * 0.25
-                pos[str(vtxs[i])][1] = pos[str(vtxs[i])][1] * 0.5 + pos[str(vtx_neighbor[i][0])][1] * 0.25 + \
-                                       pos[str(vtx_neighbor[i][1])][1] * 0.25
-                pos[str(vtxs[i])][2] = pos[str(vtxs[i])][2] * 0.5 + pos[str(vtx_neighbor[i][0])][2] * 0.25 + \
-                                       pos[str(vtx_neighbor[i][1])][2] * 0.25
+                pos[str(vtxs[i])][0] = pos[str(vtxs[i])][0] * 0.7 + pos[str(vtx_neighbor[i][0])][0] * 0.15 + \
+                                       pos[str(vtx_neighbor[i][1])][0] * 0.15
+                pos[str(vtxs[i])][1] = pos[str(vtxs[i])][1] * 0.7 + pos[str(vtx_neighbor[i][0])][1] * 0.15 + \
+                                       pos[str(vtx_neighbor[i][1])][1] * 0.15
+                pos[str(vtxs[i])][2] = pos[str(vtxs[i])][2] * 0.7 + pos[str(vtx_neighbor[i][0])][2] * 0.15 + \
+                                       pos[str(vtx_neighbor[i][1])][2] * 0.15
+        return pos
 
-        for i in range(len(vtxs)):
-            mc.xform(vtxs[i], t=(pos[str(vtxs[i])][0], pos[str(vtxs[i])][1], pos[str(vtxs[i])][2]))
+
+    def resample_and_snap_curve(self, curve_name, mesh_name, samples):
+
+        mesh_shape = AniMeta().get_path( mesh_name )
+        mesh_shape.extendToShape()
+
+        mesh_fn = om.MFnMesh( mesh_shape )
+
+        # Duplicate the curve
+        duplicated_curve = mc.duplicate(curve_name)[0]
+
+        # Resample the duplicated curve to the desired number of vertices
+        mc.rebuildCurve(duplicated_curve, spans=samples)
+
+        # Get the vertex positions of the resampled curve
+        curve_vertices = mc.ls(duplicated_curve + ".cv[*]", flatten=True)
+        curve_positions = [mc.pointPosition(vertex) for vertex in curve_vertices]
+
+        # Iterate through each vertex and snap it to the closest point on the mesh
+        for i, vertex_position in enumerate(curve_positions):
+
+            pt = mesh_fn.getClosestPoint( om.MPoint(vertex_position), space=om.MSpace.kWorld )
+
+            mc.xform(curve_vertices[i], translation=[pt[0].x, pt[0].y, pt[0].z], worldSpace=True)
+
+        # Delete the duplicated curve
+        return duplicated_curve
+
+    def chissel_curve_doit(self, curve=None, geo=None ,width=0.5, depth=0.25, samples=100):
+
+        mc.undoInfo(openChunk=True)
+        sampled_curve = self.resample_and_snap_curve(curve, geo, samples)
+
+        curve_path = AniMeta().get_path( sampled_curve )
+        geo_path = AniMeta().get_path( geo )
+
+        curve_path.extendToShape()
+        geo_path.extendToShape()
+
+        curve_fn = om.MFnNurbsCurve( curve_path )
+        meshIter = om.MItMeshVertex(geo_path)
+
+        indices = []
+        deltas = []
+        while not meshIter.isDone():
+            current = meshIter.currentItem()
+            pos = meshIter.position()
+
+            distance = curve_fn.distanceToPoint( pos )
+
+            if distance < width:
+
+                normalized_distance = 1-distance/width
+
+                vec = normalized_distance ** 4 * depth
+
+                normal = meshIter.getNormal() * -vec
+                pos = meshIter.position()
+                indices.append(meshIter.index())
+                deltas.append( om.MPoint( normal.x+pos.x,normal.y+pos.y,normal.z+pos.z )  )
+            meshIter.next()
+
+        for i in range( len(deltas)):
+
+            mc.xform(geo+'.vtx['+str(indices[i])+']'  , translation=[deltas[i].x, deltas[i].y, deltas[i].z], worldSpace=True)
+
+        mc.delete(sampled_curve)
 
         mc.undoInfo(closeChunk=True)
 
-        mc.select(dup, r=True)
-        return dup
+    def chissel_curve(self, width=0.3, depth=0.2):
+        sel = mc.ls( sl=True )
+        if len ( sel ) == 2:
+            self.chissel_curve_doit( sel[0], sel[1], width, depth )
+
     # Model
 #
 ######################################################################################
 
+######################################################################################
+#
+# Smooth Border UI
+
+class SmoothBorderUI( Model ):
+
+    ui_name = 'SmoothBorderUI'
+    title = 'Smooth Selection Border'
+    width = 100
+    height = 120
+
+    mode_ctrl = None
+    attr_ctrl = None
+
+    def __init__( self ):
+        super( SmoothBorderUI, self ).__init__()
+        self.init_settings()
+
+    def ui( self, *args ):
+
+        if mc.window(  self.ui_name, exists = True ):
+            mc.deleteUI(  self.ui_name )
+
+        mc.window( self.ui_name, title =  self.title, width =  self.width, height = self.height, sizeable = False )
+
+        # Layout fuer Menus
+        mc.menuBarLayout()
+
+        # Edit Menu
+        mc.menu( label = 'Edit' )
+        mc.menuItem( label = 'Save Settings', command = self.save_settings )
+        mc.menuItem( label = 'Reset Settings', command = self.reset_settings )
+
+        # Edit Menu
+        mc.menu( label = 'Help' )
+        mc.menuItem( label = 'Help on ' + self.title )
+
+        form = mc.formLayout()
+
+        mirror_button = mc.button( label =  self.title, command = self.smooth_border_cmd )
+        apply_button = mc.button( label = 'Apply', command = self.apply_button_cmd )
+        close_button = mc.button( label = 'Close', command = self.delete )
+
+        self.iterations_slider  = mc.intSliderGrp(label="Iterations",
+                                                  field=True,
+                                                  minValue=1,
+                                                  maxValue=100,
+                                                  value=5,
+                                                  cc=self.save_settings)
+
+        self.extract_ctrl = mc.checkBoxGrp(
+            numberOfCheckBoxes = 1,
+            label  =  'Extract Faces'  ,
+            changeCommand = self.save_settings
+        )
+        mc.formLayout(
+            form,
+            edit = True,
+            attachForm = [
+                (self.iterations_slider, 'top', 10),
+                (mirror_button, 'bottom', 5),
+                (mirror_button, 'left', 5),
+                (close_button, 'bottom', 5),
+                (close_button, 'right', 5),
+                (apply_button, 'bottom', 5),
+                (self.iterations_slider, 'left', 35),
+                (self.iterations_slider, 'top', 15),
+                (self.extract_ctrl, 'left', 95) ],
+
+            attachPosition = [ (mirror_button, 'right', 5, 33),
+                               (close_button, 'left', 5, 66),
+                               (apply_button, 'right', 0, 66),
+                               (apply_button, 'left', 0, 33) ],
+
+            attachControl = [ (self.extract_ctrl, 'top', 5, self.iterations_slider) ]
+        )
+        self.restore_settings()
+
+        mc.showWindow()
+
+    def init_settings(self):
+        mc.optionVar( intValue = ('aniMetaSmoothBorder_Iterations', 5) )
+        mc.optionVar( intValue = ('aniMetaSmoothBorder_Extract', True) )
+
+    def smooth_border_cmd( self, *args ):
+        self.smooth_border()
+        if mc.window( self.ui_name, exists = True ):
+            mc.deleteUI( self.ui_name )
+
+    def apply_button_cmd( self, *args ):
+        self.smooth_border()
+
+    def delete( self, *args ):
+        # Schliesst das Interface
+        if mc.window( self.ui_name, exists = True ):
+            mc.deleteUI( self.ui_name )
+
+    def save_settings( self, *args ):
+        iterations = mc.intSliderGrp( self.iterations_slider,q=True, value=True )
+        extract = mc.checkBoxGrp(self.extract_ctrl,q=True, value1=True )
+        mc.optionVar( intValue = ('aniMetaSmoothBorder_Iterations', iterations) )
+        mc.optionVar( intValue = ('aniMetaSmoothBorder_Extract', extract) )
+
+    def restore_settings( self, *args ):
+        iterations = mc.optionVar( query = 'aniMetaSmoothBorder_Iterations' )
+        extract = mc.optionVar( query = 'aniMetaSmoothBorder_Extract' )
+        mc.intSliderGrp( self.iterations_slider, edit = True, value = iterations )
+        mc.checkBoxGrp( self.extract_ctrl, edit = True, value1 = extract )
+
+    def reset_settings( self, *args ):
+        self.init_settings()
+        self.restore_settings()
+
+    def smooth_border( self, *args ):
+        if not mc.optionVar( exists = 'aniMetaSmoothBorder_Iterations' ):
+            self.reset_settings()
+        iterations = mc.optionVar( query = 'aniMetaSmoothBorder_Iterations' )
+        extract = mc.optionVar( query = 'aniMetaSmoothBorder_Extract' )
+        if extract:
+            self.duplicate_extract_soften_faces(iterations=iterations)
+        else:
+            self.soften_selection_border(iterations=iterations)
+
+# Soften Selection Border UI
+#
+######################################################################################
+
+######################################################################################
+#
+# Chissel Curve UI
+
+class ChisselCurveUI( Model ):
+
+    ui_name = 'ChisselCurveUI'
+    title = 'Chissel Curve'
+    width = 220
+    height = 130
+
+    width_ctrl = None
+    depth_ctrl = None
+
+    def __init__( self ):
+        super( ChisselCurveUI, self ).__init__()
+
+        if not mc.optionVar( exists = 'aniMetaChisselCurve_Width' ):
+            self.init_settings()
+
+    def ui( self, *args ):
+
+        if mc.window(  self.ui_name, exists = True ):
+            mc.deleteUI(  self.ui_name )
+
+        mc.window( self.ui_name, title =  self.title, width =  self.width, height = self.height, sizeable = False )
+
+        # Layout fuer Menus
+        mc.menuBarLayout()
+
+        # Edit Menu
+        mc.menu( label = 'Edit' )
+        mc.menuItem( label = 'Save Settings', command = self.save_settings )
+        mc.menuItem( label = 'Reset Settings', command = self.reset_settings )
+
+        # Help Menu
+        mc.menu( label = 'Help' )
+        mc.menuItem( label = 'Help on ' + self.title )
+
+        form = mc.formLayout()
+
+        mirror_button = mc.button( label =  self.title, command = self.chissel_curve_cmd)
+        apply_button = mc.button( label = 'Apply', command = self.apply_button_cmd )
+        close_button = mc.button( label = 'Close', command = self.delete )
+
+        self.width_ctrl = mc.floatFieldGrp(numberOfFields=1,
+                                           value1=0.2,
+                                           cw=[2,70],
+                                           precision=3,
+                                           l='width',
+                                           step=0.1,
+                                           cc=self.save_settings)
+        self.depth_ctrl = mc.floatFieldGrp(numberOfFields=1,
+                                           value1=0.1,
+                                           cw=[2,70],
+                                           precision=3,
+                                           l='depth',
+                                           step=0.1,
+                                           cc=self.save_settings)
+
+        mc.formLayout(
+            form,
+            edit = True,
+            attachForm = [
+                (self.width_ctrl , 'top', 10),
+                (mirror_button, 'bottom', 5),
+                (mirror_button, 'left', 5),
+                (close_button, 'bottom', 5),
+                (close_button, 'right', 5),
+                (apply_button, 'bottom', 5),
+                (self.width_ctrl, 'left', 5),
+                (self.width_ctrl, 'top', 15),
+                (self.depth_ctrl, 'left', 5) ],
+
+            attachPosition = [ (mirror_button, 'right', 5, 30),
+                               (close_button, 'left', 5, 66),
+                               (apply_button, 'right', 0, 66),
+                               (apply_button, 'left', 0, 34) ],
+
+            attachControl = [ (self.depth_ctrl, 'top', 5, self.width_ctrl) ]
+        )
+        self.restore_settings()
+        mc.showWindow()
+
+    def init_settings(self):
+        mc.optionVar( floatValue = ('aniMetaChisselCurve_Width', 0.2) )
+        mc.optionVar( floatValue = ('aniMetaChisselCurve_Depth', 0.1) )
+
+    def chissel_curve_cmd( self, *args ):
+        self.chissel_curve()
+        if mc.window( self.ui_name, exists = True ):
+            mc.deleteUI( self.ui_name )
+
+    def apply_button_cmd( self, *args ):
+        self.chissel_curve()
+
+    def delete( self, *args ):
+        if mc.window( self.ui_name, exists = True ):
+            mc.deleteUI( self.ui_name )
+
+    def save_settings( self, *args ):
+        print('save_settings')
+        width = mc.floatFieldGrp( self.width_ctrl,q=True, value1=True )
+        depth = mc.floatFieldGrp( self.depth_ctrl,q=True, value1=True )
+
+        mc.optionVar( floatValue = ('aniMetaChisselCurve_Width', width) )
+        mc.optionVar( floatValue = ('aniMetaChisselCurve_Depth', depth) )
+
+    def restore_settings( self, *args ):
+        if not mc.optionVar( exists = 'aniMetaChisselCurve_Width' ):
+            self.reset_settings()
+
+        width = mc.optionVar( query = 'aniMetaChisselCurve_Width' )
+        depth = mc.optionVar( query = 'aniMetaChisselCurve_Depth' )
+
+        mc.floatFieldGrp( self.width_ctrl, edit = True, value1 = width )
+        mc.floatFieldGrp( self.depth_ctrl, edit = True, value1 = depth )
+
+    def reset_settings( self, *args ):
+        self.init_settings()
+        self.restore_settings()
+
+    def chissel_curve( self, *args ):
+        sel = mc.ls(sl=True)
+        if len( sel ) == 2:
+            width = mc.optionVar( query = 'aniMetaChisselCurve_Width' )
+            depth = mc.optionVar( query = 'aniMetaChisselCurve_Depth' )
+            self.chissel_curve_doit( sel[0], sel[1], width = width, depth =depth)
+
+# Soften Selection Border UI
+#
+######################################################################################
 
 ######################################################################################
 #
