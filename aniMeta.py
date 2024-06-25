@@ -4014,7 +4014,6 @@ class Char( Rig ):
                 if SIDE == 'r':
                     multi=-1
 
-
                 for j, LIMB in enumerate(['arm', 'leg']):
 
                     if LIMB == 'arm':
@@ -4064,15 +4063,14 @@ class Char( Rig ):
                     guide = self.find_node(rootNode, lowerarm+'_twist_02_'+SIDE)
                     mc.pointConstraint(guide, loarm_prx_2)
 
-                    # Upper Arm
-                    aimVec = (1*multi*front_multi, 0, 0)
+                    upVec = (0, 0, 1 * multi * front_multi)
 
-                    #if LIMB == 'arm':
-                    upVec = (0, 0, 1*multi*front_multi)
+                    aimVec = (1*multi*front_multi, 0, 0)
 
                     mc.aimConstraint(prx_loarm, uparm_prx_2, aim=aimVec, upVector=upVec, wut='object', wuo=up)
 
                     aimVec = (-1*multi*front_multi, 0, 0)
+
                     upVec = (0, 0, 1*front_multi)
                     mc.aimConstraint(prx_uparm, uparm_prx_1, aim=aimVec, upVector=upVec, wut='object', wuo=prx_upvec_loarm)
 
@@ -4089,7 +4087,8 @@ class Char( Rig ):
                     if LIMB == 'arm':
                         upVec = (0, 1, 0)
                     else:
-                        upVec = (0, 0, -1)
+                        upVec = (0, 0, 1*front_multi)
+
                     mc.aimConstraint(prx_loarm, loarm_prx_1, aim=aimVec, upVector=upVec, wut='object', wuo=prx_upvec_hand)
 
                     target1 = self.find_node(rootNode, lowerarm+'_twist_01_'+SIDE)
@@ -4512,7 +4511,6 @@ class Char( Rig ):
                 mc.setAttr( joint + '.r', 0,0,0 )
                 mc.setAttr( joint + '.jo', 0,0,0 )
 
-        # name = 'Joshi'
         hikCharacter = mc.createNode("HIKCharacterNode", name=char+'_HIK')
         hikProperties = mc.createNode("HIKProperty2State", name=char + "_hikProperties")
         mc.connectAttr(hikProperties + ".message", hikCharacter + ".propertyState")
@@ -8537,15 +8535,6 @@ class Biped( Char ):
             #
             ######################################
 
-            ######################################
-            #
-            # Arms
-
-            # Arms
-            #
-            ######################################
-
-
             ##################################################################################################
             #
             # IKs
@@ -8832,8 +8821,9 @@ class Biped( Char ):
                     footJntFK_jnt_name  = footJnt.partialPathName().replace( '_' + SIDE, '_FK_' + SIDE )
                     toesJntFK_jnt_name  = toesJnt.partialPathName().replace( '_' + SIDE, '_FK_' + SIDE )
                 elif type == kBipedUE:
+                    print('UE')
                     # Proxy FK Joints
-                    hipsJntFK_jnt_name  = hipsJnt.partialPathName().replace( '_' + side, '_FK_' + side )
+                    hipsJntFK_jnt_name  = hipsJnt.partialPathName() + '_FK'
                     legUpJntFK_jnt_name = legUpJnt.partialPathName().replace( '_' + side, '_FK_' + side )
                     legLoJntFK_jnt_name = legLoJnt.partialPathName().replace( '_' + side, '_FK_' + side )
                     footJntFK_jnt_name  = footJnt.partialPathName().replace( '_' + side, '_FK_' + side )
@@ -8841,6 +8831,8 @@ class Biped( Char ):
 
                 if SIDE == 'Lft':
                     hipsJntFK  = joint_copy( hipsJnt,  hipsJntFK_jnt_name,  prx_grp     )
+                    #mc.rename( hipsJntFK, hipsJntFK_jnt_name, side )
+                    print(hipsJntFK, hipsJntFK_jnt_name, side )
                     save_for_cleanup( hipsJntFK.fullPathName() )
 
                 legUpJntFK = joint_copy( legUpJnt, legUpJntFK_jnt_name, hipsJntFK   )
