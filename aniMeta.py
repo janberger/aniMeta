@@ -3535,7 +3535,6 @@ class Char( Rig ):
             data[ 'Type' ] = kBodyGuide
 
             for joint_lft in joints:
-
                 joint_rgt = None
 
                 if 'Lft' in joint_lft:
@@ -3548,9 +3547,11 @@ class Char( Rig ):
                     jl = self.find_node( charRoot, joint_lft )
                     jr = self.find_node( charRoot, joint_rgt )
 
-                    con = self.create_sym_constraint( jl, jr )
+                    if jl is not None and jr is not None:
 
-                    self.set_metaData( con, data )
+                        con = self.create_sym_constraint( jl, jr )
+                        self.set_metaData( con, data )
+
                 else:
                     mc.warning( 'aniMeta: No right joint found for node ' + joint_lft )
 
@@ -4285,6 +4286,128 @@ class Char( Rig ):
 
         return {'Main': rootGrp, 'Geo': geoGrp, 'Joint': jointGrp, 'Rig': rigGrp, 'Mocap': mocapGrp}
 
+    def get_hik_data(self,type = kBiped ):
+
+        SIDE=['Lft', 'Rgt']
+        SIDELONG=['Left', 'Right']
+        side=['l', 'r']
+
+        hikNodes = {}
+        if type == kBiped:
+            hikNodes['Reference'] = {'Matrix': 'Main_Ctr_Ctrl', 'Parent': None, 'Ctrls': ['Main_Ctr_Ctrl']}
+            hikNodes['Hips'] = {'Matrix': 'Hips_Ctr_Ctrl', 'Parent': 'Reference',
+                                'Ctrls': ['Hips_Ctr_Ctrl', 'Torso_Ctr_Ctrl']}
+            hikNodes['Spine'] = {'Matrix': 'Spine1_Ctr_Ctrl', 'Parent': 'Hips', 'Ctrls': ['Spine1_Ctr_Ctrl']}
+            hikNodes['Spine1'] = {'Matrix': 'Spine2_Ctr_Ctrl', 'Parent': 'Spine', 'Ctrls': ['Spine2_Ctr_Ctrl']}
+            hikNodes['Spine2'] = {'Matrix': 'Spine3_Ctr_Ctrl', 'Parent': 'Spine1', 'Ctrls': ['Spine3_Ctr_Ctrl']}
+
+            hikNodes['Spine3'] = {'Matrix': 'Chest_Ctr_Ctrl', 'Parent': 'Spine2', 'Ctrls': ['Chest_Ctr_Ctrl']}
+            hikNodes['Neck'] = {'Matrix': 'Neck_Ctr_Ctrl', 'Parent': 'Spine3', 'Ctrls': ['Neck_Ctr_Ctrl']}
+
+            hikNodes['Head'] = {'Matrix': 'Head_Ctr_Ctrl', 'Parent': 'Neck', 'Ctrls': ['Head_Ctr_Ctrl']}
+
+            hikNodes['LeftUpLeg'] = {'Matrix': 'LegUp_Lft_Guide', 'Parent': 'Hips', 'Ctrls': []}
+            hikNodes['LeftLeg'] = {'Matrix': 'LegLo_Lft_Guide', 'Parent': 'LeftUpLeg', 'Ctrls': ['LegPole_IK_Lft_Ctrl']}
+            hikNodes['LeftFoot'] = {'Matrix': 'Foot_Lft_Guide', 'Parent': 'LeftLeg',
+                                    'Ctrls': ['Foot_IK_Lft_Ctrl', 'Heel_IK_Lft_Ctrl', 'FootLift_IK_Lft_Ctrl']}
+            hikNodes['LeftToeBase'] = {'Matrix': 'Toes_IK_Lft_Ctrl', 'Parent': 'LeftFoot',
+                                       'Ctrls': ['Toes_IK_Lft_Ctrl', 'ToesTip_IK_Lft_Ctrl']}
+
+            hikNodes['RightUpLeg'] = {'Matrix': 'LegUp_Rgt_Guide', 'Parent': 'Hips', 'Ctrls': []}
+            hikNodes['RightLeg'] = {'Matrix': 'LegLo_Rgt_Guide', 'Parent': 'RightUpLeg', 'Ctrls': ['LegPole_IK_Rgt_Ctrl']}
+            hikNodes['RightFoot'] = {'Matrix': 'Foot_Rgt_Guide', 'Parent': 'RightLeg',
+                                     'Ctrls': ['Foot_IK_Rgt_Ctrl', 'Heel_IK_Rgt_Ctrl', 'FootLift_IK_Rgt_Ctrl']}
+            hikNodes['RightToeBase'] = {'Matrix': 'Toes_IK_Rgt_Ctrl', 'Parent': 'RightFoot',
+                                        'Ctrls': ['Toes_IK_Rgt_Ctrl', 'ToesTip_IK_Rgt_Ctrl']}
+
+            hikNodes['LeftShoulder'] = {'Matrix': 'Clavicle_Lft_Ctrl', 'Parent': 'Spine3', 'Ctrls': ['Clavicle_Lft_Ctrl']}
+            hikNodes['LeftArm'] = {'Matrix': 'ArmUp_FK_Lft_Ctrl', 'Parent': 'LeftShoulder', 'Ctrls': ['ArmUp_FK_Lft_Ctrl']}
+            hikNodes['LeftForeArm'] = {'Matrix': 'ArmLo_FK_Lft_Ctrl', 'Parent': 'LeftArm', 'Ctrls': ['ArmLo_FK_Lft_Ctrl']}
+            hikNodes['LeftHand'] = {'Matrix': 'Hand_FK_Lft_Ctrl', 'Parent': 'LeftForeArm', 'Ctrls': ['Hand_FK_Lft_Ctrl']}
+            hikNodes['LeftFingerBase'] = {'Matrix': 'Palm_Lft_Jnt', 'Parent': 'LeftHand', 'Ctrls': []}
+
+            hikNodes['RightShoulder'] = {'Matrix': 'Clavicle_Rgt_Ctrl', 'Parent': 'Spine3', 'Ctrls': ['Clavicle_Rgt_Ctrl']}
+            hikNodes['RightArm'] = {'Matrix': 'ArmUp_FK_Rgt_Ctrl', 'Parent': 'RightShoulder',
+                                    'Ctrls': ['ArmUp_FK_Rgt_Ctrl']}
+            hikNodes['RightForeArm'] = {'Matrix': 'ArmLo_FK_Rgt_Ctrl', 'Parent': 'RightArm', 'Ctrls': ['ArmLo_FK_Rgt_Ctrl']}
+            hikNodes['RightHand'] = {'Matrix': 'Hand_FK_Rgt_Ctrl', 'Parent': 'RightForeArm', 'Ctrls': ['Hand_FK_Rgt_Ctrl']}
+            hikNodes['RightFingerBase'] = {'Matrix': 'Palm_Rgt_Jnt', 'Parent': 'RightHand', 'Ctrls': []}
+
+        elif type == kBipedUE:
+            # TODO HIK and joint names are based off the dict key, this needs to be separated
+            hikNodes['root']         = {'Matrix': 'root', 'Parent': None, 'Ctrls': ['Main_Ctr_Ctrl']}
+            hikNodes['pelvis']   = {'Matrix': 'pelvis', 'Parent': 'root', 'Ctrls': ['Torso_Ctr_Ctrl'] }
+            hikNodes['spine_01']     = {'Matrix': 'spine_01', 'Parent': 'pelvis', 'Ctrls': ['Spine1_Ctr_Ctrl'] }
+            hikNodes['spine_02']     = {'Matrix': 'spine_02', 'Parent': 'spine_01', 'Ctrls': ['Spine2_Ctr_Ctrl'] }
+            hikNodes['spine_03']     = {'Matrix': 'spine_03', 'Parent': 'spine_02', 'Ctrls': ['Spine3_Ctr_Ctrl'] }
+            hikNodes['spine_04']     = {'Matrix': 'spine_04', 'Parent': 'spine_03', 'Ctrls': ['Spine4_Ctr_Ctrl'] }
+            hikNodes['spine_05']     = {'Matrix': 'spine_05', 'Parent': 'spine_04', 'Ctrls': ['Spine5_Ctr_Ctrl'] }
+
+            hikNodes['neck_01']      = {'Matrix': 'neck_01', 'Parent': 'spine_05', 'Ctrls': ['Neck1_Ctr_Ctrl'] }
+            hikNodes['neck_02']      = {'Matrix': 'neck_02', 'Parent': 'neck_01', 'Ctrls': ['Neck2_Ctr_Ctrl'] }
+            hikNodes['head']         = {'Matrix': 'head', 'Parent': 'neck_02', 'Ctrls': ['Head_Ctr_Ctrl'] }
+
+            hikNodes['thigh_l']  = {'Matrix': 'thigh_l', 'Parent': 'pelvis', 'Ctrls': [] }
+            hikNodes['calf_l'] = {'Matrix': 'calf_l', 'Parent': 'thigh_l', 'Ctrls': ['LegPole_IK_Lft_Ctrl'] }
+            hikNodes['foot_l'] = {'Matrix': 'foot_l', 'Parent': 'calf_l',
+                                      'Ctrls': ['Foot_IK_Lft_Ctrl', 'Heel_IK_Lft_Ctrl', 'FootLift_IK_Lft_Ctrl'] }
+            hikNodes['ball_l'] = {'Matrix': 'ball_l', 'Parent': 'foot_l',
+                                       'Ctrls': ['Toes_IK_Lft_Ctrl', 'ToesTip_IK_Lft_Ctrl'] }
+
+            hikNodes['thigh_r'] = {'Matrix': 'thigh_r', 'Parent': 'pelvis', 'Ctrls': []}
+            hikNodes['calf_r']  = {'Matrix': 'calf_r', 'Parent': 'thigh_r', 'Ctrls': ['LegPole_IK_Rgt_Ctrl']}
+            hikNodes['foot_r']  = {'Matrix': 'foot_r', 'Parent': 'calf_r',
+                                      'Ctrls': ['Foot_IK_Rgt_Ctrl', 'Heel_IK_Rgt_Ctrl', 'FootLift_IK_Rgt_Ctrl'] }
+            hikNodes['ball_r'] = {'Matrix': 'ball_r', 'Parent': 'foot_r',
+                                        'Ctrls': ['Toes_IK_Rgt_Ctrl', 'ToesTip_IK_Rgt_Ctrl'] }
+
+            hikNodes['clavicle_l']   = {'Matrix': 'clavicle_l', 'Parent': 'spine_05', 'Ctrls': ['Clavicle_Lft_Ctrl'] }
+            hikNodes['upperarm_l']   = {'Matrix': 'upperarm_l', 'Parent': 'clavicle_l', 'Ctrls': ['ArmUp_FK_Lft_Ctrl'] }
+            hikNodes['lowerarm_l']   = {'Matrix': 'lowerarm_l', 'Parent': 'upperarm_l', 'Ctrls': ['ArmLo_FK_Lft_Ctrl'] }
+            hikNodes['hand_l']       = {'Matrix': 'hand_l', 'Parent': 'lowerarm_l', 'Ctrls': ['Hand_FK_Lft_Ctrl'] }
+
+            hikNodes['clavicle_r']  = {'Matrix': 'clavicle_r', 'Parent': 'spine_05', 'Ctrls': ['Clavicle_Rgt_Ctrl'] }
+            hikNodes['upperarm_r']  = {'Matrix': 'upperarm_r', 'Parent': 'clavicle_r', 'Ctrls': ['ArmUp_FK_Rgt_Ctrl'] }
+            hikNodes['lowerarm_r']  = {'Matrix': 'lowerarm_r', 'Parent': 'upperarm_r', 'Ctrls': ['ArmLo_FK_Rgt_Ctrl'] }
+            hikNodes['hand_r']      = {'Matrix': 'hand_r', 'Parent': 'lowerarm_r', 'Ctrls': ['Hand_FK_Rgt_Ctrl'] }
+
+            for i in range(2):
+
+                for finger in ['index', 'middle', 'ring', 'pinky']:
+
+                    hikNodes[ finger+'_metacarpal_'+side[i] ] = {
+                        'Matrix': finger+'_metacarpal_'+side[i],
+                        'Parent': 'hand_'+side[i],
+                        'Ctrls': [finger+'Meta_'+SIDE[i]+'_Ctrl']
+                    }
+
+                    for j in range(1,4):
+                        index = str(j)
+                        if j == 1:
+                            parent = finger+'_metacarpal_'+side[i]
+                        else:
+                            parent = finger+'_0'+str(j-1)+'_'+side[i]
+
+                        hikNodes[finger+'_0'+index+'_'+side[i]] = {
+                            'Matrix': finger+'_0'+index+'_'+side[i],
+                            'Parent': parent,
+                            'Ctrls': [finger+index+'_'+SIDE[i]+'_Ctrl'] }
+
+                finger = 'thumb'
+                for j in range(1,4):
+                    index = str(j)
+                    if j == 1:
+                        parent = 'hand_'+side[i]
+                    else:
+                        parent = finger+'_0'+str(j-1)+'_'+side[i]
+
+                    hikNodes[finger+'_0'+index+'_'+side[i]] = {
+                        'Matrix': finger+'_0'+index+'_'+side[i],
+                        'Parent': parent,
+                        'Ctrls': [finger+index+'_'+SIDE[i]+'_Ctrl']}
+
+        return hikNodes
+
     def build_mocap( self, *args ):
 
         if args:
@@ -4297,13 +4420,13 @@ class Char( Rig ):
         if char is None:
             mc.warning( 'aniMeta: No character specified, aborting mocap build.')
             return False
-        # Create Main Groups
-        #mainGrp = self.build_main_grps( char )
 
         rigNodes = {}
         hikJoints = {}
         prefix = 'hik:'
         suffix = '_Jnt'
+        if type == kBipedUE:
+            suffix = ''
         charName = 'hik_' + char
 
         offset_grp = self.find_node( char, 'Offset_Grp' )
@@ -4316,82 +4439,7 @@ class Char( Rig ):
         #
         # Create HIK Skeleton
 
-        hikNodes = {}
-
-        if type == kBiped:
-            hikNodes['Reference']  = {'Matrix': 'Main_Ctr_Ctrl', 'Parent': None, 'Ctrls': ['Main_Ctr_Ctrl']}
-            hikNodes['Hips']       = {'Matrix': 'Hips_Ctr_Ctrl', 'Parent': 'Reference',
-                                'Ctrls': ['Hips_Ctr_Ctrl', 'Torso_Ctr_Ctrl']}
-            hikNodes['Spine']      = {'Matrix': 'Spine1_Ctr_Ctrl', 'Parent': 'Hips', 'Ctrls': ['Spine1_Ctr_Ctrl']}
-            hikNodes['Spine1']     = {'Matrix': 'Spine2_Ctr_Ctrl', 'Parent': 'Spine', 'Ctrls': ['Spine2_Ctr_Ctrl']}
-            hikNodes['Spine2']     = {'Matrix': 'Spine3_Ctr_Ctrl', 'Parent': 'Spine1', 'Ctrls': ['Spine3_Ctr_Ctrl']}
-
-            hikNodes['Spine3']     = {'Matrix': 'Chest_Ctr_Ctrl', 'Parent': 'Spine2', 'Ctrls': ['Chest_Ctr_Ctrl']}
-            hikNodes['Neck']       = {'Matrix': 'Neck_Ctr_Ctrl', 'Parent': 'Spine3', 'Ctrls': ['Neck_Ctr_Ctrl']}
-
-            hikNodes['Head']       = {'Matrix': 'Head_Ctr_Ctrl', 'Parent': 'Neck', 'Ctrls': ['Head_Ctr_Ctrl']}
-
-            hikNodes['LeftUpLeg']  = {'Matrix': 'LegUp_Lft_Guide', 'Parent': 'Hips', 'Ctrls': []}
-            hikNodes['LeftLeg']    = {'Matrix': 'LegLo_Lft_Guide', 'Parent': 'LeftUpLeg', 'Ctrls': ['LegPole_IK_Lft_Ctrl']}
-            hikNodes['LeftFoot']   = {'Matrix': 'Foot_Lft_Guide', 'Parent': 'LeftLeg',
-                                    'Ctrls': ['Foot_IK_Lft_Ctrl', 'Heel_IK_Lft_Ctrl', 'FootLift_IK_Lft_Ctrl']}
-            hikNodes['LeftToeBase'] = {'Matrix': 'Toes_IK_Lft_Ctrl', 'Parent': 'LeftFoot',
-                                       'Ctrls': ['Toes_IK_Lft_Ctrl', 'ToesTip_IK_Lft_Ctrl']}
-
-            hikNodes['RightUpLeg'] = {'Matrix': 'LegUp_Rgt_Guide', 'Parent': 'Hips', 'Ctrls': []}
-            hikNodes['RightLeg']   = {'Matrix': 'LegLo_Rgt_Guide', 'Parent': 'RightUpLeg', 'Ctrls': ['LegPole_IK_Rgt_Ctrl']}
-            hikNodes['RightFoot']  = {'Matrix': 'Foot_Rgt_Guide', 'Parent': 'RightLeg',
-                                     'Ctrls': ['Foot_IK_Rgt_Ctrl', 'Heel_IK_Rgt_Ctrl', 'FootLift_IK_Rgt_Ctrl']}
-            hikNodes['RightToeBase'] = {'Matrix': 'Toes_IK_Rgt_Ctrl', 'Parent': 'RightFoot',
-                                        'Ctrls': ['Toes_IK_Rgt_Ctrl', 'ToesTip_IK_Rgt_Ctrl']}
-
-            hikNodes['LeftShoulder']   = {'Matrix': 'Clavicle_Lft_Ctrl', 'Parent': 'Spine3', 'Ctrls': ['Clavicle_Lft_Ctrl']}
-            hikNodes['LeftArm']        = {'Matrix': 'ArmUp_FK_Lft_Ctrl', 'Parent': 'LeftShoulder', 'Ctrls': ['ArmUp_FK_Lft_Ctrl']}
-            hikNodes['LeftForeArm']    = {'Matrix': 'ArmLo_FK_Lft_Ctrl', 'Parent': 'LeftArm', 'Ctrls': ['ArmLo_FK_Lft_Ctrl']}
-            hikNodes['LeftHand']       = {'Matrix': 'Hand_FK_Lft_Ctrl', 'Parent': 'LeftForeArm', 'Ctrls': ['Hand_FK_Lft_Ctrl']}
-            hikNodes['LeftFingerBase'] = {'Matrix': 'Palm_Lft_Jnt', 'Parent': 'LeftHand', 'Ctrls': []}
-
-            hikNodes['RightShoulder']  = {'Matrix': 'Clavicle_Rgt_Ctrl', 'Parent': 'Spine3', 'Ctrls': ['Clavicle_Rgt_Ctrl']}
-            hikNodes['RightArm']       = {'Matrix': 'ArmUp_FK_Rgt_Ctrl', 'Parent': 'RightShoulder', 'Ctrls': ['ArmUp_FK_Rgt_Ctrl']}
-            hikNodes['RightForeArm']   = {'Matrix': 'ArmLo_FK_Rgt_Ctrl', 'Parent': 'RightArm', 'Ctrls': ['ArmLo_FK_Rgt_Ctrl']}
-            hikNodes['RightHand']       = {'Matrix': 'Hand_FK_Rgt_Ctrl', 'Parent': 'RightForeArm', 'Ctrls': ['Hand_FK_Rgt_Ctrl']}
-            hikNodes['RightFingerBase'] = {'Matrix': 'Palm_Rgt_Jnt', 'Parent': 'RightHand', 'Ctrls': []}
-        elif type == kBipedUE:
-
-            hikNodes['Reference']  = {'Matrix': 'Main_Ctr_Ctrl', 'Parent': None, 'Ctrls': ['Main_Ctr_Ctrl']}
-            hikNodes['Hips']       = {'Matrix': 'Hips_Guide', 'Parent': 'Reference',
-                                      'Ctrls': ['Hips_Ctr_Ctrl', 'Torso_Ctr_Ctrl']}
-            hikNodes['Spine']      = {'Matrix': 'Spine1_Guide', 'Parent': 'Hips', 'Ctrls': ['Spine1_Ctr_Ctrl']}
-            hikNodes['Spine1']     = {'Matrix': 'Spine2_Guide', 'Parent': 'Spine', 'Ctrls': ['Spine2_Ctr_Ctrl']}
-            hikNodes['Spine2']     = {'Matrix': 'Spine3_Guide', 'Parent': 'Spine1', 'Ctrls': ['Spine3_Ctr_Ctrl']}
-
-            hikNodes['Neck']       = {'Matrix': 'Neck_Ctr_Ctrl', 'Parent': 'Spine2', 'Ctrls': ['Neck_Ctr_Ctrl']}
-
-            hikNodes['Head']       = {'Matrix': 'Head_Ctr_Ctrl', 'Parent': 'Neck', 'Ctrls': ['Head_Ctr_Ctrl']}
-
-            hikNodes['LeftUpLeg']  = {'Matrix': 'LegUp_Lft_Guide', 'Parent': 'Hips', 'Ctrls': []}
-            hikNodes['LeftLeg']    = {'Matrix': 'LegLo_Lft_Guide', 'Parent': 'LeftUpLeg', 'Ctrls': ['LegPole_IK_Lft_Ctrl']}
-            hikNodes['LeftFoot']   = {'Matrix': 'Foot_Lft_Guide', 'Parent': 'LeftLeg',
-                                      'Ctrls': ['Foot_IK_Lft_Ctrl', 'Heel_IK_Lft_Ctrl', 'FootLift_IK_Lft_Ctrl']}
-            hikNodes['LeftToeBase'] = {'Matrix': 'Toes_IK_Lft_Ctrl', 'Parent': 'LeftFoot',
-                                       'Ctrls': ['Toes_IK_Lft_Ctrl', 'ToesTip_IK_Lft_Ctrl']}
-
-            hikNodes['RightUpLeg'] = {'Matrix': 'LegUp_Rgt_Guide', 'Parent': 'Hips', 'Ctrls': []}
-            hikNodes['RightLeg']   = {'Matrix': 'LegLo_Rgt_Guide', 'Parent': 'RightUpLeg', 'Ctrls': ['LegPole_IK_Rgt_Ctrl']}
-            hikNodes['RightFoot']  = {'Matrix': 'Foot_Rgt_Guide', 'Parent': 'RightLeg',
-                                      'Ctrls': ['Foot_IK_Rgt_Ctrl', 'Heel_IK_Rgt_Ctrl', 'FootLift_IK_Rgt_Ctrl']}
-            hikNodes['RightToeBase'] = {'Matrix': 'Toes_IK_Rgt_Ctrl', 'Parent': 'RightFoot',
-                                        'Ctrls': ['Toes_IK_Rgt_Ctrl', 'ToesTip_IK_Rgt_Ctrl']}
-
-            hikNodes['LeftShoulder']   = {'Matrix': 'Clavicle_Lft_Ctrl', 'Parent': 'Spine2', 'Ctrls': ['Clavicle_Lft_Ctrl']}
-            hikNodes['LeftArm']        = {'Matrix': 'ArmUp_FK_Lft_Ctrl', 'Parent': 'LeftShoulder', 'Ctrls': ['ArmUp_FK_Lft_Ctrl']}
-            hikNodes['LeftForeArm']    = {'Matrix': 'ArmLo_FK_Lft_Ctrl', 'Parent': 'LeftArm', 'Ctrls': ['ArmLo_FK_Lft_Ctrl']}
-            hikNodes['LeftHand']       = {'Matrix': 'Hand_FK_Lft_Ctrl', 'Parent': 'LeftForeArm', 'Ctrls': ['Hand_FK_Lft_Ctrl']}
-
-            hikNodes['RightShoulder']  = {'Matrix': 'Clavicle_Rgt_Ctrl', 'Parent': 'Spine2', 'Ctrls': ['Clavicle_Rgt_Ctrl']}
-            hikNodes['RightArm']       = {'Matrix': 'ArmUp_FK_Rgt_Ctrl', 'Parent': 'RightShoulder', 'Ctrls': ['ArmUp_FK_Rgt_Ctrl']}
-            hikNodes['RightForeArm']   = {'Matrix': 'ArmLo_FK_Rgt_Ctrl', 'Parent': 'RightArm', 'Ctrls': ['ArmLo_FK_Rgt_Ctrl']}
-            hikNodes['RightHand']       = {'Matrix': 'Hand_FK_Rgt_Ctrl', 'Parent': 'RightForeArm', 'Ctrls': ['Hand_FK_Rgt_Ctrl']}
+        hikNodes = self.get_hik_data(type)
 
         joints = []
 
@@ -4413,12 +4461,21 @@ class Char( Rig ):
                 if not isinstance( m, om.MMatrix ):
                     mc.confirmDialog( m=node )
 
+                if 'RotOffset' in hikNodes[key]:
+                    rx = hikNodes[key]['RotOffset'][0]
+                    ry = hikNodes[key]['RotOffset'][1]
+                    rz = hikNodes[key]['RotOffset'][2]
+                    offset = om.MEulerRotation( math.radians( rx ), math.radians(ry), math.radians(rz))
+                    rot_offset = self.create_matrix(rotate=offset)
+                    m = rot_offset * m
+
                 self.set_matrix( joint, m  )   # set the transformation
+
             else:
                 mc.warning( 'aniMeta build mocap: Can not find node  ' +  hikNodes[key]['Matrix'] )
 
+
         mocap_grp  = self.find_node( char, 'Mocap_Grp' )
-        joint_grp  = self.find_node( char, 'Joint_Grp' )
 
         # Parent Joints
         for key in hikNodes.keys():
@@ -4431,10 +4488,18 @@ class Char( Rig ):
                 joint  = self.find_node( mocap_grp,  joint )
                 parent = self.find_node( mocap_grp,  parent ) # find the node
 
-                mc.parent(joint, parent)
+                m = self.get_matrix( joint, kWorld)
 
-        pairBlendTR = ['Hips', 'Reference', 'RightFoot', 'LeftFoot', 'LeftToeBase', 'RightToeBase']
+                joint = mc.parent(joint, parent)[0]
+                if type == kBipedUE:
+                    mc.setAttr(joint+'.jointOrient', 0,0,0)
+                    self.set_matrix(joint,m)
 
+        pairBlendTR = ['Reference', 'RightFoot', 'LeftFoot', 'LeftToeBase', 'RightToeBase']
+        if type == kBipedUE:
+            pairBlendTR = ['pelvis', 'root', 'foot_l', 'foot_r', 'ball_l', 'ball_r']
+
+        # Create Blend Constraints
         for key in hikNodes.keys():
             if 'Ctrls' in hikNodes[key]:
                 ctrls = hikNodes[key]['Ctrls']
@@ -4462,13 +4527,7 @@ class Char( Rig ):
                                                                                 parent=ctrl_parent,
                                                                                 ss=True,
                                                                                 name=self.short_name( ctrl ) + '_Cnst_Grp' )
-                                '''
-                                We need these earlier so it`s an option in the create handle method
-                                hikNodes[key]['Ctrl_Blnd_Grp'] = mc.createNode( 'transform',
-                                                                                parent=ctrl_parent,
-                                                                                ss=True,
-                                                                                name=ctrl + '_Blnd_Grp' )
-                                '''
+
                                 # Create Pairblend so we can dial the mocap effect in or out
                                 pb = ''
 
@@ -4493,58 +4552,26 @@ class Char( Rig ):
                                 mc.connectAttr( node + '.mocap', rev + '.ix' )
                                 mc.connectAttr( rev  + '.ox',    pb  + '.weight' )
 
-                                #parent = self.find_node( char, hikNodes[key]['Ctrl_Blnd_Grp'] )  # find the node
-                                #mc.parent( node, parent )
-
                                 joint    = self.find_node( mocap_grp, hikNodes[key]['Joint'] )  # find the node
                                 cnst_grp = self.find_node( char, hikNodes[key]['Ctrl_Cnst_Grp'] )  # find the node
 
                                 mc.parentConstraint( joint, cnst_grp, mo=True )
 
         # Reset the orientation to get a good T-Pose
-        # Is it good for Arm and Leg?
-        for joint in joints:
-            if 'RightShoulder' in joint or 'RightUpLeg' in joint:
-                mc.setAttr( joint + '.r', 0,0,0 )
-                mc.setAttr( joint + '.jo', 180,0,0 )
-            else:
-                mc.setAttr( joint + '.r', 0,0,0 )
-                mc.setAttr( joint + '.jo', 0,0,0 )
+        if type == kBiped:
+            for joint in joints:
+                if 'RightShoulder' in joint or 'RightUpLeg' in joint:
+                    mc.setAttr( joint + '.r', 0,0,0 )
+                    mc.setAttr( joint + '.jo', 180,0,0 )
+                else:
+                    mc.setAttr( joint + '.r', 0,0,0 )
+                    mc.setAttr( joint + '.jo', 0,0,0 )
 
         hikCharacter = mc.createNode("HIKCharacterNode", name=char+'_HIK')
         hikProperties = mc.createNode("HIKProperty2State", name=char + "_hikProperties")
         mc.connectAttr(hikProperties + ".message", hikCharacter + ".propertyState")
-        '''
-        prefix = ''
-        hikNodes = {}
 
-        hikNodes['Reference']         = 'Root_Jnt'
-        hikNodes['Hips']              = 'Hips_Jnt'
-        hikNodes['LeftUpLeg']         = 'LegUp_Lft_Jnt'
-        hikNodes['LeftLeg']           = 'LegLo_Lft_Jnt'
-        hikNodes['LeftFoot']          = 'Foot_Lft_Jnt'
-        hikNodes['RightUpLeg']        = 'LegUp_Rgt_Jnt'
-        hikNodes['RightLeg']          = 'LegLo_Rgt_Jnt'
-        hikNodes['RightFoot']         = 'Foot_Rgt_Jnt'
-        hikNodes['Spine']             = 'Spine1_Jnt'
-        hikNodes['LeftArm']           = 'ArmUp_Lft_Jnt'
-        hikNodes['LeftForeArm']       = 'ArmLo_Lft_Jnt'
-        hikNodes['LeftHand']          = 'Hand_Lft_Jnt'
-        hikNodes['RightArm']          = 'ArmUp_Rgt_Jnt'
-        hikNodes['RightForeArm']      = 'ArmLo_Rgt_Jnt'
-        hikNodes['RightHand']         = 'Hand_Rgt_Jnt'
-        hikNodes['Head']              = 'Head_Jnt'
-        hikNodes['LeftToeBase']       = 'Toes_Lft_Jnt'
-        hikNodes['RightToeBase']      = 'Toes_Rgt_Jnt'
-        hikNodes['LeftShoulder']      = 'Clavicle_Lft_Jnt'
-        hikNodes['RightShoulder']     = 'Clavicle_Rgt_Jnt'
-        hikNodes['Neck']              = 'Neck_Jnt'
-        hikNodes['LeftFingerBase']    = 'Palm_Lft_Jnt'
-        hikNodes['RightFingerBase']   = 'Palm_Rgt_Jnt'
-        hikNodes['Spine1']            = 'Spine2_Jnt'
-        hikNodes['Spine2']            = 'Spine3_Jnt'
-        hikNodes['Spine3']            = 'Chest_Jnt'
-        '''
+
         for key in hikNodes.keys():
 
             node = self.find_node(mocap_grp, hikNodes[key]['Joint'] )  # find the node
@@ -8211,7 +8238,7 @@ class Biped( Char ):
 
                     for k in range( 1, 5 ):
 
-                        if fingers[i] == 'Thumb' and k==4:
+                        if fingers[j] == 'Thumb' and k==4:
                             continue
 
                         finger_dict = {
@@ -8225,7 +8252,10 @@ class Biped( Char ):
                             'constraint':      self.kParent
                         }
                         if k == 1:
-                            finger_dict[ 'parent' ] = 'Hand_FK_' + SIDES[ i ] + '_Ctrl'
+                            if fingers[j] == 'Thumb':
+                                finger_dict[ 'parent' ] = 'Hand_FK_' + SIDES[ i ] + '_Ctrl'
+                            else:
+                                finger_dict['parent'] = fingers[ j ] +'Meta_' + SIDES[i] + '_Ctrl'
                         else:
                             finger_dict[ 'parent' ] = fingers[ j ] + str( k - 1 ) + '_' + SIDES[ i ] + '_Ctrl'
 
@@ -8234,6 +8264,23 @@ class Biped( Char ):
                             finger_dict[ 'constraintNode' ] = self.get_path( self.find_node( rootNode, name ))
 
                         handleDict[ fingers[ j ] + str( k ) + '_' + SIDES[ i ] + '_Ctrl' ] = finger_dict
+
+                if type == kBipedUE:
+
+                    for j in range(4):
+                        finger_dict = {
+                            'name': fingers[j] + 'Meta_' + SIDES[i] + '_Ctrl',
+                            'parent': 'Hand_FK_' + SIDES[ i ] + '_Ctrl',
+                            'matchTransform': fingers[j] + 'Meta_' + SIDES[i] + '_Guide',
+                            'color': colors[i],
+                            'shapeType': self.kSphere,
+                            'radius': 1.5,
+                            'constraintNode': fingers[j].lower()  +  '_metacarpal_' + sides[i],
+                            'maintainOffset': True,
+                            'constraint': self.kParent
+                        }
+                        handleDict[ fingers[ j ] + 'Meta_' + SIDES[ i ] + '_Ctrl' ] = finger_dict
+
 
                 handleDict[ 'LegUp_FK_' + SIDES[ i ] + '_Ctrl' ] = {
                     'name': 'LegUp_FK_' + SIDES[ i ] + '_Ctrl',
@@ -8370,6 +8417,9 @@ class Biped( Char ):
 
                 elif type == kBipedUE:
                     for finger in fingers:
+
+                        controlsList.append( finger+'Meta_'+SIDE+'_Ctrl' )
+
                         for i in range(1,4):
                             controlsList.append( finger+str(i)+'_'+SIDE+'_Ctrl' )
 
@@ -8821,7 +8871,6 @@ class Biped( Char ):
                     footJntFK_jnt_name  = footJnt.partialPathName().replace( '_' + SIDE, '_FK_' + SIDE )
                     toesJntFK_jnt_name  = toesJnt.partialPathName().replace( '_' + SIDE, '_FK_' + SIDE )
                 elif type == kBipedUE:
-                    print('UE')
                     # Proxy FK Joints
                     hipsJntFK_jnt_name  = hipsJnt.partialPathName() + '_FK'
                     legUpJntFK_jnt_name = legUpJnt.partialPathName().replace( '_' + side, '_FK_' + side )
@@ -8831,8 +8880,6 @@ class Biped( Char ):
 
                 if SIDE == 'Lft':
                     hipsJntFK  = joint_copy( hipsJnt,  hipsJntFK_jnt_name,  prx_grp     )
-                    #mc.rename( hipsJntFK, hipsJntFK_jnt_name, side )
-                    print(hipsJntFK, hipsJntFK_jnt_name, side )
                     save_for_cleanup( hipsJntFK.fullPathName() )
 
                 legUpJntFK = joint_copy( legUpJnt, legUpJntFK_jnt_name, hipsJntFK   )
@@ -10003,8 +10050,6 @@ class Model(Transform):
 
                 mc.setAttr( geo + '.aniMetaSymFile', fileName, type='string' )
 
-            else:
-                print('nope')
 
 
     def export_symmetry_ui( self, *args ):
@@ -11578,8 +11623,6 @@ class aniMetaSkinMirror( om.MPxCommand ):
                 # Loop over Vertices in +X
                 for i in range( len( vertexPlus ) ):
 
-                    #print i
-
                     if vertexMinus[ i ] is None:
                         mc.warning( 'aniMeta Mirror Skin: skipping vertex ', vertexPlus[ i ], ', no mirror match found.' )
                         warnUser = True
@@ -11781,7 +11824,7 @@ class aniMetaSkinMirror( om.MPxCommand ):
 
             for path in infs:
                 if path.partialPathName() == name:
-                    #print inf, name
+
                     mirrors.append( path )
                     match = True
 
