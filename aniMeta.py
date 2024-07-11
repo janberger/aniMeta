@@ -3601,7 +3601,7 @@ class Char( Rig ):
                            'Hips_Lft_upVec',
                            'Heel_Lft',
                            'thumb_01_l', 'thumb_02_l', 'thumb_03_l',
-                           #'index_metacarpal_l', 'middle_metacarpal_l', 'ring_metacarpal_l', 'pinky_metacarpal_l',
+                           'index_metacarpal_l', 'middle_metacarpal_l', 'ring_metacarpal_l', 'pinky_metacarpal_l',
                            'index_01_l', 'index_02_l', 'index_03_l',
                            'middle_01_l', 'middle_02_l', 'middle_03_l',
                            'ring_01_l', 'ring_02_l', 'ring_03_l',
@@ -3670,10 +3670,15 @@ class Char( Rig ):
 
                 attrList = [ 'sx', 'sy', 'sz', 'v' ]
 
-                rot_offset_1 = om.MEulerRotation( 0, math.radians(  90 ),math.radians(  -90 ) ).asMatrix()
-                rot_offset_2 = om.MEulerRotation( 0, math.radians(  90 ),math.radians(  0 ) ).asMatrix()
-                rot_offset_3 = om.MEulerRotation( math.radians(  90 ), math.radians(  0 ),math.radians( 0 ) ).asMatrix()
-                rot_offset_4 = om.MEulerRotation( math.radians(  180 ), math.radians( 0 ) ,math.radians( 0 ) ).asMatrix()
+                #rot_offset_1 = om.MEulerRotation( 0, math.radians(  90 ),math.radians(  -90 ) ).asMatrix()
+                #rot_offset_2 = om.MEulerRotation( 0, math.radians(  90 ),math.radians(  0 ) ).asMatrix()
+                #rot_offset_3 = om.MEulerRotation( math.radians(  90 ), math.radians(  0 ),math.radians( 0 ) ).asMatrix()
+                #rot_offset_4 = om.MEulerRotation( math.radians(  180 ), math.radians( 0 ) ,math.radians( 0 ) ).asMatrix()
+
+                rot_offset_1 = om.MMatrix()
+                rot_offset_2 = om.MMatrix()
+                rot_offset_3 = om.MMatrix()
+                rot_offset_4 = om.MMatrix()
 
                 #Should the Guide names be
                 ns = namespace
