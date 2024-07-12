@@ -3388,7 +3388,6 @@ class Char( Rig ):
 
     def build_guides(self, *args):
 
-        print('build_guides start')
 
         charRoot  = args[0]
         guideList = args[1]
@@ -3800,30 +3799,32 @@ class Char( Rig ):
 
                 guideDict = self.build_guides( charRoot, guideList, ctrlDict, guideDict, data, False )
 
+                # TODO: Find a better solution, the positions are wrong and it overwrites what the user may have done 
+
                 # Position heel guide manually, we don't have a joint for this one
-                heel_guide = self.find_node(charRoot, 'Heel_Lft_Guide')
-                foot_guide = self.find_node(charRoot, 'Foot_Lft_Guide')
-                mc.matchTransform( heel_guide, foot_guide)
-                mc.setAttr( heel_guide + '.ty', 0)
-                mc.xform(heel_guide, t=[0,0,-3], relative=True, objectSpace=True )
+                #heel_guide = self.find_node(charRoot, 'Heel_Lft_Guide')
+                #foot_guide = self.find_node(charRoot, 'Foot_Lft_Guide')
+                #mc.matchTransform( heel_guide, foot_guide)
+                #mc.setAttr( heel_guide + '.ty', 0)
+                #mc.xform(heel_guide, t=[0,0,-3], relative=True, objectSpace=True )
 
                 # Position shoulder_upVec
                 upvec_guide = self.find_node(charRoot, 'Shoulder_Lft_upVec_Guide')
-                shoulder_guide = self.find_node(charRoot, 'ArmUp_Lft_Guide')
-                mc.matchTransform( upvec_guide, shoulder_guide, position=True, rotation=False)
-                mc.xform(upvec_guide, t=[3,10,0], relative=True )
+                #shoulder_guide = self.find_node(charRoot, 'ArmUp_Lft_Guide')
+                #mc.matchTransform( upvec_guide, shoulder_guide, position=True, rotation=False)
+                #mc.xform(upvec_guide, t=[3,10,0], relative=True )
 
                 # Position toe_guide
-                toestip_guide = self.find_node(charRoot, 'ToesTip_Lft_Guide')
-                ball_guide = self.find_node(charRoot, 'Ball_Lft_Guide')
-                mc.matchTransform( toestip_guide, ball_guide )
-                mc.xform(toestip_guide, t=[0,0,10], relative=True, objectSpace=True )
+                #toestip_guide = self.find_node(charRoot, 'ToesTip_Lft_Guide')
+                #ball_guide = self.find_node(charRoot, 'Ball_Lft_Guide')
+                #mc.matchTransform( toestip_guide, ball_guide )
+                #mc.xform(toestip_guide, t=[0,0,10], relative=True, objectSpace=True )
 
                 # Position hips_guide
-                hipsupvec_guide = self.find_node(charRoot, 'Hips_Lft_upVec_Guide')
-                legup_guide = self.find_node(charRoot, 'LegUp_Lft_Guide')
-                mc.matchTransform( hipsupvec_guide, legup_guide )
-                mc.xform(hipsupvec_guide, t=[10,0,0], relative=True, objectSpace=True )
+                #hipsupvec_guide = self.find_node(charRoot, 'Hips_Lft_upVec_Guide')
+                #legup_guide = self.find_node(charRoot, 'LegUp_Lft_Guide')
+                #mc.matchTransform( hipsupvec_guide, legup_guide )
+                #mc.xform(hipsupvec_guide, t=[10,0,0], relative=True, objectSpace=True )
 
             if type == kBiped:
 
