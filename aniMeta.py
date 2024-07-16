@@ -1848,7 +1848,7 @@ class Rig( Transform ):
             target = matchTransform
 
         # If a constraint node is specified but not the constraint type, use parentConstraint as default
-        if constraintNode is not None:
+        if constraintNode is not None and constraint is None:
             constraint = self.kParent
 
         if constraint is not None and target is not None:
@@ -1858,8 +1858,9 @@ class Rig( Transform ):
                     mc.parentConstraint( ctrl_path.fullPathName(), target.fullPathName(), mo=maintainOffset)
                 except:
                     pass
-                
+
             if constraint == self.kAim:
+                print('maintainOffset', maintainOffset)
                 mc.aimConstraint( ctrl_path.fullPathName(), target.fullPathName(), mo=maintainOffset, upVector=upVec, aimVector=aimVec)
 
         mc.select( cl=True )
@@ -3387,8 +3388,8 @@ class Char( Rig ):
         super( Char, self ).__init__()
 
     def build_guides(self, *args):
-
-
+        print('\nbuild_guides\n', args)
+        print( mc.objExists( 'skin:pelvis' ))
         charRoot  = args[0]
         guideList = args[1]
         ctrlDict  = args[2]
@@ -3408,14 +3409,15 @@ class Char( Rig ):
 
         if guideList:
             for guide in guideList:
+                print( guide )
                 ctrlDict[ 'name' ] = guide[ 0 ]
                 ctrlDict[ 'matchTransform' ] = guide[ 1 ]
                 ctrlDict[ 'constraint' ] = self.kParent
 
-                #if len( guide ) > 4:
-                #    ctrlDict[ 'offsetMatrix' ] = guide[ 4 ]
-                #else:
-                #    ctrlDict['offsetMatrix'] = rot_offset.asMatrix()
+                if len( guide ) > 4: 
+                    ctrlDict[ 'offsetMatrix' ] = guide[ 4 ]
+                else:
+                    ctrlDict['offsetMatrix'] = rot_offset.asMatrix()
 
                 if guide[ 2 ] in guideDict:
                     ctrlDict[ 'parent' ] = guideDict[ guide[ 2 ] ]
@@ -3430,7 +3432,7 @@ class Char( Rig ):
                 # Create the Guide Control if it doesn`t exist, yet
                 if guide_ctrl is not None:
                     if mc.objExists( guide[1] ):
-                        mc.parentConstraint( guide[ 0 ], guide[ 1 ] )
+                        mc.parentConstraint( guide[ 0 ], guide[ 1 ]  )
                     # From now on we want an MDagPath
                     guide_ctrl = self.get_path( guide[ 0 ] )
                 else:
@@ -3617,7 +3619,7 @@ class Char( Rig ):
                            'Ear_Lft_Jnt', 'EarTip_Lft_Jnt'
                            ]
 
-            data = { }
+            data = {}
             data[ 'Type' ] = kBodyGuide
 
             for joint_lft in joints:
@@ -3669,15 +3671,15 @@ class Char( Rig ):
 
                 attrList = [ 'sx', 'sy', 'sz', 'v' ]
 
-                #rot_offset_1 = om.MEulerRotation( 0, math.radians(  90 ),math.radians(  -90 ) ).asMatrix()
-                #rot_offset_2 = om.MEulerRotation( 0, math.radians(  90 ),math.radians(  0 ) ).asMatrix()
-                #rot_offset_3 = om.MEulerRotation( math.radians(  90 ), math.radians(  0 ),math.radians( 0 ) ).asMatrix()
-                #rot_offset_4 = om.MEulerRotation( math.radians(  180 ), math.radians( 0 ) ,math.radians( 0 ) ).asMatrix()
+                rot_offset_1 = om.MEulerRotation( 0, math.radians(  90 ),math.radians(  -90 ) ).asMatrix()
+                rot_offset_2 = om.MEulerRotation( 0, math.radians(  90 ),math.radians(  0 ) ).asMatrix()
+                rot_offset_3 = om.MEulerRotation( math.radians(  90 ), math.radians(  0 ),math.radians( 0 ) ).asMatrix()
+                rot_offset_4 = om.MEulerRotation( math.radians(  180 ), math.radians( 0 ) ,math.radians( 0 ) ).asMatrix()
 
-                rot_offset_1 = om.MMatrix()
-                rot_offset_2 = om.MMatrix()
-                rot_offset_3 = om.MMatrix()
-                rot_offset_4 = om.MMatrix()
+                #rot_offset_1 = om.MMatrix()
+                #rot_offset_2 = om.MMatrix()
+                #rot_offset_3 = om.MMatrix()
+                #rot_offset_4 = om.MMatrix()
 
                 #Should the Guide names be
                 ns = namespace
@@ -3799,7 +3801,9 @@ class Char( Rig ):
 
                 guideDict = self.build_guides( charRoot, guideList, ctrlDict, guideDict, data, False )
 
-                # TODO: Find a better solution, the positions are wrong and it overwrites what the user may have done 
+                return
+
+                # TODO: Find a better solution, the positions are wrong and it overwrites what the user may have done
 
                 # Position heel guide manually, we don't have a joint for this one
                 #heel_guide = self.find_node(charRoot, 'Heel_Lft_Guide')
@@ -3809,7 +3813,7 @@ class Char( Rig ):
                 #mc.xform(heel_guide, t=[0,0,-3], relative=True, objectSpace=True )
 
                 # Position shoulder_upVec
-                upvec_guide = self.find_node(charRoot, 'Shoulder_Lft_upVec_Guide')
+                #upvec_guide = self.find_node(charRoot, 'Shoulder_Lft_upVec_Guide')
                 #shoulder_guide = self.find_node(charRoot, 'ArmUp_Lft_Guide')
                 #mc.matchTransform( upvec_guide, shoulder_guide, position=True, rotation=False)
                 #mc.xform(upvec_guide, t=[3,10,0], relative=True )
@@ -7913,7 +7917,9 @@ class Char( Rig ):
                         self.delete_mocap( charRoot )
 
                     # create guides
-                    self.build_body_guides( charRoot, type, namespace='skin:' )
+                    # for some reason the namespace fs up going from control to guide mode
+                    #self.build_body_guides( charRoot, type, namespace='skin:' )
+                    self.build_body_guides(charRoot, type )
 
                     om.MGlobal.displayInfo( 'aniMeta: ' + charRoot + ' is now in guide mode.' )
 
@@ -8595,8 +8601,6 @@ class Biped( Char ):
                     'Root_Ctr_Ctrl'
                 ]
 
-
-
             for SIDE in [ 'Lft', 'Rgt' ]:
                 controlsList.append( 'Foot_IK_'+SIDE+'_Ctrl'       )
                 controlsList.append( 'Heel_IK_'+SIDE+'_Ctrl'       )
@@ -8757,10 +8761,16 @@ class Biped( Char ):
                 eye_l_jnt = 'eye_l'
                 eye_r_jnt = 'eye_r'
 
-            eyes_grp = mc.createNode( 'transform', name='Eyes_Grp', parent= controls['Main_Ctr_Ctrl']  , ss=True )
+            eyes_grp = mc.createNode( 'transform', name='Eyes_Grp', parent= controls['Main_Ctr_Ctrl'], ss=True )
 
-            Eyes_Ctr_Ctrl = self.create_handle( name='Eyes_Ctr_Ctrl', matchTransform=self.find_node(rootNode, eye_l_jnt), parent = eyes_grp,
-                                         shapeType=self.kCube, green=1, red=1, width=3, height=3, depth=3,   character = rootNode, globalScale = True )
+            Eyes_Ctr_Ctrl = self.create_handle( name='Eyes_Ctr_Ctrl',
+                                                matchTransform=self.find_node(rootNode, eye_l_jnt),
+                                                parent = eyes_grp,
+                                                shapeType=self.kCube,
+                                                green=1, red=1,
+                                                width=3, height=3, depth=3,
+                                                character = rootNode,
+                                                globalScale = True )
 
             eye_ctrl_grp = mc.listRelatives( Eyes_Ctr_Ctrl.fullPathName(), p=True, pa=True )[0]
             mc.setAttr( eye_ctrl_grp + '.tx', l=0 )
@@ -8768,30 +8778,58 @@ class Biped( Char ):
 
             # Move the control to the centre
             mc.setAttr( eye_ctrl_grp + '.tx',  0 )
+            mc.setAttr( eye_ctrl_grp + '.r',  0,0,0 )
 
+            jnt = self.find_node(rootNode, eye_l_jnt)
+            Eyes_Lft_Ctrl = self.create_handle(name='Eye_Lft_Ctrl',
+                                               matchTransform=jnt,
+                                               parent=Eyes_Ctr_Ctrl.fullPathName(),
+                                               shapeType=self.kCube,
+                                               color=colors[0], width=2, height=2, depth=2,
+                                               character=rootNode,
+                                               globalScale=True,
+                                               constraint=self.kAim,
+                                               aimVec=(0,0,1),
+                                               upVec=(0,1,0),
+                                               maintainOffset=False)
 
-            Eyes_Lft_Ctrl = self.create_handle(name='Eye_Lft_Ctrl', matchTransform=self.find_node(rootNode, eye_l_jnt),   parent =  Eyes_Ctr_Ctrl.fullPathName()  ,
-                                         shapeType=self.kCube, color=colors[0], width=2, height=2, depth=2,   character = rootNode, globalScale = True,
-                                         constraint=self.kAim, aimVec=(0,0,1), upVec = (0,1,0), maintainOffset=True)
+            jnt = self.find_node(rootNode, eye_r_jnt)
+            Eyes_Rgt_Ctrl = self.create_handle(name='Eye_Rgt_Ctrl',
+                                               matchTransform=jnt,
+                                               parent=Eyes_Ctr_Ctrl.fullPathName(),
+                                               shapeType=self.kCube,
+                                               color=colors[1],
+                                               width=2, height=2, depth=2,
+                                               character=rootNode,
+                                               globalScale=True,
+                                               constraint=self.kAim,
+                                               aimVec=(0,0,1),
+                                               upVec=(0,1,0),
+                                               maintainOffset=False)
 
-            Eyes_Rgt_Ctrl = self.create_handle(name='Eye_Rgt_Ctrl', matchTransform=self.find_node(rootNode, eye_r_jnt),   parent = Eyes_Ctr_Ctrl.fullPathName() ,
-                                         shapeType=self.kCube, color=colors[1], width=2, height=2, depth=2,  character = rootNode, globalScale = True,
-                                         constraint=self.kAim, aimVec=(0,0,1), upVec = (0,1,0), maintainOffset=True )
+            # Move the center control forward
+            ty = mc.getAttr( eye_ctrl_grp + '.ty' )
+            mc.setAttr( eye_ctrl_grp+ '.tz', ty/3 )
 
             eye_ctrl_grp_l = mc.listRelatives( Eyes_Lft_Ctrl.fullPathName(), p=True, pa=True )[0]
             eye_ctrl_grp_r = mc.listRelatives( Eyes_Rgt_Ctrl.fullPathName(), p=True, pa=True )[0]
 
-            ty = mc.getAttr( eye_ctrl_grp + '.ty' )
-            mc.setAttr( eye_ctrl_grp+ '.tz', ty/3 )
+            for grp in [eye_ctrl_grp_l, eye_ctrl_grp_r]:
+                # zero out the rotation
+                mc.setAttr ( grp + '.rx', l=0 )
+                mc.setAttr ( grp + '.ry', l=0 )
+                mc.setAttr ( grp + '.rz', l=0 )
+                mc.setAttr ( grp + '.r', 0,0,0 )
 
-            # zero out the rotation on the right side
-            mc.setAttr ( eye_ctrl_grp_r + '.rx', l=0 )
-            mc.setAttr ( eye_ctrl_grp_r + '.ry', l=0 )
-            mc.setAttr ( eye_ctrl_grp_r + '.rz', l=0 )
-            mc.setAttr ( eye_ctrl_grp_r + '.r', 0,0,0 )
-            mc.setAttr ( eye_ctrl_grp_r + '.rx', l=1 )
-            mc.setAttr ( eye_ctrl_grp_r + '.ry', l=1 )
-            mc.setAttr ( eye_ctrl_grp_r + '.rz', l=1 )
+            # Lock and hide attributes
+            for attr in [ 'sx', 'sy', 'sz', 'v']:
+                mc.setAttr ( Eyes_Ctr_Ctrl .fullPathName()+ '.' + attr, l=1, k=0 )
+
+            for ctl in [Eyes_Lft_Ctrl.fullPathName(), Eyes_Rgt_Ctrl.fullPathName()]:
+                for attr in ['rx', 'ry', 'rz', 'sx', 'sy', 'sz', 'v']:
+                    mc.setAttr ( ctl + '.' + attr, l=1, k=0 )
+
+            print('Build EYE')
 
             mc.setAttr( eye_ctrl_grp + '.tx', l=1 )
             mc.setAttr( eye_ctrl_grp + '.tz', l=1 )
@@ -12607,7 +12645,7 @@ class AniMetaUI( MayaQWidgetDockableMixin, QWidget):
                 widget = wrapInstance( int( ptr ), QWidget )
             except:
                 pass
-            
+
         if widget is not None:
             char_list = None
             try:
@@ -13762,7 +13800,7 @@ class MainTab( QWidget ):
         self.button_Head.installEventFilter(self)
         self.button_Head.setContextMenuPolicy( Qt.CustomContextMenu)
         self.button_Head.customContextMenuRequested.connect( self.show_context_menu )
-        self.button_Head.setCursor( Qt.WhatsThisCursor ) 
+        self.button_Head.setCursor( Qt.WhatsThisCursor )
         self.button_Neck   = self.button_create( self.pickerLayout, 7, 7, self.yellow )
 
 
@@ -15498,7 +15536,7 @@ class LibTab(QWidget):
                 self.rig_path = path
 
             self.refresh( section )
- 
+
     def delete( self ):
         self.pose_container.deleteLater()
 
@@ -17621,15 +17659,15 @@ class Build( Rig ):
         print ('# aniMeta read start\n')
 
         print ('\naniMeta: read asset ', asset['assetName'], asset['assetVariant'])
-        metaAsset = {} 
-        metaAsset['asset'] = asset 
+        metaAsset = {}
+        metaAsset['asset'] = asset
         metaAsset['metaLayers'] = {}
 
         # Add general info to build so we can access the asset info during build time
         # buildList.append( 'AssetInfo')
         # buildDict[ 'AssetInfo' ] = print_asset( asset )
 
-        for layer in self.metaLayers: 
+        for layer in self.metaLayers:
 
             buildList     = []
             buildDict     = {}
@@ -17640,33 +17678,33 @@ class Build( Rig ):
             pathAssetClass = self.get_path ( asset, layer, type='rig' )
 
             #print 'pathAssetClass', pathAssetClass
-            
+
             # Get Meta Path
             metaPath = self.get_path ( asset, metaLayer=layer, type='meta' )
-            
+
             #print '\nMetaryx: reading metaPath ', metaPath
-            
+
             # redundant? fassetCassScriptsPath = os.path.join ( pathAssetClass, metaryx.scriptsPath )
             assetClassRigPath = os.path.join ( pathAssetClass,  self.rigFolder,  self.buildBlocksFile )
-                
+
             if os.path.isfile( assetClassRigPath ):
                 print ('\n\taniMeta: reading file ', assetClassRigPath, '\n')
-                
+
                 lines = []
-                
+
                 with open(assetClassRigPath, 'r') as f:
-                    lines = f.readlines() 
-                
+                    lines = f.readlines()
+
                 for line in lines:
-                    
-                    if '{' and '}' in line: 
-                       
+
+                    if '{' and '}' in line:
+
                         # Ignore Out-Commented lines
                         if '#{' in line:
                             continue
-                            
+
                         d = ast.literal_eval( line )
-                        
+
                         if type( d ) is dict :
 
                             buildType = 'default'
@@ -17676,7 +17714,7 @@ class Build( Rig ):
                                 buildType = d['buildType']
 
                             blockName = d['blockName']
-                            
+
                             #print '\t\taniMeta: reading block ', blockName
 
 
@@ -17779,7 +17817,7 @@ class Build( Rig ):
                         d=None
 
             if len ( buildList ) > 0:
-            
+
                 metaBlock = { 'buildList' : buildList, 'buildDict' : buildDict }
 
                 if len( buildListPost ):
@@ -17788,16 +17826,16 @@ class Build( Rig ):
 
                 # Get current dict
                 assetLayers = metaAsset['metaLayers']
-                
+
                 # Add a new block
-                assetLayers[metaPath] = metaBlock 
-                 
-                # Save in Meta Asset 
-                metaAsset['metaLayers'] = assetLayers 
-                            
-            
+                assetLayers[metaPath] = metaBlock
+
+                # Save in Meta Asset
+                metaAsset['metaLayers'] = assetLayers
+
+
             if layer == metaLayer:
-                break     
+                break
 
         print ('\n# aniMeta read end')
         print ('# ')
@@ -17811,7 +17849,7 @@ class Build( Rig ):
         #executeFile = False
         #printShell  = True
         #metaLayer = 'assetClass'
-        
+
         asset = metaAsset['asset']
         code = ''
         metaPath = self.get_path ( asset, metaLayer, type='meta' )
@@ -17820,15 +17858,15 @@ class Build( Rig ):
             mc.warning( 'aniMeta: asset has no metaLayers.')
             return None
 
-        metaPaths = metaAsset['metaLayers'].keys() 
+        metaPaths = metaAsset['metaLayers'].keys()
         metaPaths.sort( key=len )
-        
+
         buildFilePath = self.get_path ( asset, metaLayer, type='rig' )
 
         if not os.path.isdir( buildFilePath ):
             os.makedirs( buildFilePath )
 
-        
+
         buildFilePath = os.path.join( buildFilePath,  asset['assetName'] + '_' + asset['assetVariant'] +'.py' )
 
         print ('\n#######################################################################################################################')
@@ -17841,7 +17879,7 @@ class Build( Rig ):
         print ('\tMeta Layer       ', metaLayer)
         print ('\tMeta Path        ', metaPath)
         print ('\tBuild File Path  ', buildFilePath)
-        
+
         code = ''
         code += '####################################################################################\n'
         code += '# Global Asset Info\n'
@@ -17922,7 +17960,7 @@ class Build( Rig ):
 
         if printShell:
             print (code)
-            
+
         if writeFile:
             try:
                 with open(buildFilePath, 'w') as file_obj:
@@ -17932,7 +17970,7 @@ class Build( Rig ):
             except:
                 print ('aniMeta: there was a problem saving the build file to ',  buildFilePath)
                 pass
-                
+
         if executeFile:
             try:
                 print ("\nExecuting build file:          ",  buildFilePath)
@@ -17944,7 +17982,7 @@ class Build( Rig ):
                 print ('\naniMeta: there was a problem executing the build file ')
                 print (e)
                 locals()[e.message.split("'")[1]] = 0
-                pass 
+                pass
         if saveFile == True:
             path = os.path.join(  self.get_path( asset, 'assetVariant', type='asset'  ), 'Rig'  )
             filePath = os.path.join(  path, asset['assetName'] + '_' + asset['assetVariant'] + '.ma'  )
@@ -17983,18 +18021,18 @@ class Build( Rig ):
             path = ''
         for layer in self.metaLayers:
             if layer in asset:
-                
+
                 if type == 'rig' or type == 'asset':
                     path = os.path.join( path, asset[layer] )
-                    
+
                 if type == 'meta':
-                    path += '|' + asset[layer]  
-                    
+                    path += '|' + asset[layer]
+
                 if layer == metaLayer:
                     break
             else:
-                break  
-        return path         
+                break
+        return path
 
 
     def get_asset_path( self, assetDict, asset=False ):
