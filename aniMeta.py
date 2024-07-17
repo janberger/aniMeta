@@ -329,8 +329,12 @@ class AniMeta( object ):
         dict[ 'fileName' ] = mc.file( q = True, sceneName = True )
         dict[ 'maya' ]     = mc.about( version = True )
         dict[ 'aniMeta' ]  = kPluginVersion
+        dict[ 'upAxis' ]   = self.get_up_axis()
 
         return dict
+
+    def get_up_axis(self):
+        return mc.upAxis( q=True, axis=True )
 
     def match_metaData( self, node = 'myNode', dict = None ):
         '''
@@ -1860,7 +1864,6 @@ class Rig( Transform ):
                     pass
 
             if constraint == self.kAim:
-                print('maintainOffset', maintainOffset)
                 mc.aimConstraint( ctrl_path.fullPathName(), target.fullPathName(), mo=maintainOffset, upVector=upVec, aimVector=aimVec)
 
         mc.select( cl=True )
@@ -3389,7 +3392,6 @@ class Char( Rig ):
 
     def build_guides(self, *args):
         print('\nbuild_guides\n', args)
-        print( mc.objExists( 'skin:pelvis' ))
         charRoot  = args[0]
         guideList = args[1]
         ctrlDict  = args[2]
@@ -3409,7 +3411,6 @@ class Char( Rig ):
 
         if guideList:
             for guide in guideList:
-                print( guide )
                 ctrlDict[ 'name' ] = guide[ 0 ]
                 ctrlDict[ 'matchTransform' ] = guide[ 1 ]
                 ctrlDict[ 'constraint' ] = self.kParent
@@ -5146,6 +5147,12 @@ class Char( Rig ):
         ui.char_list_refresh()
 
         print ( 'aniMeta: Guide rig completed.' )
+
+        # If Z is up, rotate root Node
+        if self.get_up_axis() == 'z':
+            mc.setAttr( rootNode + '.rx', l=False )
+            mc.setAttr( rootNode + '.rx', 90 )
+            mc.setAttr( rootNode + '.rx', l=True )
 
         return rootNode
 
@@ -7941,6 +7948,12 @@ class Char( Rig ):
 
                 elif rigState == kRigStateGuide:
 
+                    # If Z is up, rotate root Node
+                    if self.get_up_axis() == 'z':
+                        mc.setAttr(charRoot + '.rx', l=False)
+                        mc.setAttr(charRoot + '.rx', 0)
+                        mc.setAttr(charRoot + '.rx', l=True)
+
                     # delete guides
                     # Dont delete the actual guides because we need them for rigging
                     self.delete_body_guides( charRoot, deleteOnlyConstraints=True )
@@ -7996,6 +8009,11 @@ class Char( Rig ):
                                         else:
                                             mc.warning( 'Not connected:', src, dst )
 
+                    # If Z is up, rotate root Node
+                    if self.get_up_axis() == 'z':
+                        mc.setAttr(charRoot + '.rx', l=False)
+                        mc.setAttr(charRoot + '.rx', 90)
+                        mc.setAttr(charRoot + '.rx', l=True)
 
                     mc.undoInfo( closeChunk = True )
 
@@ -8019,7 +8037,7 @@ class Biped( Char ):
     def __init__(self):
         super( Biped, self ).__init__()
 
-        self.DEBUG = True
+        self.DEBUG = False
 
     def build_control_rig( self, *args ):
 
@@ -8829,7 +8847,6 @@ class Biped( Char ):
                 for attr in ['rx', 'ry', 'rz', 'sx', 'sy', 'sz', 'v']:
                     mc.setAttr ( ctl + '.' + attr, l=1, k=0 )
 
-            print('Build EYE')
 
             mc.setAttr( eye_ctrl_grp + '.tx', l=1 )
             mc.setAttr( eye_ctrl_grp + '.tz', l=1 )
@@ -16738,6 +16755,12 @@ class LibTab(QWidget):
 
             mc.progressWindow( e = True, pr = 20 )
 
+            if self.am.get_up_axis() == 'z':
+                mc.setAttr(char + '.rx', l=False)
+                mc.setAttr(char + '.rx', 0)
+                mc.setAttr(char + '.rx', l=True)
+
+
             ###############################################################################
             #
             #   Reset joints to default and apply data from dict
@@ -16795,6 +16818,7 @@ class LibTab(QWidget):
             # The guides are needed for building the control rig
             _char_.build_body_guides( char, type, namespace='skin:' )
 
+
             mc.progressWindow( e = True, pr = 60 )
 
             # Build the control rig
@@ -16836,6 +16860,12 @@ class LibTab(QWidget):
             om.MGlobal.displayInfo('aniMeta: Rig preset loaded successfully.')
 
             mc.progressWindow( ep = True )
+
+
+            if self.am.get_up_axis() == 'z':
+                mc.setAttr(char + '.rx', l=False)
+                mc.setAttr(char + '.rx', 90)
+                mc.setAttr(char + '.rx', l=True)
 
             mc.undoInfo( closeChunk=True )
         print( 'rig_import end' )
