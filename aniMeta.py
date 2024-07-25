@@ -1440,6 +1440,8 @@ class Rig( Transform ):
 
         if char is not None:
 
+            mm.eval('timeSliderCopyKey()')
+
             if handle_mode == 1:
                 handles = Rig().get_char_handles( char, { 'Type': kHandle, 'Side': kAll } )
             else:
@@ -1614,6 +1616,8 @@ class Rig( Transform ):
         scale = 1.0
         rotateOrder = kXYZ
         showRotateOrder = False
+        mirror = None
+        mirrorNode = None
 
         if 'name' in kwargs:
             name = kwargs['name']
@@ -1675,6 +1679,10 @@ class Rig( Transform ):
             showRotateOrder = kwargs[ 'showRotateOrder' ]
         if 'color' in kwargs:
             color = kwargs['color']
+        if 'mirror' in kwargs:
+            mirror = kwargs['mirror']
+        if 'mirrorNode' in kwargs:
+            mirrorNode = kwargs['mirrorNode']
 
         name = self.short_name( name )
 
@@ -1826,18 +1834,29 @@ class Rig( Transform ):
 
         mc.rename( ctrl_path.fullPathName(), name)
 
+        mc.setAttr( ctrl_path.fullPathName() + '.rotateOrder', rotateOrder)
+
         if matchTransform is not None:
 
             m = offsetMatrix * self.get_matrix( matchTransform, kWorld )
 
-            if createGrp:
-                self.set_matrix( grp, m )
+            self.set_matrix(ctrl_path.fullPathName(), m)
+        '''
+        if mirror is not None and mirrorNode is not None:
+
+            m = self.get_matrix(mirrorNode, space=kWorld)
+            m = self.mirror_matrix(m, mirror, space=kWorld)
+
+            self.print_matrix(m, mirrorNode)
+
+            if grp is not None:
+                self.set_matrix(grp, m, space=kWorld)
             else:
-                self.set_matrix(ctrl_path.fullPathName(), m)
+                self.set_matrix(ctrl_path.fullPathName(), m, space=kWorld)
+        '''
         if showRotateOrder == True:
             mc.setAttr( ctrl_path.fullPathName() + '.rotateOrder', k=True)
 
-        mc.setAttr( ctrl_path.fullPathName() + '.rotateOrder', rotateOrder)
 
         # Turn off rendering attributes
         for attr in [ "castsShadows",  "receiveShadows", "motionBlur", "primaryVisibility",
@@ -1850,6 +1869,7 @@ class Rig( Transform ):
                 grp = mc.parent( grp, parent.fullPathName() )[0]
             else:
                 mc.parent( ctrl_path.fullPathName(), parent.fullPathName())[0]
+
         target = constraintNode
 
         # Is this good? Not Really in the case of Hips UpVector Control
@@ -2799,6 +2819,8 @@ class Rig( Transform ):
         else:
             mc.warning( "aniMeta Mirror: Please select two transforms or joints to mirror." )
 
+
+
     def mocap_bake(self ):
 
         at = Transform()
@@ -3183,8 +3205,9 @@ class Rig( Transform ):
 
                     for attr in ik_dict[ik].keys():
                         mc.setAttr(node + '.' + attr, ik_dict[opposite][attr])
+
             if mode == 'all':
-                self.flip_tangents( )
+                self.flip_tangents()
             if mode == 'sel':
                 self.flip_tangents( handles_Ctr+ handles_Rgt+ handles_Lft )
 
@@ -3238,45 +3261,59 @@ class Rig( Transform ):
                 for attr in attrs:
                     if attr in mirror:
                         # Query Angles and lock
-                        try:
-                            if 'Lft' in node:
-                                node_mirror = node.replace('Lft', 'Rgt')
-                            elif 'Rgt' in node:
-                                node_mirror = node.replace('Rgt', 'Lft')
-                            else:
-                                node_mirror = node
+                        #try:
+                        if 'Lft' in node:
+                            node_mirror = node.replace('Lft', 'Rgt')
+                        elif 'Rgt' in node:
+                            node_mirror = node.replace('Rgt', 'Lft')
+                        else:
+                            node_mirror = node
 
-                            node        = self.find_node( char, node )
-                            node_mirror = self.find_node( char, node_mirror )
+                        node        = self.find_node( char, node )
+                        node_mirror = self.find_node( char, node_mirror )
 
-                            meta = self.get_metaData( node )
+                        meta = self.get_metaData( node )
 
-                            inv=False
+                        inv=False
 
-                            if 'Mirror' in meta:
-                                type = meta['Mirror']
+                        if 'Mirror' in meta:
+                            type = meta['Mirror']
 
-                                if type == kBasic:
-                                    if attr in [ 'translateX', 'rotateZ', 'rotateY']:
-                                        inv=True
+                            if type == kBasic:
+                                if attr in [ 'translateX', 'rotateZ', 'rotateY']:
+                                    inv=True
 
-                            in_angle  = mc.keyTangent(node_mirror, attribute=attr, query=True, inAngle=True,  time=(current, current))[0]
-                            out_angle = mc.keyTangent(node_mirror, attribute=attr, query=True, outAngle=True, time=(current, current))[0]
-                            lock      = mc.keyTangent(node_mirror, attribute=attr, query=True, lock=True,     time=(current, current))[0]
+                        in_angle  = mc.keyTangent(node_mirror, attribute=attr, query=True, inAngle=True,  time=(current, current))
+                        out_angle = mc.keyTangent(node_mirror, attribute=attr, query=True, outAngle=True, time=(current, current))
+                        lock      = mc.keyTangent(node_mirror, attribute=attr, query=True, lock=True,     time=(current, current))
 
-                            if inv:
-                                in_angle *= -1
-                                out_angle *= -1
+                        if in_angle is None:
+                            continue
 
-                            cmd += 'keyTangent -edit -attribute '+attr+' -time "'+str(current)+':'+str(current)+'" -lock 0 '+node+';\n'
-                            cmd += 'keyTangent -edit -attribute '+attr+' -time "'+str(current)+':'+str(current)+'" -ia '+str(in_angle)+' -oa '+str(out_angle)+' '+node+';\n'
-                            cmd += 'keyTangent -edit -attribute '+attr+' -time "'+str(current)+':'+str(current)+'" -lock '+str(int(lock))+' '+node+';\n'
+                        in_angle = in_angle[0]
+                        out_angle = out_angle[0]
+                        lock = lock[0]
 
-                        except:
-                            pass
+                        #inv = True
+
+                        if inv:
+                            in_angle *= -1
+                            out_angle *= -1
+
+                        cmd += 'keyTangent -edit -attribute '+attr+' -time "'+str(current)+':'+str(current)+'" -lock 0 '+node+';\n'
+                        cmd += 'keyTangent -edit -attribute '+attr+' -time "'+str(current)+':'+str(current)+'" -ia '+str(in_angle)+' -oa '+str(out_angle)+' '+node+';\n'
+                        cmd += 'keyTangent -edit -attribute '+attr+' -time "'+str(current)+':'+str(current)+'" -lock '+str(int(lock))+' '+node+';\n'
+
+                        #except:
+                        #    print('there was an issue', node, attr)
+                        #    pass
 
             if len(cmd):
-                mm.eval( cmd )
+                try:
+                    mm.eval( cmd )
+                except:
+                    print('There was an issue flipping tangents')
+                    print( cmd )
 
     def swap_rotation_with_parent(self, node):
 
@@ -3415,7 +3452,8 @@ class Char( Rig ):
                 ctrlDict[ 'name' ] = guide[ 0 ]
                 ctrlDict[ 'matchTransform' ] =  guide[ 1 ]
                 if not 'skin:' in guide[ 1 ]:
-                    ctrlDict[ 'matchTransform' ] =  'skin:'+ guide[ 1 ]
+                    if mc.objExists( 'skin:'+ guide[ 1 ] ):
+                        ctrlDict[ 'matchTransform' ] =  'skin:'+ guide[ 1 ]
 
                 ctrlDict[ 'constraint' ] = self.kParent
                 ctrlDict['createGrp'] = False
@@ -8407,7 +8445,9 @@ class Biped( Char ):
                     'matchTransform': 'Clavicle_' + SIDES[ i ] + '_Guide',
                     'color': colors[ i ],
                     'size': [ 2, 2, 20 ],
-                    'offset': (3 * global_scale * multi[ i ], 0, 0)
+                    'offset': (3 * global_scale * multi[ i ], 0, 0),
+                    'mirror': kSymmetricRotation,
+                    'mirrorNode': 'Clavicle_Lft_Guide',
                 }
                 if type == kBipedUE:
                     handleDict[ 'Clavicle_' + SIDES[ i ] + '_Ctrl' ][ 'parent' ] = 'Spine5_Ctr_Ctrl'
@@ -10339,8 +10379,6 @@ class Model(Transform):
                 elif mc.nodeType( shape.fullPathName() ) == 'nurbsSurface':
                     surf_fn = om.MFnNurbsSurface( shape )
                     vtx_count = surf_fn.numCVsInU * surf_fn.numCVsInV
-
-
 
                 dict = {
                     'Meta': {}
@@ -13285,10 +13323,29 @@ class MainTab( QWidget ):
 
     def copy_pose( self ):
 
-        self.pose = self.rig.get_pose()
+        #self.pose = self.rig.get_pose()
+        rig = Rig()
+        sel = mc.ls(sl=True)
+        rig.get_handles(mode='select', side= kAll)
+        mm.eval('timeSliderCopyKey()')
+        mc.select(sel, r=True)
 
     def paste_pose( self ):
-        self.rig.set_pose( self.pose )
+        #self.rig.set_pose( self.pose )
+        rig = Rig()
+        sel = mc.ls(sl=True)
+        rig.get_handles(mode='select', side=kAll)
+        mm.eval('timeSliderPasteKey(false)')
+        mc.select(sel, r=True)
+
+    def paste_swap_pose( self ):
+        #self.rig.set_pose( self.pose )
+        rig = Rig()
+        sel = mc.ls(sl=True)
+        rig.get_handles(mode='select', side=kAll)
+        mm.eval('timeSliderPasteKey(false)')
+        rig.swap_pose(mode='all', symMode='swap')
+        mc.select(sel, r=True)
 
     def mocap_bake(self):
         Rig().mocap_bake()
@@ -13675,17 +13732,23 @@ class MainTab( QWidget ):
         self.button_key_sel.clicked.connect( partial ( self.rig.get_handles, mode='key', side=kSelection ) )
         self.set_style( self.button_key_sel )
 
-        self.button_pose_copy = self.button_create( self.pickerLayout, 39, 1,  self.red, 1, 5 )
-        self.button_pose_copy.setFixedWidth( five_units )
+        self.button_pose_copy = self.button_create( self.pickerLayout, 39, 1,  self.red, 1, 3 )
+        self.button_pose_copy.setFixedWidth( three_units )
         self.button_pose_copy.setText('Copy Pose')
         self.set_style( self.button_pose_copy )
         self.button_pose_copy.clicked.connect(  self.copy_pose )
 
-        self.button_pose_paste = self.button_create( self.pickerLayout, 39, 9,  self.red, 1, 5 )
-        self.button_pose_paste.setFixedWidth( five_units )
+        self.button_pose_paste = self.button_create( self.pickerLayout, 39, 6,  self.red, 1, 3 )
+        self.button_pose_paste.setFixedWidth( three_units )
         self.button_pose_paste.setText('Paste Pose')
         self.set_style( self.button_pose_paste )
         self.button_pose_paste.clicked.connect(  self.paste_pose )
+
+        self.button_pose_paste_swap = self.button_create( self.pickerLayout, 39, 11,  self.red, 1, 3 )
+        self.button_pose_paste_swap.setFixedWidth( three_units )
+        self.button_pose_paste_swap.setText('Paste & Swap')
+        self.set_style( self.button_pose_paste_swap )
+        self.button_pose_paste_swap.clicked.connect(  self.paste_swap_pose )
 
         self.button_mocap_on = self.button_create( self.pickerLayout, 40, 1,  self.red, 1, 3 )
         self.button_mocap_on.setFixedWidth( three_units )
@@ -16754,7 +16817,7 @@ class LibTab(QWidget):
                     if not 'Blend' in key and not 'Aux' in key:
 
                         joint = self.am.find_node(char, ns+key)
-                        print( 'joint', joint )
+
                         if joint is None:
                             if 'parent' in data['joints'][key]:
                                 parent = self.am.find_node(char, ns+data['joints'][key]['parent'] )
