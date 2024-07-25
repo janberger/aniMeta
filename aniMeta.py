@@ -1832,6 +1832,8 @@ class Rig( Transform ):
 
             if createGrp:
                 self.set_matrix( grp, m )
+            else:
+                self.set_matrix(ctrl_path.fullPathName(), m)
         if showRotateOrder == True:
             mc.setAttr( ctrl_path.fullPathName() + '.rotateOrder', k=True)
 
@@ -1843,8 +1845,11 @@ class Rig( Transform ):
             mc.setAttr( ctrl_path.fullPathName() + '.' + attr, False )
 
         if parent is not None:
-            grp = mc.parent( grp, parent.fullPathName() )[0]
 
+            if createGrp:
+                grp = mc.parent( grp, parent.fullPathName() )[0]
+            else:
+                mc.parent( ctrl_path.fullPathName(), parent.fullPathName())[0]
         target = constraintNode
 
         # Is this good? Not Really in the case of Hips UpVector Control
@@ -1858,10 +1863,7 @@ class Rig( Transform ):
         if constraint is not None and target is not None:
 
             if constraint == self.kParent:
-                try:
-                    mc.parentConstraint( ctrl_path.fullPathName(), target.fullPathName(), mo=maintainOffset)
-                except:
-                    pass
+                mc.parentConstraint( ctrl_path.fullPathName(), target.fullPathName(), mo=maintainOffset)
 
             if constraint == self.kAim:
                 mc.aimConstraint( ctrl_path.fullPathName(), target.fullPathName(), mo=maintainOffset, upVector=upVec, aimVector=aimVec)
@@ -3391,7 +3393,6 @@ class Char( Rig ):
         super( Char, self ).__init__()
 
     def build_guides(self, *args):
-        print('\nbuild_guides\n', args)
         charRoot  = args[0]
         guideList = args[1]
         ctrlDict  = args[2]
@@ -3412,8 +3413,13 @@ class Char( Rig ):
         if guideList:
             for guide in guideList:
                 ctrlDict[ 'name' ] = guide[ 0 ]
-                ctrlDict[ 'matchTransform' ] = guide[ 1 ]
+                ctrlDict[ 'matchTransform' ] =  guide[ 1 ]
+                if not 'skin:' in guide[ 1 ]:
+                    ctrlDict[ 'matchTransform' ] =  'skin:'+ guide[ 1 ]
+
                 ctrlDict[ 'constraint' ] = self.kParent
+                ctrlDict['createGrp'] = False
+
 
                 if len( guide ) > 4: 
                     ctrlDict[ 'offsetMatrix' ] = guide[ 4 ]
@@ -3449,55 +3455,22 @@ class Char( Rig ):
                         parent_rgt = ctrlDict[ 'parent' ]
 
                         if 'Lft' in ctrlDict[ 'parent' ].partialPathName():
-                            #parent_rgt = ctrlDict[ 'parent' ].fullPathName().replace( 'Lft', 'Rgt')
                             parent_rgt = self.short_name( ctrlDict[ 'parent' ].fullPathName() ).replace( 'Lft', 'Rgt')
                             parent_rgt = self.find_node( charRoot, parent_rgt )
                             parent_rgt = self.get_path( parent_rgt )
 
-                        #######################################################################################
-                        # Create right side guide groups and symConstraints
-                        # To make symConstraints work, we need to create them for the guides and their parents
-                        # in this section we create additional transforms above the right side guides
-
-                        # Get the parent
-                        parent_grp_lft = mc.listRelatives( guide_ctrl.fullPathName(), p=True )[0]
-
-                        #if self.short_name(parent_rgt) != 'Guides_Body_Grp':
-
-                        # Get the short name
-                        parent_grp_lft_short = self.short_name( parent_grp_lft )
-
-                        # Get the right side version of this name
-                        parent_grp_rgt_short = parent_grp_lft_short.replace( 'Lft', 'Rgt' )
-
-                        # Get the parent`s parent of this group so we can parent the new group
-                        grandparent_grp_lft = mc.listRelatives( parent_grp_lft, p=True, pa=True )[0]
-
-                        # Get the short name of the grandparent
-                        grandparent_grp_lft_short = self.short_name( grandparent_grp_lft )
-
-                        # Get the right side version of this name
-                        grandparent_grp_rgt_short = grandparent_grp_lft_short.replace( 'Lft', 'Rgt' )
-
-                        # Get the long DAG path
-                        grandparent_grp_rgt = self.find_node( charRoot, grandparent_grp_rgt_short )
-
-                        parent_rgt_node = mc.createNode( 'transform', name=parent_grp_rgt_short, parent=grandparent_grp_rgt, ss=True )
+                        rgt_node = mc.createNode('transform', name=rgt_name, parent=parent_rgt, ss=True)
 
                         # Add an offset matrix to first nodes off the centre to make the symConstraints work with standard transforms, the offset is 180 on rx
-                        if not 'Lft' in grandparent_grp_lft_short:
+                        if not 'Lft' in  guide_ctrl.fullPathName():
                             offset_matrix = [1.0, 0.0, 0.0, 0.0, 0.0, -1, 0.0, 0.0, 0.0, 0.0, -1, 0.0, 0.0, 0.0, 0.0, 1.0]
 
-                            mc.setAttr(  parent_rgt_node+ '.offsetParentMatrix', offset_matrix, typ='matrix')
+                            mc.setAttr( rgt_node+ '.offsetParentMatrix', offset_matrix, typ='matrix')
 
-                        self.create_sym_constraint( parent_grp_lft , parent_rgt_node )
+                        self.create_sym_constraint( guide_ctrl.fullPathName() , rgt_node )
 
                         # Create right side guide groups and symConstraints
                         #######################################################################################
-
-                        guide_rgt = mc.createNode( 'transform', name=rgt_name, parent=parent_rgt_node, ss=True )
-
-                        self.create_sym_constraint( guide_ctrl, guide_rgt )
 
                 guideDict[ ctrlDict[ 'name' ] ] = guide_ctrl
 
@@ -5195,6 +5168,7 @@ class Char( Rig ):
 
     def delete_body_guides( self, *args, **kwargs ):
 
+
         charRoot = self.get_active_char()
         deleteOnlyConstraints = False
         if args:
@@ -5203,6 +5177,7 @@ class Char( Rig ):
             if 'deleteOnlyConstraints' in kwargs:
                 deleteOnlyConstraints = kwargs['deleteOnlyConstraints']
 
+        print( 'delete_body_guides', deleteOnlyConstraints)
         delNodes = [ ]
         metaData = None
 
@@ -7816,7 +7791,7 @@ class Char( Rig ):
                 }
             }
 
-    def toggle_guides( self, *args ):
+    def toggle_mode(self, *args):
         '''
         Toggles the select character between guide and control rig mode.
         :return:
@@ -7880,6 +7855,7 @@ class Char( Rig ):
                 except:
                     pass
 
+                # Control >> Guides
                 if rigState == kRigStateControl:
 
                     handles = self.get_char_handles( charRoot, { 'Type': kHandle } )
@@ -7946,7 +7922,9 @@ class Char( Rig ):
 
                     return kRigStateGuide
 
+                # Guides >> Control
                 elif rigState == kRigStateGuide:
+                    print ( 'Guides >> Control')
 
                     # If Z is up, rotate root Node
                     if self.get_up_axis() == 'z':
@@ -7957,6 +7935,7 @@ class Char( Rig ):
                     # delete guides
                     # Dont delete the actual guides because we need them for rigging
                     self.delete_body_guides( charRoot, deleteOnlyConstraints=True )
+
 
                     # create control rig
                     if type == kBiped or type == kBipedUE:
@@ -8041,6 +8020,8 @@ class Biped( Char ):
 
     def build_control_rig( self, *args ):
 
+        print('build_control_rig')
+
         handleDict = {}
         controls   = {}          # Store the DAG Paths of created controls
         metaData   = {}
@@ -8052,6 +8033,7 @@ class Biped( Char ):
         sides = [ 'l', 'r' ]
         colors = [ [ 0, 0, 1 ], [ 1, 0, 0 ] ]
         multi = [ 1, -1 ]
+        ns = 'skin:'
 
         if len( args ):
             rootNode = args[0]
@@ -8509,7 +8491,7 @@ class Biped( Char ):
                             'color': colors[i],
                             'shapeType': self.kSphere,
                             'radius': 1.5,
-                            'constraintNode': fingers[j].lower()  +  '_metacarpal_' + sides[i],
+                            'constraintNode': ns+fingers[j].lower()  +  '_metacarpal_' + sides[i],
                             'maintainOffset': True,
                             'constraint': self.kParent
                         }
@@ -13059,12 +13041,12 @@ class MainTab( QWidget ):
 
     def guides_mode( self ):
 
-        Char().toggle_guides()
+        Char().toggle_mode()
         self.pickerWidget.setEnabled( False )
 
     def controls_mode( self ):
 
-        Char().toggle_guides()
+        Char().toggle_mode()
         self.pickerWidget.setEnabled( True )
 
 
@@ -13348,32 +13330,32 @@ class MainTab( QWidget ):
         char  = rig.get_active_char()
         nodes = rig.get_nodes(char, { 'Type': kBodyGuide } )
 
+        guides_grp = rig.find_node(char, 'Guides_Grp')
         for s in sel:
 
             short = rig.short_name(s)
 
             if short in nodes:
 
-                parent = mc.listRelatives(s, p=True, pa=True) or []
+                #parent = mc.listRelatives(s, p=True, pa=True) or []
 
-                if parent:
-                    m = rig.get_matrix( parent[0] )
-                    loc = mc.spaceLocator( name=AniMeta().short_name( s )  + '_Lock' )[0]
-                    rig.set_matrix( loc, m)
-                    size = mc.getAttr(s + '.controlSize')
-                    mc.setAttr(loc + '.localScale', size, size, size)
-                    mc.setAttr(loc + '.overrideEnabled', True)
-                    mc.setAttr(loc + '.overrideRGBColors', 1)
-                    mc.setAttr(loc + '.overrideColorRGB', 1, 0, 0)
+                #if parent:
+                m = rig.get_matrix( s  )
+                loc = mc.spaceLocator( name=AniMeta().short_name( s )  + '_Lock' )[0]
+                rig.set_metaData(loc, {'Type': kBodyGuideLock})
+                mc.parent(loc, guides_grp)
+                rig.set_matrix( loc, m)
+                size = mc.getAttr(s + '.controlSize')
+                mc.setAttr(loc + '.localScale', size, size, size)
+                mc.setAttr(loc + '.overrideEnabled', True)
+                mc.setAttr(loc + '.overrideRGBColors', 1)
+                mc.setAttr(loc + '.overrideColorRGB', 1, 0, 0)
 
-                    rig.lock_trs(loc, True)
-                    rig.lock_trs(parent[0], False)
+                rig.lock_trs(loc, True)
+                #rig.lock_trs(parent[0], False)
 
-                    mc.parentConstraint(loc, parent[0])
-                    guides_grp = rig.find_node(char, 'Guides_Grp')
+                mc.parentConstraint(loc, s)
 
-                    rig.set_metaData(loc, {'Type': kBodyGuideLock})
-                    mc.parent(loc, guides_grp)
             else:
                 mc.warning('aniMeta Create Guide Lock: can not lock node', short, ', only guides can be locked.')
         mc.select( sel, r=True )
@@ -16747,7 +16729,7 @@ class LibTab(QWidget):
 
             if rigState == kRigStateControl:
 
-                _char_.toggle_guides()
+                _char_.toggle_mode()
 
             mc.progressWindow( e = True, pr = 10 )
 
