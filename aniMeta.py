@@ -1840,7 +1840,10 @@ class Rig( Transform ):
 
             m = offsetMatrix * self.get_matrix( matchTransform, kWorld )
 
-            self.set_matrix(ctrl_path.fullPathName(), m)
+            if createGrp:
+                self.set_matrix(grp, m)
+            else:
+                self.set_matrix(ctrl_path.fullPathName(), m)
         '''
         if mirror is not None and mirrorNode is not None:
 
@@ -2259,9 +2262,11 @@ class Rig( Transform ):
             mc.connectAttr( symNode + '.constraintScale',            constraint + '.scale')
             mc.connectAttr( constraint + '.parentInverseMatrix[0]',  symNode + '.constraintInverseParentWorldMatrix')
 
-            if mc.nodeType( tgtNode.fullPathName() ) == 'joint' and mc.nodeType( constraint ) == 'joint':
-                mc.connectAttr( target + '.jointOrient',            symNode + '.targetJointOrient')
-                mc.connectAttr( symNode + '.constraintJointOrient', constraint + '.jointOrient')
+            if mc.nodeType( tgtNode.fullPathName() ) == 'joint':
+                mc.connectAttr( target + '.jointOrient', symNode + '.targetJointOrient')
+            if mc.nodeType( constraint ) == 'joint':
+                    mc.connectAttr( symNode + '.constraintJointOrient', constraint + '.jointOrient')
+
 
             return symNode
 
@@ -3497,7 +3502,8 @@ class Char( Rig ):
                             parent_rgt = self.find_node( charRoot, parent_rgt )
                             parent_rgt = self.get_path( parent_rgt )
 
-                        rgt_node = mc.createNode('transform', name=rgt_name, parent=parent_rgt, ss=True)
+                        rgt_node = mc.createNode('joint', name=rgt_name, parent=parent_rgt, ss=True)
+                        mc.setAttr( rgt_node + '.v', False )
 
                         # Add an offset matrix to first nodes off the centre to make the symConstraints work with standard transforms, the offset is 180 on rx
                         if not 'Lft' in  guide_ctrl.fullPathName():
@@ -3552,22 +3558,7 @@ class Char( Rig ):
             mc.warning( 'Please select a Biped Root Group.' )
         else:
             metaData = self.get_metaData( charRoot )
-            rigState = None
 
-            if 'RigState' in metaData:
-                rigState = metaData[ 'RigState' ]
-            else:
-                rigState = kRigStateBind
-
-            if rigState == kRigStateControl:
-                # self.rig_control_biped_delete()
-                rigState = kRigStateBind
-            #if rigState == kRigStateGuide:
-            #    mc.warning( 'aniMeta: The rig already is already in guide mode.' )
-            #    return
-            #if rigState != kRigStateBind:
-            #    mc.warning( 'aniMeta: Wrong state to create Guides.' )
-            #else:
             metaData[ 'RigState' ] = kRigStateGuide
 
             # Set Default Rig Display options to be used when the rig is switched to control mode
@@ -3812,35 +3803,6 @@ class Char( Rig ):
                         guideList.append( [ guide_name, name, parent, attrList, rot_offset_4 ] )
 
                 guideDict = self.build_guides( charRoot, guideList, ctrlDict, guideDict, data, False )
-
-                return
-
-                # TODO: Find a better solution, the positions are wrong and it overwrites what the user may have done
-
-                # Position heel guide manually, we don't have a joint for this one
-                #heel_guide = self.find_node(charRoot, 'Heel_Lft_Guide')
-                #foot_guide = self.find_node(charRoot, 'Foot_Lft_Guide')
-                #mc.matchTransform( heel_guide, foot_guide)
-                #mc.setAttr( heel_guide + '.ty', 0)
-                #mc.xform(heel_guide, t=[0,0,-3], relative=True, objectSpace=True )
-
-                # Position shoulder_upVec
-                #upvec_guide = self.find_node(charRoot, 'Shoulder_Lft_upVec_Guide')
-                #shoulder_guide = self.find_node(charRoot, 'ArmUp_Lft_Guide')
-                #mc.matchTransform( upvec_guide, shoulder_guide, position=True, rotation=False)
-                #mc.xform(upvec_guide, t=[3,10,0], relative=True )
-
-                # Position toe_guide
-                #toestip_guide = self.find_node(charRoot, 'ToesTip_Lft_Guide')
-                #ball_guide = self.find_node(charRoot, 'Ball_Lft_Guide')
-                #mc.matchTransform( toestip_guide, ball_guide )
-                #mc.xform(toestip_guide, t=[0,0,10], relative=True, objectSpace=True )
-
-                # Position hips_guide
-                #hipsupvec_guide = self.find_node(charRoot, 'Hips_Lft_upVec_Guide')
-                #legup_guide = self.find_node(charRoot, 'LegUp_Lft_Guide')
-                #mc.matchTransform( hipsupvec_guide, legup_guide )
-                #mc.xform(hipsupvec_guide, t=[10,0,0], relative=True, objectSpace=True )
 
             if type == kBiped:
 
@@ -5103,8 +5065,6 @@ class Char( Rig ):
         if 'type' in kwargs:
             type = kwargs['type']
 
-        print ('\nCreate Rig')
-
         # Create Main Groups
         mainGrp = self.build_main_grps( char, type )
 
@@ -5129,6 +5089,8 @@ class Char( Rig ):
         # Create the body guides
         print ('aniMeta: Create the body guides.')
         self.build_body_guides( rootNode, type )
+
+        self.position_feet_guides( rootNode, type)
 
         # Constraints
         print ('aniMeta: Build Constraints.')
@@ -5203,9 +5165,7 @@ class Char( Rig ):
                 mc.parentConstraint( foot_jnt, foot_up_vec, mo=True )
 
 
-
     def delete_body_guides( self, *args, **kwargs ):
-
 
         charRoot = self.get_active_char()
         deleteOnlyConstraints = False
@@ -5215,7 +5175,6 @@ class Char( Rig ):
             if 'deleteOnlyConstraints' in kwargs:
                 deleteOnlyConstraints = kwargs['deleteOnlyConstraints']
 
-        print( 'delete_body_guides', deleteOnlyConstraints)
         delNodes = [ ]
         metaData = None
 
@@ -5247,6 +5206,7 @@ class Char( Rig ):
             #####################################################################################
             #
             # Delete Constraints
+
             parents = [ ]
             for node in nodes:
                 node_long = self.find_node( charRoot, node  )
@@ -5279,10 +5239,6 @@ class Char( Rig ):
                 if con:
                     if mc.nodeType( con[0] ) == 'symmetryConstraint':
                         mc.delete( con )
-
-            # This causes issues
-            #metaData[ 'RigState' ] = kRigStateBind
-            #self.set_metaData( charRoot, metaData )
 
             # Delete Constraints
             #
@@ -7287,29 +7243,22 @@ class Char( Rig ):
                             "nodeType": "joint"
                         },
                         "jaw": {
-                            "tx": 1.5678,
+                            "tx": -1.5678,
                             "ty": -3.9375,
                             "tz": 0.0126,
                             "ry": -0.0002,
                             "rz": 0.0007,
-                            "jox": 90.0,
-                            "joy": 89.9999,
                             "parent": "head",
                             "nodeType": "joint"
                         },
                         "tongue_01": {
-                            "tx": 2.5437,
-                            "ty": -3.9375,
-                            "tz": 0.0126,
-                            "ry": -0.0002,
-                            "rz": 0.0007,
-                            "jox": 90.0,
-                            "joy": 89.9999,
+                            "tx": -1,
+                            "ty": -1.5,
                             "parent": "jaw",
                             "nodeType": "joint"
                         },
                         "tongue_02": {
-                            "tz": 2.0 ,
+                            "ty": -2.0 ,
                             "parent": "tongue_01",
                             "nodeType": "joint"
                         },
@@ -7829,6 +7778,40 @@ class Char( Rig ):
                 }
             }
 
+    def position_feet_guides(self, charRoot, type):
+
+        if type == kBipedUE:
+
+            # Position heel guide manually, we don't have a joint for this one
+            heel_guide = self.find_node(charRoot, 'Heel_Lft_Guide')
+            foot_guide = self.find_node(charRoot, 'Foot_Lft_Guide')
+            mc.matchTransform( heel_guide, foot_guide)
+            mc.setAttr( heel_guide + '.ty', 0)
+            mc.xform(heel_guide, t=[0,0,-3], relative=True, objectSpace=True )
+            pos = mc.xform(heel_guide, query=True, translation=True, worldSpace=True )
+            mc.xform(heel_guide, t=[pos[0], 0, pos[2]], rotation=[0,0,0],absolute=True, worldSpace=True )
+
+            # Position shoulder_upVec
+            upvec_guide = self.find_node(charRoot, 'Shoulder_Lft_upVec_Guide')
+            shoulder_guide = self.find_node(charRoot, 'ArmUp_Lft_Guide')
+            mc.matchTransform( upvec_guide, shoulder_guide, position=True, rotation=False)
+            mc.xform(upvec_guide, t=[3,10,0], relative=True )
+
+            # Position toe_guide
+            toestip_guide = self.find_node(charRoot, 'ToesTip_Lft_Guide')
+            ball_guide = self.find_node(charRoot, 'Ball_Lft_Guide')
+            mc.matchTransform( toestip_guide, ball_guide )
+            mc.xform(toestip_guide, t=[0,0,10], relative=True, objectSpace=True )
+            pos = mc.xform(toestip_guide, query=True, translation=True, worldSpace=True )
+            mc.xform(toestip_guide, t=[pos[0], 0, pos[2]], rotation=[0,0,0],absolute=True, worldSpace=True )
+
+            # Position hips_guide
+            hipsupvec_guide = self.find_node(charRoot, 'Hips_Lft_upVec_Guide')
+            legup_guide = self.find_node(charRoot, 'LegUp_Lft_Guide')
+            mc.matchTransform( hipsupvec_guide, legup_guide )
+            mc.xform(hipsupvec_guide, t=[10,0,0], relative=True, objectSpace=True )
+
+
     def toggle_mode(self, *args):
         '''
         Toggles the select character between guide and control rig mode.
@@ -7974,7 +7957,6 @@ class Char( Rig ):
                     # Dont delete the actual guides because we need them for rigging
                     self.delete_body_guides( charRoot, deleteOnlyConstraints=True )
 
-
                     # create control rig
                     if type == kBiped or type == kBipedUE:
                         biped = Biped()
@@ -8040,6 +8022,7 @@ class Char( Rig ):
 
                     return kRigStateControl
 
+
 # Char
 #
 ######################################################################################
@@ -8081,6 +8064,8 @@ class Biped( Char ):
         if rootNode is None:
             mc.warning('aniMeta: No Valid character specified. Aborting rig build.')
             return False
+
+        print('rootNode', rootNode)
 
         ctrlsDict = {}
         ctrlsDict['character']      = rootNode
