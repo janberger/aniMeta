@@ -1889,8 +1889,10 @@ class Rig( Transform ):
                 mc.parentConstraint( ctrl_path.fullPathName(), target.fullPathName(), mo=maintainOffset)
 
             if constraint == self.kAim:
-                mc.aimConstraint( ctrl_path.fullPathName(), target.fullPathName(), mo=maintainOffset, upVector=upVec, aimVector=aimVec)
-
+                try:
+                    mc.aimConstraint( ctrl_path.fullPathName(), target.fullPathName(), mo=maintainOffset, upVector=upVec, aimVector=aimVec)
+                except:
+                    pass
         mc.select( cl=True )
 
         return ctrl_path
@@ -2235,7 +2237,6 @@ class Rig( Transform ):
 
         if tgtNode and cnstNode:
 
-
             target     = tgtNode.fullPathName()
             constraint = cnstNode.fullPathName()
 
@@ -2267,7 +2268,6 @@ class Rig( Transform ):
             if mc.nodeType( constraint ) == 'joint':
                     mc.connectAttr( symNode + '.constraintJointOrient', constraint + '.jointOrient')
 
-
             return symNode
 
         if not tgtNode :
@@ -2295,81 +2295,6 @@ class Rig( Transform ):
             except:
                 pass
 
-    '''
-    # There is another delete_body_guides method in Char
-    def delete_body_guides(self, *args, **kwargs ):
-
-        charRoot = self.get_active_char()
-        delNodes = []
-        metaData = None
-
-        if not charRoot:
-            mc.warning('Please select a Biped Root Group.')
-        else:
-            metaData = self.get_metaData(charRoot)
-            data = {'Type': kBodyGuide}
-            nodes = self.get_nodes(charRoot, data)
-
-            try:
-                mc.setAttr('Root_Jnt.overrideEnabled', 0)
-                mc.setAttr('Root_Jnt.overrideDisplayType', 0)
-            except:
-                pass
-
-            #####################################################################################
-            #
-            # Store joint positions
-            # ... or the positions may be off when the constraints get deleted
-            jointDict = self.get_joint_transform( charRoot )
-
-            # Store joint positions
-            #
-            #####################################################################################
-
-            #####################################################################################
-            #
-            # Delete Constraints
-
-
-            parents=[]
-            for node in nodes:
-                con = mc.listConnections(node+'.t', s=True)
-                if con:
-                    if mc.nodeType(con[0]) == 'parentConstraint':
-
-                        parents.append( con[0])
-            if parents:
-                try:
-                    if len ( parents) > 0:
-                        self.delete_nodes( charRoot, parents )
-                except:
-                    pass
-            if nodes:
-                try:
-                    if len ( nodes) > 0:
-                        self.delete_nodes( charRoot, nodes )
-
-                except:
-                    pass
-
-            metaData['RigState'] = kRigStateBind
-            self.set_metaData(charRoot, metaData)
-
-            # Delete Constraints
-            #
-            #####################################################################################
-
-            #####################################################################################
-            #
-            # Restore joint positions
-
-            self.set_joint_transform(charRoot, jointDict )
-
-            # Restore joint positions
-            #
-            #####################################################################################
-
-    '''
     def delete_nodes( self, char, nodes ):
 
         for node in nodes:
@@ -2380,9 +2305,7 @@ class Rig( Transform ):
 
     def export_drivenKeys( self, drivenKeys, fileName ):
 
-
         drivenKeysData = {}
-
         anim = Anim()
 
         for i in range( len(drivenKeys)):
@@ -2390,12 +2313,10 @@ class Rig( Transform ):
             result = anim.get_anim_curve_data( drivenKeys[i] )
             drivenKeysData[drivenKeys[i]] = result
 
-
         data_json = json.dumps( drivenKeysData, indent = 4 )
 
         with open(fileName, 'w') as file_obj:
             file_obj.write( data_json)
-
 
     def export_joints( self, joints, fileName ):
 
@@ -3463,7 +3384,6 @@ class Char( Rig ):
                 ctrlDict[ 'constraint' ] = self.kParent
                 ctrlDict['createGrp'] = False
 
-
                 if len( guide ) > 4: 
                     ctrlDict[ 'offsetMatrix' ] = guide[ 4 ]
                 else:
@@ -3482,7 +3402,18 @@ class Char( Rig ):
                 # Create the Guide Control if it doesn`t exist, yet
                 if guide_ctrl is not None:
                     if mc.objExists( guide[1] ):
-                        mc.parentConstraint( guide[ 0 ], guide[ 1 ]  )
+                        mc.parentConstraint( guide[ 0 ], guide[ 1 ], mo=True  )
+
+                    if 'Lft' in guide[ 0 ]:
+                        rgt_guide = guide[ 0 ].replace( 'Lft', 'Rgt' )
+                        rgt_joint = guide[ 1 ].replace( 'l', 'r' )
+
+                        rgt_guide = self.find_node( charRoot, rgt_guide )
+                        rgt_joint = self.find_node( charRoot, rgt_joint )
+
+                        if rgt_guide is not None and rgt_joint is not None:
+                            mc.parentConstraint(rgt_guide, rgt_joint, mo=True)
+
                     # From now on we want an MDagPath
                     guide_ctrl = self.get_path( guide[ 0 ] )
                 else:
@@ -3625,6 +3556,7 @@ class Char( Rig ):
             data = {}
             data[ 'Type' ] = kBodyGuide
 
+            '''
             for joint_lft in joints:
                 joint_rgt = None
 
@@ -3645,7 +3577,7 @@ class Char( Rig ):
 
                 else:
                     mc.warning( 'aniMeta: No right joint found for node ' + joint_lft )
-
+            '''
             guidesGrp = self.find_node( charRoot, 'Guides_Grp' )
             guideGrp = self.find_node( charRoot, 'Guides_Body_Grp' )
 
@@ -7818,7 +7750,6 @@ class Char( Rig ):
         :return:
         '''
 
-
         # Character list may need to be updated to show the current character in the scene
         if not self.get_active_char():
             self.update_ui()
@@ -7923,7 +7854,7 @@ class Char( Rig ):
                     # create guides
                     # for some reason the namespace fs up going from control to guide mode
                     #self.build_body_guides( charRoot, type, namespace='skin:' )
-                    self.build_body_guides(charRoot, type )
+                    self.build_body_guides(charRoot, type, namespace='skin:' )
 
                     om.MGlobal.displayInfo( 'aniMeta: ' + charRoot + ' is now in guide mode.' )
 
