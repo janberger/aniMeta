@@ -1381,12 +1381,44 @@ class Rig( Transform ):
                 if mc.nodeType( new_joints[ joint ].fullPathName() ) == 'transform':
                     mc.parent( new_joints[ joint ].fullPathName(), proxy_grp )
 
+            self.create_blend_joints()
+
             if rootNode is not None:
                 return new_joints[ rootNode ].fullPathName()
             else:
                 return True
         else:
             return None
+    def create_blend_joints(self):
+
+        def add_blend_after_first_underscore(input_string): 
+            first_underscore_index = input_string.find('_') 
+            if first_underscore_index == -1:
+                return input_string
+ 
+            output_string = (input_string[:first_underscore_index + 1] + 'blend_' +
+                             input_string[first_underscore_index + 1:])
+
+            return output_string
+
+        joints = [ 'upperarm_', 'lowerarm_', 'hand_',
+                   'thumb_01_', 'thumb_02_', 'thumb_03_',
+                   'index_01_', 'index_02_', 'index_03_',
+                   'middle_01_', 'middle_02_', 'middle_03_',
+                   'ring_01_', 'ring_02_', 'ring_03_',
+                   'pinky_01_', 'pinky_02_', 'pinky_03_',
+                   'thigh_', 'calf_', 'foot_', 'ball_'
+                   ]
+        for SIDE in ['l','r']:
+            for joint in joints:
+                joint += SIDE
+                parent = mc.listRelatives(joint, parent=True)[0]
+
+                blend = mc.createNode('joint', name=add_blend_after_first_underscore(joint), parent=parent, ss=True)
+
+                mc.connectAttr(joint + '.t', blend + '.t')
+
+                self.create_pair_blend(blend, joint, kPairBlendRotate, 0.5)
 
     def check_attr(self, node, attrName ):
         if not mc.attributeQuery( attrName, node=node, exists=True ):
@@ -1886,8 +1918,11 @@ class Rig( Transform ):
         if constraint is not None and target is not None:
 
             if constraint == self.kParent:
-                mc.parentConstraint( ctrl_path.fullPathName(), target.fullPathName(), mo=maintainOffset)
-
+                print( ctrl_path.fullPathName(), target.fullPathName())
+                try:
+                    mc.parentConstraint( ctrl_path.fullPathName(), target.fullPathName(), mo=maintainOffset)
+                except:
+                    pass
             if constraint == self.kAim:
                 try:
                     mc.aimConstraint( ctrl_path.fullPathName(), target.fullPathName(), mo=maintainOffset, upVector=upVec, aimVector=aimVec)
@@ -7996,8 +8031,6 @@ class Biped( Char ):
             mc.warning('aniMeta: No Valid character specified. Aborting rig build.')
             return False
 
-        print('rootNode', rootNode)
-
         ctrlsDict = {}
         ctrlsDict['character']      = rootNode
         ctrlsDict['globalScale']    = True
@@ -8719,7 +8752,7 @@ class Biped( Char ):
 
             eyes_grp = mc.createNode( 'transform', name='Eyes_Grp', parent= controls['Main_Ctr_Ctrl'], ss=True )
 
-            Eyes_Ctr_Ctrl = self.create_handle( name='Eyes_Ctr_Ctrl',
+            controls['Eyes_Ctr_Ctrl'] = self.create_handle( name='Eyes_Ctr_Ctrl',
                                                 matchTransform=self.find_node(rootNode, eye_l_jnt),
                                                 parent = eyes_grp,
                                                 shapeType=self.kCube,
@@ -8728,7 +8761,7 @@ class Biped( Char ):
                                                 character = rootNode,
                                                 globalScale = True )
 
-            eye_ctrl_grp = mc.listRelatives( Eyes_Ctr_Ctrl.fullPathName(), p=True, pa=True )[0]
+            eye_ctrl_grp = mc.listRelatives( controls['Eyes_Ctr_Ctrl'].fullPathName(), p=True, pa=True )[0]
             mc.setAttr( eye_ctrl_grp + '.tx', l=0 )
             mc.setAttr( eye_ctrl_grp + '.tz', l=0 )
 
@@ -8737,9 +8770,9 @@ class Biped( Char ):
             mc.setAttr( eye_ctrl_grp + '.r',  0,0,0 )
 
             jnt = self.find_node(rootNode, eye_l_jnt)
-            Eyes_Lft_Ctrl = self.create_handle(name='Eye_Lft_Ctrl',
+            controls['Eyes_Lft_Ctrl']  = self.create_handle(name='Eye_Lft_Ctrl',
                                                matchTransform=jnt,
-                                               parent=Eyes_Ctr_Ctrl.fullPathName(),
+                                               parent=controls['Eyes_Ctr_Ctrl'].fullPathName(),
                                                shapeType=self.kCube,
                                                color=colors[0], width=2, height=2, depth=2,
                                                character=rootNode,
@@ -8750,9 +8783,9 @@ class Biped( Char ):
                                                maintainOffset=False)
 
             jnt = self.find_node(rootNode, eye_r_jnt)
-            Eyes_Rgt_Ctrl = self.create_handle(name='Eye_Rgt_Ctrl',
+            controls['Eyes_Rgt_Ctrl'] = self.create_handle(name='Eye_Rgt_Ctrl',
                                                matchTransform=jnt,
-                                               parent=Eyes_Ctr_Ctrl.fullPathName(),
+                                               parent=controls['Eyes_Ctr_Ctrl'].fullPathName(),
                                                shapeType=self.kCube,
                                                color=colors[1],
                                                width=2, height=2, depth=2,
@@ -8767,8 +8800,8 @@ class Biped( Char ):
             ty = mc.getAttr( eye_ctrl_grp + '.ty' )
             mc.setAttr( eye_ctrl_grp+ '.tz', ty/3 )
 
-            eye_ctrl_grp_l = mc.listRelatives( Eyes_Lft_Ctrl.fullPathName(), p=True, pa=True )[0]
-            eye_ctrl_grp_r = mc.listRelatives( Eyes_Rgt_Ctrl.fullPathName(), p=True, pa=True )[0]
+            eye_ctrl_grp_l = mc.listRelatives( controls['Eyes_Lft_Ctrl'].fullPathName(), p=True, pa=True )[0]
+            eye_ctrl_grp_r = mc.listRelatives( controls['Eyes_Rgt_Ctrl'].fullPathName(), p=True, pa=True )[0]
 
             for grp in [eye_ctrl_grp_l, eye_ctrl_grp_r]:
                 # zero out the rotation
@@ -8779,9 +8812,9 @@ class Biped( Char ):
 
             # Lock and hide attributes
             for attr in [ 'sx', 'sy', 'sz', 'v']:
-                mc.setAttr ( Eyes_Ctr_Ctrl .fullPathName()+ '.' + attr, l=1, k=0 )
+                mc.setAttr ( controls['Eyes_Ctr_Ctrl'].fullPathName()+ '.' + attr, l=1, k=0 )
 
-            for ctl in [Eyes_Lft_Ctrl.fullPathName(), Eyes_Rgt_Ctrl.fullPathName()]:
+            for ctl in [controls['Eyes_Lft_Ctrl'].fullPathName(), controls['Eyes_Rgt_Ctrl'].fullPathName()]:
                 for attr in ['rx', 'ry', 'rz', 'sx', 'sy', 'sz', 'v']:
                     mc.setAttr ( ctl + '.' + attr, l=1, k=0 )
 
@@ -8790,7 +8823,7 @@ class Biped( Char ):
             mc.setAttr( eye_ctrl_grp + '.tz', l=1 )
 
             # Space Switch
-            self.create_space_switch( Eyes_Ctr_Ctrl, controls['Head_Ctr_Ctrl'], 'world', False )
+            self.create_space_switch( controls['Eyes_Ctr_Ctrl'], controls['Head_Ctr_Ctrl'], 'world', False )
 
             # Eyes
             #
@@ -9114,12 +9147,10 @@ class Biped( Char ):
                 for ctl in [ 'Foot_IK_' + SIDE + '_Ctrl', 'FootLift_IK_' + SIDE + '_Ctrl', 'Heel_IK_' + SIDE + '_Ctrl', 'Toes_IK_' + SIDE + '_Ctrl', 'ToesTip_IK_' + SIDE + '_Ctrl' ]:
                     mc.connectAttr( ik_loc.fullPathName() + '.' + ik_attr, controls[ctl].fullPathName() + '.v')
 
-
                 # IK Handle
                 mc.orientConstraint( controls['FootLift_IK_'+SIDE+'_Ctrl'].fullPathName(), footJntIK, mo=True)
                 mc.setAttr( legLoJntIK.fullPathName() + '.preferredAngle',leg_preferred_angle[0], leg_preferred_angle[1], leg_preferred_angle[2] )
                 ik = mc.ikHandle(n=ikName, sj=legUpJntIK.fullPathName(), ee=footJntIK.fullPathName() )
-
 
                 ikHandle = '|'+ik[0]
                 effector = ik[1]
@@ -9151,7 +9182,6 @@ class Biped( Char ):
                 mc.setAttr (  ik_loc.fullPathName() + '.FK_IK', 1)
 
                 # Space Switch
-
                 feet_iks = [ controls[ 'Foot_IK_'+SIDE+'_Ctrl' ] ]
 
                 for node in feet_iks:
@@ -9249,11 +9279,9 @@ class Biped( Char ):
                 mc.setAttr(ikHandle + '.stickiness', True)
                 mc.setAttr(ikHandle + '.snapEnable', False)
                 mc.parent(ikHandle, controls['Hand_IK_'+SIDE+'_Ctrl'].fullPathName() )
-                #mc.orientConstraint('FootLift_IK_' + SIDE + '_Ctrl', footJntIK, mo=True)
 
                 hook_up_fk( armUpJnt, armUpJntIK,  armUpJntFK, ik_loc,  'ArmUp' )
                 hook_up_fk( armLoJnt, armLoJntIK,  armLoJntFK, ik_loc,  'ArmLo' )
-
 
                 ########################################################################################################
                 #
@@ -9273,7 +9301,6 @@ class Biped( Char ):
                 #
                 ########################################################################################################
 
-
                 # Create Switch to orient the hand to the IK Ctrl
                 hand_ctrl =  self.find_node(rootNode, 'Hand_FK_'+SIDE+'_Ctrl')
                 hand_parent = mc.listRelatives( hand_ctrl, p=True, pa=True )[0]
@@ -9282,7 +9309,6 @@ class Biped( Char ):
                 # Make the Hand follow the arm joint for IK/FK Blending
                 for attr in ['tx', 'ty', 'tz', 'rx', 'ry', 'rz']:
                     mc.setAttr( hand_parent + '.' + attr, l=False)
-
 
                 cnst = mc.parentConstraint(
                     armLoJnt,
@@ -9408,7 +9434,8 @@ class Biped( Char ):
                     controls['ShoulderUpVec_'+SIDE+'_Ctrl'],
                     controls['Hand_IK_'+SIDE+'_Ctrl'],
                     controls['ArmPole_IK_'+SIDE+'_Ctrl'],
-                    controls['HipsUpVec_'+SIDE+'_Ctrl']
+                    controls['HipsUpVec_'+SIDE+'_Ctrl'],
+                    controls['Eyes_'+SIDE+'_Ctrl']
                 ]
 
                 set_data(  handles, data )
@@ -16525,6 +16552,7 @@ class LibTab(QWidget):
                 char_data[ 'root' ] = { }
                 char_data[ 'handles' ] = { }
                 char_data[ 'joints' ] = { }
+                char_data[ 'guides' ] = { }
 
                 for attr in mc.listAttr( char, k = True ) or [ ]:
                     char_data[ 'root' ][ attr ] = mc.getAttr( char + '.' + attr )
@@ -16534,7 +16562,7 @@ class LibTab(QWidget):
                 if len( handles ) > 0:
 
                     joint_grp = self.am.find_node( char, 'Joint_Grp' ) or [ ]
-                    joints = mc.listRelatives( joint_grp, c = True, ad = True, typ = 'joint' )
+                    joints = mc.listRelatives( joint_grp, c = True, ad = True, typ = 'joint' ) or []
                     attrs = [ 'controlSize', 'controlSizeX', 'controlSizeY', 'controlSizeZ', 'controlOffset', 'controlOffsetX', 'controlOffsetY', 'controlOffsetZ' ]
 
                     for handle in handles:
@@ -16576,6 +16604,32 @@ class LibTab(QWidget):
                             if ':' in joint_name:
                                 joint_name = joint_name.split(':')[1]
                             char_data[ 'joints' ][ joint_name  ] = tmp
+
+
+                    guides_grp = self.am.find_node( char, 'Guides_Grp' ) or [ ]
+                    guides = mc.listRelatives( guides_grp, c = True, ad = True, typ = 'transform' )
+
+                    for guide in guides:
+
+                        shapes = mc.listRelatives(guide, pa=True, s=True)
+                        if (shapes):
+                            if mc.nodeType(shapes[0]) == 'mesh':
+
+                                guide_path = self.am.find_node( char, guide )
+
+                                tmp = { }
+
+                                for attr in [ 'tx', 'ty', 'tz', 'rx', 'ry', 'rz'  ]:
+
+                                    value = mc.getAttr( guide_path + '.' + attr )
+
+                                    tmp[ attr ] = round( value, 5 )
+
+                                guide_name = self.am.short_name(guide)
+                                if ':' in guide_name:
+                                    guide_name = joint_name.split(':')[1]
+                                char_data[ 'guides' ][ guide_name  ] = tmp
+
 
                     sceneDict = self.am.get_scene_info()
 
@@ -16778,6 +16832,30 @@ class LibTab(QWidget):
             # Build the guides so they match the joints
             # The guides are needed for building the control rig
             _char_.build_body_guides( char, type, namespace='skin:' )
+
+            ###############################################################################
+            #
+            #   Import Guides
+
+            if 'guides' in data:
+
+                for key in sorted(data['guides'].keys()):
+                    guide = self.am.find_node(char, key)
+
+                    if guide is not None:
+                        for attr in sorted(data['guides'][key].keys()):
+                            # Translates need to be set via the multiply node on the parent
+                            try:
+                                value = data['guides'][key][attr]
+                                mc.setAttr(guide + '.' + attr, value )
+                            except:
+                                mc.warning('aniMeta: There is a problem setting attribute', attr,  'on guide', guide)
+                                pass
+                    else:
+                        mc.warning( 'Can not find guide', key)
+            #   Import Guides
+            #
+            ###############################################################################
 
 
             mc.progressWindow( e = True, pr = 60 )
