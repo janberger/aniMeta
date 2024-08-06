@@ -3471,6 +3471,8 @@ class Char( Rig ):
                         rgt_node = mc.createNode('joint', name=rgt_name, parent=parent_rgt, ss=True)
                         mc.setAttr( rgt_node + '.v', False )
 
+                        self.set_metaData(rgt_node, {'Type': kBodyGuide})
+
                         # Add an offset matrix to first nodes off the centre to make the symConstraints work with standard transforms, the offset is 180 on rx
                         if not 'Lft' in  guide_ctrl.fullPathName():
                             offset_matrix = [1.0, 0.0, 0.0, 0.0, 0.0, -1, 0.0, 0.0, 0.0, 0.0, -1, 0.0, 0.0, 0.0, 0.0, 1.0]
