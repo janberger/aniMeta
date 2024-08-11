@@ -1918,7 +1918,6 @@ class Rig( Transform ):
         if constraint is not None and target is not None:
 
             if constraint == self.kParent:
-                print( ctrl_path.fullPathName(), target.fullPathName())
                 try:
                     mc.parentConstraint( ctrl_path.fullPathName(), target.fullPathName(), mo=maintainOffset)
                 except:
@@ -9116,6 +9115,7 @@ class Biped( Char ):
                     legLoJntFK_jnt_name = legLoJnt.partialPathName().replace( '_' + SIDE, '_FK_' + SIDE )
                     footJntFK_jnt_name  = footJnt.partialPathName().replace( '_' + SIDE, '_FK_' + SIDE )
                     toesJntFK_jnt_name  = toesJnt.partialPathName().replace( '_' + SIDE, '_FK_' + SIDE )
+
                 elif type == kBipedUE:
                     # Proxy FK Joints
                     hipsJntFK_jnt_name  = hipsJnt.partialPathName() + '_FK'
@@ -9235,44 +9235,53 @@ class Biped( Char ):
 
                 # Proxy FK Joints
                 if type == kBiped:
-                    clavJntIK_jnt_name  = clavJnt.partialPathName().replace(  '_' + SIDE, '_FK_' + SIDE )
-                    armUpJntIK_jnt_name = armUpJnt.partialPathName().replace( '_' + SIDE, '_FK_' + SIDE )
-                    armLoJntIK_jnt_name = armLoJnt.partialPathName().replace( '_' + SIDE, '_FK_' + SIDE )
-                    handJntIK_jnt_name  = handJnt.partialPathName().replace(  '_' + SIDE, '_FK_' + SIDE )
+                    clavJntFK_jnt_name  = clavJnt.partialPathName().replace(  '_' + SIDE, '_FK_' + SIDE )
+                    armUpJntFK_jnt_name = armUpJnt.partialPathName().replace( '_' + SIDE, '_FK_' + SIDE )
+                    armLoJntFK_jnt_name = armLoJnt.partialPathName().replace( '_' + SIDE, '_FK_' + SIDE )
+                    handJntFK_jnt_name  = handJnt.partialPathName().replace(  '_' + SIDE, '_FK_' + SIDE )
 
+                    clavJntIK_jnt_name  = clavJnt.partialPathName().replace(  '_' + SIDE, '_IK_' + SIDE )
                     armUpJntIK_jnt_name = armUpJnt.partialPathName().replace( '_' + SIDE, '_IK_' + SIDE )
                     armLoJntIK_jnt_name = armLoJnt.partialPathName().replace( '_' + SIDE, '_IK_' + SIDE )
                     handJntIK_jnt_name  = handJnt.partialPathName().replace(  '_' + SIDE, '_IK_' + SIDE )
 
                 elif type == kBipedUE:
-                    clavJntIK_jnt_name  = clavJnt.partialPathName().replace(  '_' + side, '_FK_' + side )
-                    armUpJntIK_jnt_name = armUpJnt.partialPathName().replace( '_' + side, '_FK_' + side )
-                    armLoJntIK_jnt_name = armLoJnt.partialPathName().replace( '_' + side, '_FK_' + side )
-                    handJntIK_jnt_name  = handJnt.partialPathName().replace(  '_' + side, '_FK_' + side )
+                    clavJntFK_jnt_name  = clavJnt.partialPathName().replace(  '_' + side, '_FK_' + side )
+                    armUpJntFK_jnt_name = armUpJnt.partialPathName().replace( '_' + side, '_FK_' + side )
+                    armLoJntFK_jnt_name = armLoJnt.partialPathName().replace( '_' + side, '_FK_' + side )
+                    handJntFK_jnt_name  = handJnt.partialPathName().replace(  '_' + side, '_FK_' + side )
 
+                    clavJntIK_jnt_name  = clavJnt.partialPathName().replace(  '_' + side, '_IK_' + side )
                     armUpJntIK_jnt_name = armUpJnt.partialPathName().replace( '_' + side, '_IK_' + side )
                     armLoJntIK_jnt_name = armLoJnt.partialPathName().replace( '_' + side, '_IK_' + side )
                     handJntIK_jnt_name  = handJnt.partialPathName().replace(  '_' + side, '_IK_' + side )
 
-                armUpJntIK = joint_copy( armUpJnt, armUpJntIK_jnt_name, clav         )
+                clavJntIK = joint_copy( clavJnt, clavJntIK_jnt_name, clav         )
+                armUpJntIK = joint_copy( armUpJnt, armUpJntIK_jnt_name, clavJntIK         )
                 armLoJntIK = joint_copy( armLoJnt, armLoJntIK_jnt_name, armUpJntIK   )
                 handJntIK  = joint_copy( handJnt,  handJntIK_jnt_name, armLoJntIK    )
-                mc.setAttr( armUpJntIK.fullPathName() + '.v', False )
+                mc.setAttr( clavJntIK.fullPathName() + '.v', False )
 
-                clavJntFK  = joint_copy( clavJnt,  clavJntIK_jnt_name, prx_grp       )
+                clavJntFK  = joint_copy( clavJnt,  clavJntFK_jnt_name, prx_grp       )
                 save_for_cleanup( clavJntFK.fullPathName() )
-                armUpJntFK = joint_copy( armUpJnt, armUpJntIK_jnt_name, clavJntFK   )
-                armLoJntFK = joint_copy( armLoJnt, armLoJntIK_jnt_name, armUpJntFK  )
-                handJntFK  = joint_copy( handJnt,  handJntIK_jnt_name,  armLoJntFK   )
+                armUpJntFK = joint_copy( armUpJnt, armUpJntFK_jnt_name, clavJntFK   )
+                armLoJntFK = joint_copy( armLoJnt, armLoJntFK_jnt_name, armUpJntFK  )
+                handJntFK  = joint_copy( handJnt,  handJntFK_jnt_name,  armLoJntFK   )
 
+                mc.parentConstraint( controls['Clavicle_'+SIDE+'_Ctrl'].fullPathName(), clavJntIK.fullPathName(), mo=True )
                 mc.parentConstraint( controls['Clavicle_'+SIDE+'_Ctrl'].fullPathName(), clavJntFK.fullPathName(), mo=True )
                 mc.parentConstraint( controls['ArmUp_FK_'+SIDE+'_Ctrl'].fullPathName(), armUpJntFK.fullPathName(), mo=True )
                 mc.parentConstraint( controls['ArmLo_FK_'+SIDE+'_Ctrl'].fullPathName(), armLoJntFK.fullPathName(), mo=True )
                 mc.parentConstraint( controls['Hand_FK_'+SIDE+'_Ctrl'].fullPathName(), handJntFK.fullPathName(), mo=True )
 
                 # IK Handle
-                mc.setAttr( armLoJntIK.fullPathName()  + '.preferredAngle', 0, -45, 0)
+                if type == kBiped:
+                    mc.setAttr( armLoJntIK.fullPathName()  + '.preferredAngle', 0, -45, 0)
+                elif type == kBipedUE:
+                    mc.setAttr( armLoJntIK.fullPathName()  + '.preferredAngle', 0, 0, -45)
+
                 ik = mc.ikHandle(n=ikName, sj=armUpJntIK.fullPathName() , ee=handJntIK.fullPathName() , solver ='ikRPsolver' )
+
                 # It seems that the ikHandle command does not yield a unique DAG path
                 ikHandle = '|'+ik[0]
                 effector = ik[1]
