@@ -789,7 +789,6 @@ class Transform(AniMeta):
 
             worldTrans = self.get_translate( outMat )
 
-            ''', 'PoleOffset
             pa.normalize()
             L4 = L2 + pa
             V4 = L4 - L2
@@ -805,7 +804,7 @@ class Transform(AniMeta):
             poleOffset.setTranslation(cross, om.MSpace.kWorld)
             outMat = poleOffset.asMatrix() * dag2WorldTMat
             worldTrans = self.get_translate( outMat )
-            '''
+
         return self.create_matrix(translate=worldTrans)
 
     def get_rotation_order( self, order ):
@@ -2698,8 +2697,6 @@ class Rig( Transform ):
                         if mc.objExists( xform_data['parent'] ):
                             mc.parent( joints[i], xform_data['parent'])
 
-
-
         for i in range(len(joints)):
 
             xform_data = data['Skeleton']['Joints'][joints[i]]
@@ -3183,6 +3180,8 @@ class Rig( Transform ):
                             mirror = self.mirror_matrix( mats[ nameLft ], mode = dataDict[ 'Mirror' ], space = kLocal )
                             self.set_matrix( handle, mirror, kLocal )
 
+
+
             elif symDir == 'rightToLeft':
                 for handle in handles_Lft:
                     dataDict = self.get_metaData( handle )
@@ -3194,6 +3193,12 @@ class Rig( Transform ):
                         else:
                             mc.warning( nameRgt + ' can not be found in mats_Rgt dict.' )
 
+            # Mirror the Centre Controls
+            for handle in handles_Ctr:
+                dataDict = self.get_metaData( handle )
+                if 'Mirror' in dataDict:
+                    mirror = self.mirror_matrix( mats[ handle ], mode = dataDict[ 'Mirror' ], space = kLocal )
+                    self.set_matrix( handle, mirror, kLocal )
             mc.undoInfo( closeChunk = True )
 
 
@@ -5284,11 +5289,18 @@ class Char( Rig ):
 
                 jointGrp = self.find_node( charRoot, 'Joint_Grp' )
 
-                for jnt in mc.listRelatives( jointGrp, ad = True, c = True, typ = 'joint' ):
-                    nodes = mc.listConnections( jnt + '.t', s = True, d = False ) or None
-                    if nodes is not None:
-                        if mc.nodeType( nodes[ 0 ] ) == 'multiplyDivide':
-                            mc.delete( nodes[ 0 ] )
+                if mc.listRelatives( jointGrp, ad = True, c = True, typ = 'joint' ):
+                    joints = mc.listRelatives( jointGrp, ad = True, c = True, typ = 'joint' )
+                else:
+                    if mc.objExists('skin:root'):
+                        joints = mc.listRelatives( 'skin:root', ad = True, c = True, typ = 'joint' )
+
+                if len( joints ):
+                    for jnt in joints:
+                        nodes = mc.listConnections( jnt + '.t', s = True, d = False ) or None
+                        if nodes is not None:
+                            if mc.nodeType( nodes[ 0 ] ) == 'multiplyDivide':
+                                mc.delete( nodes[ 0 ] )
 
                 # Store joint positions
                 jointDict = self.get_joint_transform( charRoot )
@@ -8147,7 +8159,10 @@ class Biped( Char ):
                 offset_rot_2 = om.MEulerRotation(  math.radians( 90 ), 0, 0 )
                 offset_rot_3 = om.MEulerRotation(  math.radians( 180 ), 0, 0 )
                 leg_preferred_angle = [ 0,0,-45 ]
-                arm_preferred_angle = [ 0,-45,0 ]
+                if type == kBiped:
+                    arm_preferred_angle = [ 0,-45,0 ]
+                if type == kBipedUE:
+                    arm_preferred_angle = [ 0,0,-45 ]
 
                 joints['Root_Ctr']    = self.get_path( self.find_node( rootNode, 'root' ))
                 joints['Hips_Ctr']    = self.get_path( self.find_node( rootNode, 'pelvis' ))
@@ -8487,7 +8502,6 @@ class Biped( Char ):
                         }
                         handleDict[ fingers[ j ] + 'Meta_' + SIDES[ i ] + '_Ctrl' ] = finger_dict
 
-
                 handleDict[ 'LegUp_FK_' + SIDES[ i ] + '_Ctrl' ] = {
                     'name': 'LegUp_FK_' + SIDES[ i ] + '_Ctrl',
                     'parent': 'Hips_Ctr_Ctrl',
@@ -8696,6 +8710,11 @@ class Biped( Char ):
             eff_ctrls  = ['LegLo_FK_', 'ArmLo_FK_']
             hndl_ctrls  = ['Foot_FK_', 'Hand_FK_']
 
+            if type == kBiped:
+                preferred_angle = [0,-45,0]
+            elif type == kBipedUE:
+                preferred_angle = [0,0,-45]
+
             for SIDE in [ 'Lft', 'Rgt'  ]:
 
                 for i in range( len ( poles ) ):
@@ -8703,17 +8722,13 @@ class Biped( Char ):
                     for attr in ['tx', 'ty', 'tz', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz'  ]:
                         mc.setAttr( controls[poles[i]+SIDE+'_Ctrl'].fullPathName()+ '.'+attr, l=False)
 
-                    #legUp_jnt = controls[ root_ctrls[i]+SIDE+'_Ctrl' ]
-                    #legLo_jnt = controls[ eff_ctrls[i] +SIDE+'_Ctrl' ]
-                    #foot_jnt  = controls[ hndl_ctrls[i]+SIDE+'_Ctrl' ]
-
-                    #legUp_jnt = self.find_node( controls[ root_ctrls[i]+SIDE+'_Ctrl' ] )
+                    legUp_jnt = controls[ root_ctrls[i]+SIDE+'_Ctrl' ]
                     legLo_jnt = controls[ eff_ctrls[i] +SIDE+'_Ctrl' ]
                     foot_jnt  = controls[ hndl_ctrls[i]+SIDE+'_Ctrl' ]
 
-                    # Redundant? Wird beim IK Setup besser passen...
-                    '''
                     pole_matrix = self.get_polevector_position( legUp_jnt, legLo_jnt, foot_jnt, preferred_angle )
+
+                    pole_matrix = self.create_matrix(translate=self.get_translate( pole_matrix ))
 
                     parent = mc.listRelatives ( controls[ poles[i]+SIDE+'_Ctrl' ].fullPathName(), p=True )[0]
                     parent = mc.listRelatives ( parent, p=True )[0]
@@ -8722,7 +8737,7 @@ class Biped( Char ):
 
                     for attr in ['tx', 'ty', 'tz', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz'  ]:
                         mc.setAttr( parent + '.'+attr, l=True)
-                    '''
+
             if self.DEBUG:
                 print ( 'Position Pole Vector done' )
 
@@ -8771,7 +8786,7 @@ class Biped( Char ):
             mc.setAttr( eye_ctrl_grp + '.r',  0,0,0 )
 
             jnt = self.find_node(rootNode, eye_l_jnt)
-            controls['Eyes_Lft_Ctrl']  = self.create_handle(name='Eye_Lft_Ctrl',
+            controls['Eye_Lft_Ctrl']  = self.create_handle(name='Eye_Lft_Ctrl',
                                                matchTransform=jnt,
                                                parent=controls['Eyes_Ctr_Ctrl'].fullPathName(),
                                                shapeType=self.kCube,
@@ -8784,7 +8799,7 @@ class Biped( Char ):
                                                maintainOffset=False)
 
             jnt = self.find_node(rootNode, eye_r_jnt)
-            controls['Eyes_Rgt_Ctrl'] = self.create_handle(name='Eye_Rgt_Ctrl',
+            controls['Eye_Rgt_Ctrl'] = self.create_handle(name='Eye_Rgt_Ctrl',
                                                matchTransform=jnt,
                                                parent=controls['Eyes_Ctr_Ctrl'].fullPathName(),
                                                shapeType=self.kCube,
@@ -8801,8 +8816,8 @@ class Biped( Char ):
             ty = mc.getAttr( eye_ctrl_grp + '.ty' )
             mc.setAttr( eye_ctrl_grp+ '.tz', ty/3 )
 
-            eye_ctrl_grp_l = mc.listRelatives( controls['Eyes_Lft_Ctrl'].fullPathName(), p=True, pa=True )[0]
-            eye_ctrl_grp_r = mc.listRelatives( controls['Eyes_Rgt_Ctrl'].fullPathName(), p=True, pa=True )[0]
+            eye_ctrl_grp_l = mc.listRelatives( controls['Eye_Lft_Ctrl'].fullPathName(), p=True, pa=True )[0]
+            eye_ctrl_grp_r = mc.listRelatives( controls['Eye_Rgt_Ctrl'].fullPathName(), p=True, pa=True )[0]
 
             for grp in [eye_ctrl_grp_l, eye_ctrl_grp_r]:
                 # zero out the rotation
@@ -8815,10 +8830,9 @@ class Biped( Char ):
             for attr in [ 'sx', 'sy', 'sz', 'v']:
                 mc.setAttr ( controls['Eyes_Ctr_Ctrl'].fullPathName()+ '.' + attr, l=1, k=0 )
 
-            for ctl in [controls['Eyes_Lft_Ctrl'].fullPathName(), controls['Eyes_Rgt_Ctrl'].fullPathName()]:
+            for ctl in [controls['Eye_Lft_Ctrl'].fullPathName(), controls['Eye_Rgt_Ctrl'].fullPathName()]:
                 for attr in ['rx', 'ry', 'rz', 'sx', 'sy', 'sz', 'v']:
                     mc.setAttr ( ctl + '.' + attr, l=1, k=0 )
-
 
             mc.setAttr( eye_ctrl_grp + '.tx', l=1 )
             mc.setAttr( eye_ctrl_grp + '.tz', l=1 )
@@ -8895,22 +8909,6 @@ class Biped( Char ):
 
                 mc.connectAttr( mlt1 + '.output', mlt2 + '.input1' )
 
-                '''
-                legUp_FK_decomp = matrix_multi(
-                    name=name + '_FK_' + SIDE,
-                    inputs=[
-                        name + '_FK_' + SIDE + '_Ctrl',
-                        name + '_FK_' + SIDE + '_Ctrl_Blnd_Grp',
-                        name + '_FK_' + SIDE + '_Ctrl_Grp'
-                    ],
-                    inputs_inv=[
-                        joints[ name + '_' + SIDE ]
-                    ]
-                )
-                mc.connectAttr( legUp_FK_decomp + '.outputRotate', pb + '.inRotate1' )
-                mc.connectAttr( legUp_FK_decomp + '.outputTranslate', pb + '.inTranslate1' )
-
-                '''
                 mc.connectAttr( joint_fk.fullPathName() + '.rotate', pb + '.inRotate1' )
                 mc.connectAttr( joint_fk.fullPathName() + '.translate', pb + '.inTranslate1' )
 
@@ -8922,10 +8920,6 @@ class Biped( Char ):
                 mc.connectAttr(mlt2 + '.output', joint.fullPathName() + '.translate')
 
                 mc.connectAttr(pb + '.outRotate', joint.fullPathName() + '.rotate')
-
-                # Is that a good idea? I don`t think so
-                #mc.setAttr(joint.fullPathName() + '.jointOrient', 0, 0, 0)
-                #mc.setAttr(joint_ik.fullPathName() + '.jointOrient', 0, 0, 0)
 
                 return pb
 
@@ -8998,7 +8992,6 @@ class Biped( Char ):
                 wo = mc.createNode( 'transform', name=self.short_name(node.replace('Ctrl', 'WorldOrient')), ss=True, parent=parent )
 
                 mc.parent( node_path.fullPathName(), wo )
-
 
                 orient = mc.orientConstraint( root, wo, mo=True)
 
@@ -9274,6 +9267,25 @@ class Biped( Char ):
                 mc.parentConstraint( controls['ArmLo_FK_'+SIDE+'_Ctrl'].fullPathName(), armLoJntFK.fullPathName(), mo=True )
                 mc.parentConstraint( controls['Hand_FK_'+SIDE+'_Ctrl'].fullPathName(), handJntFK.fullPathName(), mo=True )
 
+                grp = mc.createNode('transform', name='Arm_Prx_Grp_'+SIDE, parent=prx_grp, ss=True)
+
+                # Create Proxy Transforms for FK/IK switching
+                def create_proxy_transform(ctl, joint, parent):
+                    node_name= self.short_name(ctl).replace('Ctrl', 'Prx')
+                    node = mc.createNode('transform', name=node_name, parent=parent, ss=True)
+                    mc.matchTransform( node, ctl )
+                    mc.parentConstraint(joint, node, mo=True)
+
+                create_proxy_transform(controls['ArmUp_FK_'+SIDE+'_Ctrl'].fullPathName(),
+                                       armUpJntFK.fullPathName(),
+                                       grp)
+                create_proxy_transform(controls['ArmLo_FK_'+SIDE+'_Ctrl'].fullPathName(),
+                                       armLoJntFK.fullPathName(),
+                                       grp)
+                create_proxy_transform(controls['Hand_FK_'+SIDE+'_Ctrl'].fullPathName(),
+                                       handJntFK.fullPathName(),
+                                       grp)
+
                 # IK Handle
                 if type == kBiped:
                     mc.setAttr( armLoJntIK.fullPathName()  + '.preferredAngle', 0, -45, 0)
@@ -9297,7 +9309,8 @@ class Biped( Char ):
                 ########################################################################################################
                 #
                 # Pole vector Position
-
+                '''
+                Redundant
                 pole_matrix = self.get_polevector_position( armUpJntIK, armLoJntIK, handJntIK, arm_preferred_angle )
 
                 parent = mc.listRelatives( controls[ 'ArmPole_IK_' + SIDE + '_Ctrl' ].fullPathName(), p = True )[ 0 ]
@@ -9307,7 +9320,7 @@ class Biped( Char ):
 
                 for attr in [ 'tx', 'ty', 'tz', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz' ]:
                     mc.setAttr( parent + '.' + attr, l = True )
-
+                '''
                 # Pole vector Position
                 #
                 ########################################################################################################
@@ -9446,7 +9459,7 @@ class Biped( Char ):
                     controls['Hand_IK_'+SIDE+'_Ctrl'],
                     controls['ArmPole_IK_'+SIDE+'_Ctrl'],
                     controls['HipsUpVec_'+SIDE+'_Ctrl'],
-                    controls['Eyes_'+SIDE+'_Ctrl']
+                    controls['Eye_'+SIDE+'_Ctrl']
                 ]
 
                 set_data(  handles, data )
@@ -9460,7 +9473,16 @@ class Biped( Char ):
                 data['Mirror'] = kSymmetricRotation
                 handles_ik = [controls['FootLift_IK_'+SIDE+'_Ctrl'],  controls['Toes_IK_'+SIDE+'_Ctrl'], controls['ToesTip_IK_'+SIDE+'_Ctrl'], controls['Heel_IK_'+SIDE+'_Ctrl'] ]
 
+                data['Mirror'] = kSymmetricTranslation
+                data['Limb'] = 'Head'
+                handles_ik = [controls['Eye_'+SIDE+'_Ctrl'], controls['Eyes_Ctr_Ctrl']  ]
                 set_data(  handles_ik, data )
+
+                data['Mirror'] = kSymmetricTranslation
+                for LIMB in ['Arm', 'Leg']:
+                    data['Limb'] = LIMB
+                    handles_ik = [controls[LIMB+'Pole_IK_'+SIDE+'_Ctrl'] ]
+                    set_data(  handles_ik, data )
 
                 data['Kinematic'] = 'FK'
                 handles_fk = [controls['LegUp_FK_'+SIDE+'_Ctrl'], controls['LegLo_FK_'+SIDE+'_Ctrl'], controls['Foot_FK_'+SIDE+'_Ctrl'], controls['Toes_FK_'+SIDE+'_Ctrl'] ]
@@ -9686,6 +9708,10 @@ class Biped( Char ):
 
         if char and limb and side:
 
+            data = self.get_metaData(char)
+
+            type = data['RigType']
+
             ctrl = 'Foot_IK_Lft_Ctrl'
 
             if limb == 'Leg' and side == 'Lft':
@@ -9787,36 +9813,68 @@ class Biped( Char ):
                 # From IK to FK
                 if newMode == 0:
 
+                    side_jnt = side
                     nodes  = ['ArmUp_FK_{}_Ctrl', 'ArmLo_FK_{}_Ctrl', 'Hand_FK_{}_Ctrl' ]
                     joints = ['ArmUp_{}_Jnt', 'ArmLo_{}_Jnt', 'Hand_{}_Jnt' ]
 
-                    for i in range(len(nodes)):
-                        ctrlName = nodes[i].format(side)
-                        jntName  = joints[i].format(side)
-                        ctrl     = am.find_node(char, ctrlName)
-                        jnt      = am.find_node(char, jntName)
+                    if type == kBipedUE:
+                        side_jnt = 'l'
+                        if side == 'Rgt':
+                            side_jnt = 'r'
+                        joints = ['skin:upperarm_IK_{}', 'skin:lowerarm_IK_{}', 'skin:hand_IK_{}']
 
+                    matrices = []
+
+                    # Get the matrices
+                    for i in range(len(nodes)):
+                        prxName  = nodes[i].format(side).replace('Ctrl','Prx')
+                        prx      = am.find_node(char, prxName)
+
+                        if prx is None:
+                            mc.warning('aniMeta: can not find ', prxName)
+                            break
+
+                        m = self.get_matrix( prx )
+                        matrices.append( m )
+
+                    mc.setAttr(ik_node + '.FK_IK', 0)
+
+                    # Set the matrices
+                    for i in range(len(nodes)):
+
+                        ctrlName = nodes[i].format(side)
+                        ctrl     = am.find_node(char, ctrlName)
                         if ctrl is None:
                             mc.warning('aniMeta: can not find ', ctrlName)
                             break
-                        if jnt is None:
-                            mc.warning('aniMeta: can not find ', jntName)
-                            break
 
-                        m = self.get_matrix( jnt )
-                        self.set_matrix( ctrl, m )
 
-                    mc.setAttr(ik_node + '.FK_IK', 0)
+                        if type == kBiped:
+                            self.set_matrix( ctrl, matrices[i] )
+
+                        if type == kBipedUE:
+                            self.set_matrix( ctrl, matrices[i] )
 
                 # From FK to IK
                 elif newMode == 1:
 
-                    # Foot
-                    armUp_ik_jnt = 'ArmUp_IK_{}_Jnt'.format(side)
-                    armLo_ik_jnt = 'ArmLo_IK_{}_Jnt'.format(side)
                     pole_ik      = 'ArmPole_IK_{}_Ctrl'.format(side)
                     hand_ik      = 'Hand_IK_{}_Ctrl'.format(side)
-                    hand_jnt     = 'Hand_{}_Jnt'.format(side)
+
+                    # Arm
+                    if type == kBiped:
+                        armUp_ik_jnt = 'ArmUp_IK_{}_Jnt'.format(side)
+                        armLo_ik_jnt = 'ArmLo_IK_{}_Jnt'.format(side)
+                        hand_jnt     = 'Hand_{}_Jnt'.format(side)
+
+                    elif type == kBipedUE:
+                        side_jnt = 'l'
+                        if side == 'Rgt':
+                            side_jnt = 'r'
+
+                        armUp_ik_jnt = 'skin:upperarm_IK_' + side_jnt
+                        armLo_ik_jnt = 'skin:lowerarm_IK_' + side_jnt
+                        hand_jnt     = 'Hand_FK_{}_Prx'.format(side)
 
                     armUp_ik_jnt = am.find_node(char, armUp_ik_jnt)
                     armLo_ik_jnt = am.find_node(char, armLo_ik_jnt)
@@ -9826,12 +9884,10 @@ class Biped( Char ):
 
                     m = self.get_matrix(hand_jnt)
 
-                    if side == 'Rgt':
-                        m = om.MEulerRotation(math.radians(180),0,0).asMatrix() * m
-
                     self.set_matrix(hand_ik, m, setScale = False )
 
-                    pa = mc.getAttr( armLo_ik_jnt + '.preferredAngle' )[0]
+                    if armLo_ik_jnt is not None:
+                        pa = mc.getAttr( armLo_ik_jnt + '.preferredAngle' )[0]
 
                     out = Transform().get_polevector_position( armUp_ik_jnt, armLo_ik_jnt, hand_jnt, pa )
 
@@ -13726,10 +13782,10 @@ class MainTab( QWidget ):
         # IK
 
         # Leg IK Switch R
-        self.button_ik_arm_switch_R   = self.button_create( self.pickerLayout, 8, 1, self.red, 1, 3 )
-        self.button_ik_arm_switch_R.setFixedWidth(  three_units )
-        self.button_ik_arm_switch_R.setText('IK <> FK')
-        self.button_ik_arm_switch_R.clicked.connect( partial ( self.picker_cmd, {'Mode': 'Arm_IK_R','Nodes':['Arm_IK_Rgt'], 'Switch': True } ) )
+        #self.button_ik_arm_switch_R   = self.button_create( self.pickerLayout, 8, 1, self.red, 1, 3 )
+        #self.button_ik_arm_switch_R.setFixedWidth(  three_units )
+        #self.button_ik_arm_switch_R.setText('IK <> FK')
+        #self.button_ik_arm_switch_R.clicked.connect( partial ( self.picker_cmd, {'Mode': 'Arm_IK_R','Nodes':['Arm_IK_Rgt'], 'Switch': True } ) )
 
         self.button_ik_arm_R   = self.button_create( self.pickerLayout, 9, 2, self.grey, 1, 1 )
         self.button_ik_arm_R.setFixedWidth( self.button_size )
@@ -13744,10 +13800,10 @@ class MainTab( QWidget ):
         self.button_fk_arm_R.clicked.connect( partial ( self.picker_cmd, {'Mode': 'Arm_FK_R','Nodes':['Arm_IK_Rgt'], 'Switch': False } ) )
 
         # Leg IK Switch L
-        self.button_ik_arm_switch_L   = self.button_create( self.pickerLayout, 8, 11, self.blue, 1, 3 )
-        self.button_ik_arm_switch_L.setFixedWidth(  three_units )
-        self.button_ik_arm_switch_L.setText('IK <> FK')
-        self.button_ik_arm_switch_L.clicked.connect( partial ( self.picker_cmd, {'Mode': 'Arm_IK_L','Nodes':['Arm_IK_Lft'], 'Switch': True } ) )
+        #self.button_ik_arm_switch_L   = self.button_create( self.pickerLayout, 8, 11, self.blue, 1, 3 )
+        #self.button_ik_arm_switch_L.setFixedWidth(  three_units )
+        #self.button_ik_arm_switch_L.setText('IK <> FK')
+        #self.button_ik_arm_switch_L.clicked.connect( partial ( self.picker_cmd, {'Mode': 'Arm_IK_L','Nodes':['Arm_IK_Lft'], 'Switch': True } ) )
 
         self.button_ik_arm_L = self.button_create( self.pickerLayout, 9, 12, self.grey, 1, 1 )
         self.button_ik_arm_L.setFixedWidth( self.button_size )
@@ -13763,10 +13819,10 @@ class MainTab( QWidget ):
 
 
         # Leg IK Switch R
-        self.button_ik_leg_switch_R   = self.button_create( self.pickerLayout, 14, 1, self.red, 1, 3 )
-        self.button_ik_leg_switch_R.setFixedWidth(  three_units )
-        self.button_ik_leg_switch_R.setText('IK <> FK')
-        self.button_ik_leg_switch_R.clicked.connect( partial ( self.picker_cmd, {'Mode': 'Leg_IK_R','Nodes':['Leg_IK_Rgt'], 'Switch': True } ) )
+        #self.button_ik_leg_switch_R   = self.button_create( self.pickerLayout, 14, 1, self.red, 1, 3 )
+        #self.button_ik_leg_switch_R.setFixedWidth(  three_units )
+        #self.button_ik_leg_switch_R.setText('IK <> FK')
+        #self.button_ik_leg_switch_R.clicked.connect( partial ( self.picker_cmd, {'Mode': 'Leg_IK_R','Nodes':['Leg_IK_Rgt'], 'Switch': True } ) )
 
         self.button_ik_leg_R   = self.button_create( self.pickerLayout, 15, 2, self.grey, 1, 1 )
         self.button_ik_leg_R.setFixedWidth( self.button_size )
@@ -13781,10 +13837,10 @@ class MainTab( QWidget ):
         self.button_fk_leg_R.clicked.connect( partial ( self.picker_cmd, {'Mode': 'Leg_FK_R','Nodes':['Leg_IK_Rgt'], 'Switch': False } ) )
 
         # Leg IK Switch L
-        self.button_ik_leg_switch_L   = self.button_create( self.pickerLayout, 14, 11, self.blue, 1, 3 )
-        self.button_ik_leg_switch_L.setFixedWidth(  three_units )
-        self.button_ik_leg_switch_L.setText('IK <> FK')
-        self.button_ik_leg_switch_L.clicked.connect( partial ( self.picker_cmd, {'Mode': 'Leg_IK_L','Nodes':['Leg_IK_Lft'], 'Switch': True } ) )
+        #self.button_ik_leg_switch_L   = self.button_create( self.pickerLayout, 14, 11, self.blue, 1, 3 )
+        #self.button_ik_leg_switch_L.setFixedWidth(  three_units )
+        #self.button_ik_leg_switch_L.setText('IK <> FK')
+        #self.button_ik_leg_switch_L.clicked.connect( partial ( self.picker_cmd, {'Mode': 'Leg_IK_L','Nodes':['Leg_IK_Lft'], 'Switch': True } ) )
 
         self.button_ik_leg_L = self.button_create( self.pickerLayout, 15, 12, self.grey, 1, 1 )
         self.button_ik_leg_L.setFixedWidth( self.button_size )
@@ -14121,7 +14177,7 @@ class MainTab( QWidget ):
         self.button_Spine3.clicked.connect( partial( self.picker_cmd,     {'Nodes': ['Spine3_Ctr_Ctrl']} ) )
         self.button_Hips.clicked.connect(partial(self.picker_cmd,         {'Nodes': ['Hips_Ctr_Ctrl']}))
         self.button_Chest.clicked.connect(partial(self.picker_cmd,        {'Nodes': ['Chest_Ctr_Ctrl']}))
-        self.button_Neck.clicked.connect(partial(self.picker_cmd,         {'Nodes': ['Neck_Ctr_Ctrl']}))
+        self.button_Neck.clicked.connect(partial(self.picker_cmd,         {'Nodes': ['Neck1_Ctr_Ctrl']}))
         self.button_Head.clicked.connect(partial(self.picker_cmd,         {'Nodes': ['Head_Ctr_Ctrl']}))
         self.button_Eye_L.clicked.connect(partial(self.picker_cmd,        {'Nodes': ['Eye_Lft_Ctrl']}))
         self.button_Eye_R.clicked.connect(partial(self.picker_cmd,        {'Nodes': ['Eye_Rgt_Ctrl']}))
@@ -14541,49 +14597,49 @@ class MainTab( QWidget ):
         # Tool Tips
         ############################################################
 
-        self.button_Finger1_1_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky1_Rgt_Ctrl']}))
-        self.button_Finger1_2_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky2_Rgt_Ctrl']}))
-        self.button_Finger1_3_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky3_Rgt_Ctrl']}))
-        self.button_Finger1_4_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky4_Rgt_Ctrl']}))
+        self.button_Finger1_1_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['PinkyMeta_Rgt_Ctrl']}))
+        self.button_Finger1_2_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky1_Rgt_Ctrl']}))
+        self.button_Finger1_3_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky2_Rgt_Ctrl']}))
+        self.button_Finger1_4_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky3_Rgt_Ctrl']}))
 
-        self.button_Finger2_1_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Ring1_Rgt_Ctrl']}))
-        self.button_Finger2_2_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Ring2_Rgt_Ctrl']}))
-        self.button_Finger2_3_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Ring3_Rgt_Ctrl']}))
-        self.button_Finger2_4_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Ring4_Rgt_Ctrl']}))
+        self.button_Finger2_1_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['RingMeta_Rgt_Ctrl']}))
+        self.button_Finger2_2_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Ring1_Rgt_Ctrl']}))
+        self.button_Finger2_3_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Ring2_Rgt_Ctrl']}))
+        self.button_Finger2_4_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Ring3_Rgt_Ctrl']}))
 
-        self.button_Finger3_1_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Middle1_Rgt_Ctrl']}))
-        self.button_Finger3_2_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Middle2_Rgt_Ctrl']}))
-        self.button_Finger3_3_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Middle3_Rgt_Ctrl']}))
-        self.button_Finger3_4_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Middle4_Rgt_Ctrl']}))
+        self.button_Finger3_1_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['MiddleMeta_Rgt_Ctrl']}))
+        self.button_Finger3_2_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Middle1_Rgt_Ctrl']}))
+        self.button_Finger3_3_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Middle2_Rgt_Ctrl']}))
+        self.button_Finger3_4_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Middle3_Rgt_Ctrl']}))
 
-        self.button_Finger4_1_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Index1_Rgt_Ctrl']}))
-        self.button_Finger4_2_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Index2_Rgt_Ctrl']}))
-        self.button_Finger4_3_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Index3_Rgt_Ctrl']}))
-        self.button_Finger4_4_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Index4_Rgt_Ctrl']}))
+        self.button_Finger4_1_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['IndeMeta_Rgt_Ctrl']}))
+        self.button_Finger4_2_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Index1_Rgt_Ctrl']}))
+        self.button_Finger4_3_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Index2_Rgt_Ctrl']}))
+        self.button_Finger4_4_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Index3_Rgt_Ctrl']}))
 
         self.button_Finger5_1_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Thumb1_Rgt_Ctrl']}))
         self.button_Finger5_2_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Thumb2_Rgt_Ctrl']}))
         self.button_Finger5_3_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Thumb3_Rgt_Ctrl']}))
 
-        self.button_Finger1_1_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky1_Lft_Ctrl']}))
-        self.button_Finger1_2_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky2_Lft_Ctrl']}))
-        self.button_Finger1_3_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky3_Lft_Ctrl']}))
-        self.button_Finger1_4_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky4_Lft_Ctrl']}))
+        self.button_Finger1_1_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['PinkyMeta_Lft_Ctrl']}))
+        self.button_Finger1_2_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky1_Lft_Ctrl']}))
+        self.button_Finger1_3_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky2_Lft_Ctrl']}))
+        self.button_Finger1_4_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky3_Lft_Ctrl']}))
 
-        self.button_Finger2_1_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Ring1_Lft_Ctrl']}))
-        self.button_Finger2_2_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Ring2_Lft_Ctrl']}))
-        self.button_Finger2_3_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Ring3_Lft_Ctrl']}))
-        self.button_Finger2_4_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Ring4_Lft_Ctrl']}))
+        self.button_Finger2_1_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['RingMeta_Lft_Ctrl']}))
+        self.button_Finger2_2_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Ring1_Lft_Ctrl']}))
+        self.button_Finger2_3_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Ring2_Lft_Ctrl']}))
+        self.button_Finger2_4_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Ring3_Lft_Ctrl']}))
 
-        self.button_Finger3_1_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Middle1_Lft_Ctrl']}))
-        self.button_Finger3_2_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Middle2_Lft_Ctrl']}))
-        self.button_Finger3_3_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Middle3_Lft_Ctrl']}))
-        self.button_Finger3_4_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Middle4_Lft_Ctrl']}))
+        self.button_Finger3_1_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['MiddleMeta_Lft_Ctrl']}))
+        self.button_Finger3_2_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Middle1_Lft_Ctrl']}))
+        self.button_Finger3_3_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Middle2_Lft_Ctrl']}))
+        self.button_Finger3_4_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Middle3_Lft_Ctrl']}))
 
-        self.button_Finger4_1_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Index1_Lft_Ctrl']}))
-        self.button_Finger4_2_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Index2_Lft_Ctrl']}))
-        self.button_Finger4_3_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Index3_Lft_Ctrl']}))
-        self.button_Finger4_4_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Index4_Lft_Ctrl']}))
+        self.button_Finger4_1_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['IndexMeta_Lft_Ctrl']}))
+        self.button_Finger4_2_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Index1_Lft_Ctrl']}))
+        self.button_Finger4_3_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Index2_Lft_Ctrl']}))
+        self.button_Finger4_4_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Index3_Lft_Ctrl']}))
 
         self.button_Finger5_1_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Thumb1_Lft_Ctrl']}))
         self.button_Finger5_2_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Thumb2_Lft_Ctrl']}))
@@ -14593,19 +14649,19 @@ class MainTab( QWidget ):
         self.button_Prop_R.clicked.connect( partial(self.picker_cmd, {'Nodes': ['Prop_Rgt_Ctrl']}))
 
 
-        self.button2_Finger1_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky4_Rgt_Ctrl',
+        self.button2_Finger1_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky1_Rgt_Ctrl',
                                                                                    'Pinky3_Rgt_Ctrl',
                                                                                    'Pinky2_Rgt_Ctrl']}))
 
-        self.button2_Finger2_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Ring4_Rgt_Ctrl',
+        self.button2_Finger2_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Ring1_Rgt_Ctrl',
                                                                                    'Ring3_Rgt_Ctrl',
                                                                                    'Ring2_Rgt_Ctrl']}))
 
-        self.button2_Finger3_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Middle4_Rgt_Ctrl',
+        self.button2_Finger3_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Middle1_Rgt_Ctrl',
                                                                                    'Middle3_Rgt_Ctrl',
                                                                                    'Middle2_Rgt_Ctrl']}))
 
-        self.button2_Finger4_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Index4_Rgt_Ctrl',
+        self.button2_Finger4_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Index1_Rgt_Ctrl',
                                                                                    'Index3_Rgt_Ctrl',
                                                                                    'Index2_Rgt_Ctrl' ]}))
 
@@ -14613,65 +14669,65 @@ class MainTab( QWidget ):
                                                                                    'Thumb2_Rgt_Ctrl',
                                                                                    'Thumb3_Rgt_Ctrl']}))
 
-        self.button2_Finger1_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky4_Lft_Ctrl',
+        self.button2_Finger1_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky1_Lft_Ctrl',
                                                                                    'Pinky3_Lft_Ctrl',
                                                                                    'Pinky2_Lft_Ctrl']}))
 
-        self.button2_Finger2_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Ring4_Lft_Ctrl',
+        self.button2_Finger2_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Ring1_Lft_Ctrl',
                                                                                    'Ring3_Lft_Ctrl',
                                                                                    'Ring2_Lft_Ctrl']}))
 
         self.button2_Finger3_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Middle2_Lft_Ctrl',
                                                                                    'Middle3_Lft_Ctrl',
-                                                                                   'Middle4_Lft_Ctrl']}))
+                                                                                   'Middle1_Lft_Ctrl']}))
 
         self.button2_Finger4_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Index2_Lft_Ctrl',
                                                                                    'Index3_Lft_Ctrl',
-                                                                                   'Index4_Lft_Ctrl']}))
+                                                                                   'Index1_Lft_Ctrl']}))
 
         self.button2_Finger5_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Thumb1_Lft_Ctrl',
                                                                                    'Thumb2_Lft_Ctrl',
                                                                                    'Thumb3_Lft_Ctrl']}))
 
-        self.button2_Digits1_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky1_Rgt_Ctrl',
+        self.button2_Digits1_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['PinkyMeta_Rgt_Ctrl',
+                                                                                   'RingMeta_Rgt_Ctrl',
+                                                                                   'MiddleMeta_Rgt_Ctrl',
+                                                                                   'IndexMeta_Rgt_Ctrl']}))
+
+        self.button2_Digits2_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky1_Rgt_Ctrl',
                                                                                    'Ring1_Rgt_Ctrl',
                                                                                    'Middle1_Rgt_Ctrl',
                                                                                    'Index1_Rgt_Ctrl']}))
 
-        self.button2_Digits2_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky2_Rgt_Ctrl',
+        self.button2_Digits3_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky2_Rgt_Ctrl',
                                                                                    'Ring2_Rgt_Ctrl',
                                                                                    'Middle2_Rgt_Ctrl',
                                                                                    'Index2_Rgt_Ctrl']}))
 
-        self.button2_Digits3_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky3_Rgt_Ctrl',
+        self.button2_Digits4_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky3_Rgt_Ctrl',
                                                                                    'Ring3_Rgt_Ctrl',
                                                                                    'Middle3_Rgt_Ctrl',
                                                                                    'Index3_Rgt_Ctrl']}))
 
-        self.button2_Digits4_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky4_Rgt_Ctrl',
-                                                                                   'Ring4_Rgt_Ctrl',
-                                                                                   'Middle4_Rgt_Ctrl',
-                                                                                   'Index4_Rgt_Ctrl']}))
+        self.button2_Digits1_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['PinkyMeta_Lft_Ctrl',
+                                                                                   'RingMeta_Lft_Ctrl',
+                                                                                   'MiddleMeta_Lft_Ctrl',
+                                                                                   'IndexMeta_Lft_Ctrl']}))
 
-        self.button2_Digits1_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky1_Lft_Ctrl',
+        self.button2_Digits2_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky1_Lft_Ctrl',
                                                                                    'Ring1_Lft_Ctrl',
                                                                                    'Middle1_Lft_Ctrl',
                                                                                    'Index1_Lft_Ctrl']}))
 
-        self.button2_Digits2_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky2_Lft_Ctrl',
+        self.button2_Digits3_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky2_Lft_Ctrl',
                                                                                    'Ring2_Lft_Ctrl',
                                                                                    'Middle2_Lft_Ctrl',
                                                                                    'Index2_Lft_Ctrl']}))
 
-        self.button2_Digits3_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky3_Lft_Ctrl',
+        self.button2_Digits4_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky3_Lft_Ctrl',
                                                                                    'Ring3_Lft_Ctrl',
                                                                                    'Middle3_Lft_Ctrl',
                                                                                    'Index3_Lft_Ctrl']}))
-
-        self.button2_Digits4_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky4_Lft_Ctrl',
-                                                                                   'Ring4_Lft_Ctrl',
-                                                                                   'Middle4_Lft_Ctrl',
-                                                                                   'Index4_Lft_Ctrl']}))
 
         self.button_Hand_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky4_Lft_Ctrl',
                                                                                    'Ring4_Lft_Ctrl',
