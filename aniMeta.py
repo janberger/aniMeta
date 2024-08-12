@@ -14164,7 +14164,6 @@ class MainTab( QWidget ):
         # Stack
         ############################################################
 
-
         ############################################################
         # Commands
 
@@ -14265,7 +14264,8 @@ class MainTab( QWidget ):
 
 
         self.button_Caput.clicked.connect(partial(self.picker_cmd,    {'Nodes': ['Head_Ctr_Ctrl',
-                                                                                 'Neck_Ctr_Ctrl',
+                                                                                 'Neck1_Ctr_Ctrl',
+                                                                                 'Neck2_Ctr_Ctrl',
                                                                                  'Eyes_Ctr_Ctrl',
                                                                                  'Eye_Lft_Ctrl',
                                                                                  'Eye_Rgt_Ctrl']}))
