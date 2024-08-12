@@ -1643,6 +1643,7 @@ class Rig( Transform ):
         globalScale = False
         aimVec = [0,0,1]
         upVec = [0,1,0]
+        upVecObj = None
         gs = 'globalCtrlScale'
         scale = 1.0
         rotateOrder = kXYZ
@@ -1702,6 +1703,8 @@ class Rig( Transform ):
             aimVec = kwargs[ 'aimVec' ]
         if 'upVec' in kwargs:
             upVec = kwargs[ 'upVec' ]
+        if 'upVecObject' in kwargs:
+            upVecObj = kwargs[ 'upVecObject' ]
         if 'scale' in kwargs:
             scale = kwargs[ 'scale' ]
         if 'rotateOrder' in kwargs:
@@ -1923,7 +1926,20 @@ class Rig( Transform ):
                     pass
             if constraint == self.kAim:
                 try:
-                    mc.aimConstraint( ctrl_path.fullPathName(), target.fullPathName(), mo=maintainOffset, upVector=upVec, aimVector=aimVec)
+                    if upVecObj is not None:
+                        mc.aimConstraint( ctrl_path.fullPathName(),
+                                          target.fullPathName(),
+                                          mo=maintainOffset,
+                                          upVector=upVec,
+                                          aimVector=aimVec,
+                                          worldUpType='object',
+                                          worldUpObject=upVecObj)
+                    else:
+                        mc.aimConstraint( ctrl_path.fullPathName(),
+                                          target.fullPathName(),
+                                          mo=maintainOffset,
+                                          upVector=upVec,
+                                          aimVector=aimVec)
                 except:
                     pass
         mc.select( cl=True )
@@ -5189,6 +5205,8 @@ class Char( Rig ):
                     for c in con:
                         if mc.nodeType( c  ) == 'parentConstraint' or mc.nodeType( c  ) == 'symConstraint':
                             parents.append( c  )
+                con = mc.listConnections( node_long + '.tx', s = True )
+
             if parents:
                 try:
                     if len( parents ) > 0:
@@ -5211,6 +5229,10 @@ class Char( Rig ):
                 con = mc.listConnections( joint + '.t', s=1, d=0 )
                 if con:
                     if mc.nodeType( con[0] ) == 'symmetryConstraint':
+                        mc.delete( con )
+                con = mc.listConnections( joint + '.tx', s=1, d=0 )
+                if con:
+                    if mc.nodeType( con[0] ) == 'parentConstraint':
                         mc.delete( con )
 
             # Delete Constraints
@@ -7935,7 +7957,7 @@ class Char( Rig ):
                     # delete guides
                     # Dont delete the actual guides because we need them for rigging
                     self.delete_body_guides( charRoot, deleteOnlyConstraints=True )
-
+                    
                     # create control rig
                     if type == kBiped or type == kBipedUE:
                         biped = Biped()
@@ -8757,7 +8779,6 @@ class Biped( Char ):
             ######################################
             #
             # Eyes
-            #if type == kBiped:
 
             eye_l_jnt = 'Eye_Lft_Jnt'
             eye_r_jnt = 'Eye_Rgt_Jnt'
@@ -8765,6 +8786,8 @@ class Biped( Char ):
             if type == kBipedUE:
                 eye_l_jnt = 'eye_l'
                 eye_r_jnt = 'eye_r'
+
+            head_ctl = controls['Head_Ctr_Ctrl']
 
             eyes_grp = mc.createNode( 'transform', name='Eyes_Grp', parent= controls['Main_Ctr_Ctrl'], ss=True )
 
@@ -8786,6 +8809,11 @@ class Biped( Char ):
             mc.setAttr( eye_ctrl_grp + '.r',  0,0,0 )
 
             jnt = self.find_node(rootNode, eye_l_jnt)
+
+            up_vec_obj_l = mc.createNode('transform', name='Eye_upVec_Lft', ss=True, parent=head_ctl)
+            mc.matchTransform( up_vec_obj_l, jnt )
+            mc.xform( up_vec_obj_l, t=[0,2,0], relative=True, objectSpace=True)
+
             controls['Eye_Lft_Ctrl']  = self.create_handle(name='Eye_Lft_Ctrl',
                                                matchTransform=jnt,
                                                parent=controls['Eyes_Ctr_Ctrl'].fullPathName(),
@@ -8796,9 +8824,14 @@ class Biped( Char ):
                                                constraint=self.kAim,
                                                aimVec=(0,0,1),
                                                upVec=(0,1,0),
+                                               upVecObject=up_vec_obj_l,
                                                maintainOffset=False)
 
             jnt = self.find_node(rootNode, eye_r_jnt)
+            up_vec_obj_r = mc.createNode('transform', name='Eye_upVec_Rgt', ss=True, parent=head_ctl)
+            mc.matchTransform( up_vec_obj_r, jnt )
+            mc.xform( up_vec_obj_r, t=[0,2,0], relative=True, objectSpace=True)
+
             controls['Eye_Rgt_Ctrl'] = self.create_handle(name='Eye_Rgt_Ctrl',
                                                matchTransform=jnt,
                                                parent=controls['Eyes_Ctr_Ctrl'].fullPathName(),
@@ -8810,6 +8843,7 @@ class Biped( Char ):
                                                constraint=self.kAim,
                                                aimVec=(0,0,1),
                                                upVec=(0,1,0),
+                                               upVecObject=up_vec_obj_r,
                                                maintainOffset=False)
 
             # Move the center control forward
@@ -14729,10 +14763,10 @@ class MainTab( QWidget ):
                                                                                    'Middle3_Lft_Ctrl',
                                                                                    'Index3_Lft_Ctrl']}))
 
-        self.button_Hand_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky4_Lft_Ctrl',
-                                                                                   'Ring4_Lft_Ctrl',
-                                                                                   'Middle4_Lft_Ctrl',
-                                                                                   'Index4_Lft_Ctrl',
+        self.button_Hand_L.clicked.connect(partial(self.picker_cmd, {'Nodes': ['PinkyMeta_Lft_Ctrl',
+                                                                                   'RingMeta_Lft_Ctrl',
+                                                                                   'MiddleMeta_Lft_Ctrl',
+                                                                                   'IndexMeta_Lft_Ctrl',
                                                                                    'Pinky3_Lft_Ctrl',
                                                                                    'Ring3_Lft_Ctrl',
                                                                                    'Middle3_Lft_Ctrl',
@@ -14749,10 +14783,10 @@ class MainTab( QWidget ):
                                                                                    'Thumb2_Lft_Ctrl',
                                                                                    'Thumb3_Lft_Ctrl' ]}))
 
-        self.button_Hand_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['Pinky4_Rgt_Ctrl',
-                                                                                   'Ring4_Rgt_Ctrl',
-                                                                                   'Middle4_Rgt_Ctrl',
-                                                                                   'Index4_Rgt_Ctrl',
+        self.button_Hand_R.clicked.connect(partial(self.picker_cmd, {'Nodes': ['PinkyMeta_Rgt_Ctrl',
+                                                                                   'RingMeta_Rgt_Ctrl',
+                                                                                   'MiddleMeta_Rgt_Ctrl',
+                                                                                   'IndexMeta_Rgt_Ctrl',
                                                                                    'Pinky3_Rgt_Ctrl',
                                                                                    'Ring3_Rgt_Ctrl',
                                                                                    'Middle3_Rgt_Ctrl',
