@@ -395,6 +395,16 @@ class AniMeta( object ):
                 mc.addAttr( node_path.fullPathName(), ln = attr, dt = "string" )
             mc.setAttr( node_path.fullPathName() + '.' + attr, str( data ), typ = 'string' )
 
+    def define_as_control(self, *args):
+        sel = mc.ls(sl=True)
+        data = {}
+        data['Type'] = kHandle
+        data['Side'] = kLeft
+
+        for s in sel:
+            self.set_metaData(s, data)
+
+
     def short_name( self,  node ):
         if node is not None:
             if isinstance( node, string_types ) :
@@ -468,6 +478,7 @@ class Menu(AniMeta):
         mc.menuItem( d = True, dl = 'Control Handles' )
         mc.menuItem( label = 'Create Custom Control', c = rig.create_custom_control )
         mc.menuItem( label = 'Delete Custom Control', c = rig.delete_custom_control )
+        mc.menuItem( label = 'Define as Control', c = self.define_as_control )
         mc.menuItem( d = True, dl = 'Grouping' )
         mc.menuItem( label = 'Create Null', c = rig.create_nul )
         mc.menuItem( d = True, dl = 'Symmetry Constraint' )
@@ -17196,6 +17207,8 @@ class BlendShapeSplitter():
         self.blend_default_text = 'Please specify a blendShape mesh.'
         self.guide_default_text = 'Please specify a guide object.'
 
+        self.up_axis = mc.upAxis(q=True, ax=True)
+
         self.ui()
 
         sel = mc.ls(sl=True)
@@ -17394,14 +17407,21 @@ class BlendShapeSplitter():
                     scale = mc.getAttr( name + '.sx')
                     mc.delete( name )
 
+                axis = (0,0,1)
+                width = box[3]-box[0]
+                height = box[4]*2
+                print(self.up_axis)
+                if self.up_axis == 'z':
+                    axis = (0,-1,0)
+
                 plane = mc.polyPlane(
                     name=name,
-                    ax=(0,0,1),
+                    ax=axis,
                     sx=1,
                     sy=1,
-                    w=(box[3]-box[0]),
-                    h=(box[4]*2),
-                    ch=False
+                    w=width,
+                    h=height,
+                    ch=True
                 )
                 self.guide_geo = plane[0]
 
@@ -17410,8 +17430,16 @@ class BlendShapeSplitter():
                 t0 = mc.xform( plane[0] + '.vtx[0]', q=True, ws=True, t=True )
                 t1 = mc.xform( plane[0] + '.vtx[1]', q=True, ws=True, t=True )
 
-                mc.xform( plane[0] + '.vtx[0]',  ws=True, t=(t0[0], box[1], t0[2]) )
-                mc.xform( plane[0] + '.vtx[1]',  ws=True, t=(t1[0], box[1], t1[2]) )
+
+                if self.up_axis == 'y':
+                    mc.xform( plane[0] + '.vtx[0]',  ws=True, t=(t0[0], box[1], t0[2]) )
+                    mc.xform( plane[0] + '.vtx[1]',  ws=True, t=(t1[0], box[1], t1[2]) )
+
+                print ( box )
+
+                if self.up_axis == 'z':
+                    mc.xform(plane[0] + '.vtx[0]', ws=True, a=True, t=(t0[0], t0[1], box[2]))
+                    mc.xform(plane[0] + '.vtx[1]', ws=True, a=True, t=(t1[0], t1[1], box[2]))
 
                 parent = mc.listRelatives( self.base_geo, pa=True, p=True )
 
@@ -17555,7 +17583,11 @@ class BlendShapeSplitter():
                     mc.xform( right + '.vtx[' + str(inside[i]) + ']', a=True, os=True, t=[valX, valY, valZ])
 
                 bb = mc.exactWorldBoundingBox( self.blend_geo )
-                height = abs( bb[1] - bb[4] )
+                if self.up_axis == 'y':
+                    height = abs( bb[1] - bb[4] )
+                elif self.up_axis == 'z':
+                    height = abs( bb[2] - bb[5] )
+
                 pos2 = mc.xform ( self.blend_geo, q=True, a=True, ws=True, t=True )
 
                 for x in 'xyz':
@@ -17566,6 +17598,7 @@ class BlendShapeSplitter():
                 # Move the blends down
                 mc.xform( blend_L, r=True, t=[0,height*-1.1,0] )
                 mc.xform( blend_R, r=True, t=[0,height*-2.2,0] )
+
 
                 print( 'Blendshapes split successfully: ' + self.shortName(blend_L) +', '+ self.shortName(blend_R) )
 
