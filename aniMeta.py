@@ -8314,7 +8314,10 @@ class Biped( Char ):
                             if fingers[j] == 'Thumb':
                                 finger_dict[ 'parent' ] = 'Hand_FK_' + SIDES[ i ] + '_Ctrl'
                             else:
-                                finger_dict['parent'] = fingers[ j ] +'Meta_' + SIDES[i] + '_Ctrl'
+                                if type == kBipedUE:
+                                    finger_dict['parent'] = fingers[ j ] +'Meta_' + SIDES[i] + '_Ctrl'
+                                else: 
+                                    finger_dict[ 'parent' ] = 'Hand_FK_' + SIDES[ i ] + '_Ctrl'
                         else:
                             finger_dict[ 'parent' ] = fingers[ j ] + str( k - 1 ) + '_' + SIDES[ i ] + '_Ctrl'
 
