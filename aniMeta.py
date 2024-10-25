@@ -53,7 +53,7 @@ if maya_version < 2025:
     from PySide2.QtGui import *
     from PySide2.QtWidgets import *
     from PySide2 import QtCore
-    from shiboken import wrapInstance
+    from shiboken2 import wrapInstance
 else:
     from PySide6.QtCore import *
     from PySide6.QtGui import *
