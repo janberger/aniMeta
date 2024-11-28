@@ -9004,12 +9004,14 @@ class Biped( Char ):
 
                 feet_iks = [ controls[ 'Foot_IK_'+SIDE+'_Ctrl' ] ]
 
+                root_path = self.get_path(rootNode)
+
                 for node in feet_iks:
                     self.create_multi_space_switch(
                         node,
-                        [ controls[ 'Main_Ctr_Ctrl'], controls[ 'Hips_Ctr_Ctrl'], controls[ 'Torso_Ctr_Ctrl'] ],
+                        [ controls[ 'Main_Ctr_Ctrl'], controls[ 'Hips_Ctr_Ctrl'], controls[ 'Torso_Ctr_Ctrl'], root_path ],
                         attrName='space',
-                        attrNameList=['Main', 'Hips', 'Torso']
+                        attrNameList=['Main', 'Hips', 'Torso', 'World']
                     )
 
                 # Leg
@@ -9161,13 +9163,15 @@ class Biped( Char ):
                 for node in hand_space_switch_list:
                     hand_space_ctrls.append( controls[node] )
 
+                root_path = self.get_path(rootNode)
+
                 # Space Switch
-                for node in [ controls['Hand_IK_'+SIDE+'_Ctrl'], controls['ArmPole_IK_'+SIDE+'_Ctrl'] ]:
+                for node in [ controls['Hand_IK_'+SIDE+'_Ctrl'], controls['ArmPole_IK_'+SIDE+'_Ctrl'], root_path ]:
                     self.create_multi_space_switch(
                         node,
                         hand_space_ctrls,
                         attrName='space',
-                        attrNameList=['Main', 'Head', 'Chest', 'Hips', 'Torso']
+                        attrNameList=['Main', 'Head', 'Chest', 'Hips', 'Torso', 'World']
                     )
                 # Hide the attribute on the pole Vector
                 #ArmPoleVecIK_Ctrl[0] = self.find_node( rootNode, ArmPoleVecIK_Ctrl[0] )
