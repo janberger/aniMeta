@@ -465,7 +465,6 @@ class Menu(AniMeta):
         mc.menuItem( label = 'Character', sm = True, to = True, parent = self.menu )
 
         mc.menuItem( label = 'Create', divider=True )
-        mc.menuItem( label = 'Biped',    c = partial( char.create, name='Adam', type=kBiped ) )
         mc.menuItem( label = 'Biped UE',    c = partial( char.create, name='Adam', type=kBipedUE ) )
 
         # Character
@@ -2271,8 +2270,6 @@ class Rig( Transform ):
         cnstNode = self.get_path( cnstNode )
 
         if tgtNode and cnstNode:
-
-
             target     = tgtNode.fullPathName()
             constraint = cnstNode.fullPathName()
 
@@ -3442,7 +3439,13 @@ class Char( Rig ):
                         parent_grp_lft_short = self.short_name( parent_grp_lft )
 
                         # Get the right side version of this name
+                        parent_joint_lft_short = parent_grp_lft_short.replace( 'Lft', '_joint_Lft' )
                         parent_grp_rgt_short = parent_grp_lft_short.replace( 'Lft', 'Rgt' )
+
+                        # We create a joint to joint symConstraint as there seem to be errors when not using joints
+                        # with symConstraint nodes
+                        parent_joint_grp_lft = mc.createNode('joint', name=parent_joint_lft_short, parent=parent_grp_lft )
+                        mc.setAttr( parent_joint_grp_lft+'.v', False )
 
                         # Get the parent`s parent of this group so we can parent the new group
                         grandparent_grp_lft = mc.listRelatives( parent_grp_lft, p=True, pa=True )[0]
@@ -3456,7 +3459,8 @@ class Char( Rig ):
                         # Get the long DAG path
                         grandparent_grp_rgt = self.find_node( charRoot, grandparent_grp_rgt_short )
 
-                        parent_rgt_node = mc.createNode( 'transform', name=parent_grp_rgt_short, parent=grandparent_grp_rgt, ss=True )
+                        parent_rgt_node = mc.createNode( 'joint', name=parent_grp_rgt_short, parent=grandparent_grp_rgt, ss=True )
+                        mc.setAttr( parent_rgt_node+'.v', False )
 
                         # Add an offset matrix to first nodes off the centre to make the symConstraints work with standard transforms, the offset is 180 on rx
                         if not 'Lft' in grandparent_grp_lft_short:
@@ -3464,12 +3468,13 @@ class Char( Rig ):
 
                             mc.setAttr(  parent_rgt_node+ '.offsetParentMatrix', offset_matrix, typ='matrix')
 
-                        self.create_sym_constraint( parent_grp_lft , parent_rgt_node )
+                        self.create_sym_constraint( parent_joint_grp_lft , parent_rgt_node )
 
                         # Create right side guide groups and symConstraints
                         #######################################################################################
 
-                        guide_rgt = mc.createNode( 'transform', name=rgt_name, parent=parent_rgt_node, ss=True )
+                        guide_rgt = mc.createNode( 'joint', name=rgt_name, parent=parent_rgt_node, ss=True )
+                        mc.setAttr( guide_rgt+'.v', False )
 
                         self.create_sym_constraint( guide_ctrl, guide_rgt )
 
@@ -3483,8 +3488,6 @@ class Char( Rig ):
                         self.set_metaData( guide_ctrl , data )
                     else:
                         mc.warning( 'aniMeta: There was a problem creating guide', guide[ 0 ] )
-
-
         return guideDict
 
     def build_body_guides( self, *args ):
@@ -3764,7 +3767,13 @@ class Char( Rig ):
                 foot_guide = self.find_node(charRoot, 'Foot_Lft_Guide')
                 mc.matchTransform( heel_guide, foot_guide)
                 mc.setAttr( heel_guide + '.ty', 0)
-                mc.xform(heel_guide, t=[0,0,-3], relative=True, objectSpace=True )
+                mc.xform(heel_guide, t=[0,3,0], relative=True, objectSpace=True )
+
+                # Position toe_guide
+                toestip_guide = self.find_node(charRoot, 'ToesTip_Lft_Guide')
+                ball_guide = self.find_node(charRoot, 'Ball_Lft_Guide')
+                mc.matchTransform( toestip_guide, ball_guide )
+                mc.xform(toestip_guide, t=[10,0,0], relative=True, objectSpace=True )
 
                 # Position shoulder_upVec
                 upvec_guide = self.find_node(charRoot, 'Shoulder_Lft_upVec_Guide')
@@ -3772,17 +3781,11 @@ class Char( Rig ):
                 mc.matchTransform( upvec_guide, shoulder_guide, position=True, rotation=False)
                 mc.xform(upvec_guide, t=[3,10,0], relative=True )
 
-                # Position toe_guide
-                toestip_guide = self.find_node(charRoot, 'ToesTip_Lft_Guide')
-                ball_guide = self.find_node(charRoot, 'Ball_Lft_Guide')
-                mc.matchTransform( toestip_guide, ball_guide )
-                mc.xform(toestip_guide, t=[0,0,10], relative=True, objectSpace=True )
-
                 # Position hips_guide
                 hipsupvec_guide = self.find_node(charRoot, 'Hips_Lft_upVec_Guide')
                 legup_guide = self.find_node(charRoot, 'LegUp_Lft_Guide')
                 mc.matchTransform( hipsupvec_guide, legup_guide )
-                mc.xform(hipsupvec_guide, t=[10,0,0], relative=True, objectSpace=True )
+                mc.xform(hipsupvec_guide, t=[0,0,-10], relative=True, objectSpace=True )
 
             if type == kBiped:
 
@@ -8109,13 +8112,13 @@ class Biped( Char ):
                 'name': 'Torso_Ctr_Ctrl',
                 'parent': 'Main_Ctr_Ctrl',
                 'matchTransform': 'Hips_Guide',
-                'size': [ 30, 6, 6 ]
+                'size': [ 6, 6, 30 ]
             }
             handleDict[ 'Hips_Ctr_Ctrl' ] = {
                 'name': 'Hips_Ctr_Ctrl',
                 'parent': 'Torso_Ctr_Ctrl',
                 'matchTransform': 'Spine1_Guide',
-                'size': [ 20, 2, 20 ],
+                'size': [ 2, 20, 20 ],
                 'constraint': self.kParent,
                 'constraintNode': joints['Hips_Ctr'],
                 'maintainOffset': True
@@ -8124,7 +8127,7 @@ class Biped( Char ):
                 'name': 'Spine1_Ctr_Ctrl',
                 'parent': 'Torso_Ctr_Ctrl',
                 'matchTransform': 'Spine1_Guide',
-                'size': [ 20, 2, 2 ],
+                'size': [ 2, 2, 20 ],
                 'constraint': self.kParent,
                 'constraintNode': joints['Spine1_Ctr'] ,
                 'maintainOffset': True
@@ -8133,7 +8136,7 @@ class Biped( Char ):
                 'name': 'Spine2_Ctr_Ctrl',
                 'parent': 'Spine1_Ctr_Ctrl',
                 'matchTransform': 'Spine2_Guide',
-                'size': [ 20, 2, 2 ],
+                'size': [ 2, 2, 20 ],
                 'constraint': self.kParent,
                 'constraintNode':  joints['Spine2_Ctr'],
                 'maintainOffset': True
@@ -8142,7 +8145,7 @@ class Biped( Char ):
                 'name': 'Spine3_Ctr_Ctrl',
                 'parent': 'Spine2_Ctr_Ctrl',
                 'matchTransform': 'Spine3_Guide',
-                'size': [ 20, 2, 2 ],
+                'size': [ 2, 2, 20 ],
                 'constraint': self.kParent,
                 'constraintNode':  joints['Spine3_Ctr'] ,
                 'maintainOffset': True
@@ -8190,7 +8193,7 @@ class Biped( Char ):
                     'name': 'Spine4_Ctr_Ctrl',
                     'parent': 'Spine3_Ctr_Ctrl',
                     'matchTransform': 'Spine4_Guide',
-                    'size': [20, 2, 2],
+                    'size': [2, 2, 20],
                     'constraint': self.kParent,
                     'constraintNode': joints['Spine4_Ctr'],
                     'maintainOffset': True
@@ -8199,7 +8202,7 @@ class Biped( Char ):
                     'name': 'Spine5_Ctr_Ctrl',
                     'parent': 'Spine4_Ctr_Ctrl',
                     'matchTransform': 'Spine5_Guide',
-                    'size': [20, 2, 2],
+                    'size': [2, 2, 20],
                     'constraint': self.kParent,
                     'constraintNode': joints['Spine5_Ctr'],
                     'maintainOffset': True
@@ -8209,7 +8212,7 @@ class Biped( Char ):
                     'name': 'Neck1_Ctr_Ctrl',
                     'parent': 'Spine5_Ctr_Ctrl',
                     'matchTransform': 'Neck1_Guide',
-                    'size': [ 20, 2, 2 ],
+                    'size': [ 2, 2, 20 ],
                     'constraint': self.kParent,
                     'constraintNode':joints['Neck_Ctr'],
                     'maintainOffset': True
@@ -8219,7 +8222,7 @@ class Biped( Char ):
                     'name': 'Neck2_Ctr_Ctrl',
                     'parent': 'Neck1_Ctr_Ctrl',
                     'matchTransform': 'Neck2_Guide',
-                    'size': [20, 2, 2],
+                    'size': [2, 2, 20],
                     'constraint': self.kParent,
                     'constraintNode': joints['Neck2_Ctr'],
                     'maintainOffset': True
@@ -8229,7 +8232,7 @@ class Biped( Char ):
                     'name': 'Head_Ctr_Ctrl',
                     'parent': 'Neck2_Ctr_Ctrl',
                     'matchTransform': 'Head_Guide',
-                    'size': [ 20, 2, 2 ],
+                    'size': [ 2, 2, 20 ],
                     'constraint': self.kParent,
                     'constraintNode':joints['Head_Ctr'],
                     'maintainOffset': True
@@ -8261,7 +8264,7 @@ class Biped( Char ):
                     'name': 'Heel_IK_' + SIDES[ i ] + '_Ctrl',
                     'parent': 'Foot_IK_' + SIDES[ i ] + '_Ctrl',
                     'matchTransform': 'Heel_' + SIDES[ i ] + '_Guide',
-                    'size': [ 12, 2, 2 ],
+                    'size': [ 2, 2, 12 ],
                     'rotateOrder': kXYZ,
                     'color': colors[ i ]
                 }
@@ -8269,7 +8272,7 @@ class Biped( Char ):
                     'name': 'ToesTip_IK_' + SIDES[ i ] + '_Ctrl',
                     'parent': 'Heel_IK_' + SIDES[ i ] + '_Ctrl',
                     'matchTransform': 'ToesTip_' + SIDES[ i ] + '_Guide',
-                    'size': [ 12, 2, 2 ],
+                    'size': [ 2, 2, 12 ],
                     'rotateOrder': kXYZ,
                     'color': colors[ i ]
                 }
@@ -8277,7 +8280,7 @@ class Biped( Char ):
                     'name': 'Toes_IK_' + SIDES[ i ] + '_Ctrl',
                     'parent': 'ToesTip_IK_' + SIDES[ i ] + '_Ctrl',
                     'matchTransform': 'Ball_' + SIDES[ i ] + '_Guide',
-                    'size': [ 12, 2, 2 ],
+                    'size': [ 2, 2, 12 ],
                     'rotateOrder': kXYZ,
                     'color': colors[ i ]
                 }
@@ -8285,11 +8288,11 @@ class Biped( Char ):
                     'name': 'FootLift_IK_' + SIDES[ i ] + '_Ctrl',
                     'parent': 'ToesTip_IK_' + SIDES[ i ] + '_Ctrl',
                     'matchTransform': 'Ball_' + SIDES[ i ] + '_Guide',
-                    'size': [ 12, 2, 2 ],
+                    'size': [ 2, 2, 12 ],
                     'rotateOrder': kXYZ,
                     'color': colors[ i ],
-                    'offset': (0, 3 * global_scale * multi[ i ], -6 * global_scale * multi[ i ]),
-                    'rotate': (30, 0, 0)
+                    'offset': (-6 * global_scale * multi[ i ], 3 * global_scale * multi[ i ],0 ),
+                    'rotate': (0, 0, 30)
                 }
                 handleDict[ 'LegPole_IK_' + SIDES[ i ] + '_Ctrl' ] = {
                     'name': 'LegPole_IK_' + SIDES[ i ] + '_Ctrl',
@@ -8316,7 +8319,7 @@ class Biped( Char ):
                     'parent': 'Chest_Ctr_Ctrl',
                     'matchTransform': 'Clavicle_' + SIDES[ i ] + '_Guide',
                     'color': colors[ i ],
-                    'size': [ 2, 2, 20 ],
+                    'size': [ 2, 20, 2 ],
                     'offset': (3 * global_scale * multi[ i ], 0, 0)
                 }
                 if type == kBipedUE:
@@ -8556,7 +8559,7 @@ class Biped( Char ):
             for control in controlsList:
                 if control in handleDict:
                     # Create a copy of the standard dict
-                    ctrlDict                    = copy.deepcopy( ctrlsDict )
+                    ctrlDict = copy.deepcopy( ctrlsDict )
 
                     # Update the copy with the specifics
                     ctrlDict.update( handleDict[control] )
@@ -9533,7 +9536,7 @@ class Biped( Char ):
                         x,y,z = 1,1,1
 
                         if data['Mirror'] == kSymmetricRotation:
-                            x,y,z = -1, -1, -1
+                            x,y,z = 1, -1, -1
 
                         if data['Mirror'] == kBasic:
                             x = -1
@@ -13156,7 +13159,7 @@ class MainTab( QWidget ):
         )
         layout.addWidget(createButton)
 
-        createButton.clicked.connect( partial( Char().create, name = 'Adam', type = kBiped  ))
+        createButton.clicked.connect( partial( Char().create, name = 'Adam', type = kBipedUE  ))
 
         #   Create
         ########################################
