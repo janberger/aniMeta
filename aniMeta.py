@@ -1,6 +1,6 @@
 # -*- coding: UTF-8 -*-
 '''
-Copyright (c) 2018-2022 Prof. Jan Berger, Hochschule fuer Technik und Wirtschaft Berlin, Germany
+Copyright (c) 2018-2025 Prof. Jan Berger, Hochschule fuer Technik und Wirtschaft Berlin, Germany
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
 associated documentation files (the "Software"), to deal in the Software without restriction, including
 without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
@@ -20,10 +20,13 @@ Autodesk® Maya® is a registered trademark of Autodesk Inc.
 All other brand names, product names or trademarks belong to their respective holders.
 
 Supported Maya Versions:
-2020-2023
+2022-2025
 
 Supported OS:
 Any OS supported by Maya
+
+Thanks to:
+- Simon Leykamm for various UI improvement suggestions regarding the FrameWdget and DPI-Scaling
 
 '''
 
@@ -63,10 +66,14 @@ else:
 
 from functools import partial
 
-px = omui.MQtUtil.dpiScale
+real_scale = mc.mayaDpiSetting(query=True, realScaleValue=True)
+
+# override omui.MQtUtil.dpiScale px-function
+def px(value):
+    return real_scale*value
 
 kPluginName    = 'aniMeta'
-kPluginVersion = '01.00.154'
+kPluginVersion = '01.00.157'
 
 kLeft, kRight, kCenter, kAll, kSelection = range( 5 )
 kHandle, kIKHandle, kJoint, kMain, kBodyGuide, kBipedRoot, kQuadrupedRoot, kCustomHandle, kBodyGuideLock, kBipedRootUE = range(10)
@@ -80,6 +87,7 @@ kRigStateBind, kRigStateGuide, kRigStateControl = range(3)
 kXYZ, kYZX, kZXY, kXZY, kYXZ, kZYX = range(6)
 kX, kY, kZ = range(3)
 kFK, kIK = range(2)
+kLibPose, kLibAnim, kLibRig = range(3)
 
 curveType = [ 'animCurveTA', 'animCurveTL', 'animCurveTT', 'animCurveTU',
               'animCurveUA', 'animCurveUL', 'animCurveUT', 'animCurveUU' ]
@@ -173,7 +181,7 @@ class AniMeta( object ):
             buff = nodeNameShort.split(':')
             nodeNameShort = buff[len(buff) - 1]
 
-        nodes = mc.listRelatives( root, ad=True, c=True, f=True) or []
+        nodes = mc.listRelatives( root, ad=True, c=True, f=True, pa=True) or []
 
         for node in nodes:
             currentNode = self.short_name(node)
@@ -322,9 +330,13 @@ class AniMeta( object ):
         Returns the MDagPath of a given maya node`s string name, the verbose flag enables/disables warnings
         :rtype:
         '''
-
         if isinstance( nodeName, om.MDagPath ):
             return nodeName
+
+        # Check if more than object with this name exists in the scene
+        if len(mc.ls(nodeName))  > 1:
+            mc.warning('AniMeta->Get Path: More than one object matches name ' + nodeName)
+            return None
 
         if nodeName is not None:
             obj = self.get_mobject( nodeName )
@@ -400,6 +412,12 @@ class AniMeta( object ):
                         mc.setAttr( node + '.' + attr, value )
                     else:
                         mc.setKeyframe( node, attribute = attr, value = value )
+                else:
+                    mc.warning('AniMeta->set_attr: Node Attribute is not settable '+node+'.'+ attr)
+            else:
+                mc.warning('AniMeta->set_attr: Node Attribute does not exist '+node+'.'+ attr)
+        else:
+            mc.warning('AniMeta->set_attr: Node does not exist '+node)
 
     def set_metaData( self, node, data = None, attr = aniMetaDataAttrName ):
         if data is None:
@@ -436,6 +454,9 @@ class AniMeta( object ):
             if 'picker' in kwargs:
                 ui = AniMetaUI( create = True )
                 ui.char_list_refresh()
+
+            if 'rig' in kwargs:
+                ui.set_active_char(kwargs['rig'])
 
 
 class Menu(AniMeta):
@@ -1561,7 +1582,7 @@ class Rig( Transform ):
                 # Make sure this is a custom handle
                 if 'Custom' in metaData:
                     # Find the parent
-                    parent = mc.listRelatives( ctrl, parent=True )
+                    parent = mc.listRelatives( ctrl, parent=True, pa=True )
                     if parent:
                         try:
                             # delete it
@@ -1627,13 +1648,17 @@ class Rig( Transform ):
 
                 ctrlDict['matchTransform'] = s
                 ctrlDict['constraintNode'] = s
+
                 ctrl = self.create_handle(**ctrlDict)
+                ctrl_parent = mc.listRelatives( ctrl, p=True, pa=True )[0]
 
                 self.set_metaData( ctrl.fullPathName(), data)
 
                 for a in ['tx', 'ty', 'tz', 'rx', 'ry', 'rz']:
                     mc.setAttr( ctrl.fullPathName() + '.' + a, l=False)
-                mc.parentConstraint( parent, ctrl_grp, mo=True )
+
+                mc.parentConstraint( parent, ctrl_parent, mo=True )
+
                 ctrls.append( ctrl )
 
             return ctrls
@@ -1641,7 +1666,6 @@ class Rig( Transform ):
             return None
 
     def create_handle(self, **kwargs):
-
         name = 'Default_Ctrl'
         width = 0
         height = 0
@@ -1743,11 +1767,13 @@ class Rig( Transform ):
 
             if  isinstance( node, str ) :
                 out_node = self.find_node( charRoot, node )
+
                 if out_node is not None:
-                    out_node = self.get_path( node )
+                    out_node = self.get_path( out_node )
                     if out_node is not None:
                         return out_node
-
+                else:
+                    print(mc.ls(node))
             return out_node
 
         parent         = check_node( parent,         'parent'        , charRoot )
@@ -1846,12 +1872,6 @@ class Rig( Transform ):
         mc.addAttr(ctrl_path.fullPathName(), ln='controlOffsetY', parent='controlOffset', at='float')
         mc.addAttr(ctrl_path.fullPathName(), ln='controlOffsetZ', parent='controlOffset', at='float')
 
-        cluster = mc.deformer( ctrl_path.fullPathName(), type='cluster', name='aniMetaCluster')
-        compMatrix = mc.createNode('composeMatrix', ss=True, name=name+'HandleOffsetMatrix')
-
-        mc.connectAttr( ctrl_path.fullPathName()+'.controlOffset', compMatrix + '.inputTranslate')
-        mc.connectAttr( compMatrix+'.outputMatrix', cluster[0] + '.matrix')
-
         if rotate[0] != 0 or rotate[1] != 0 or rotate[2] != 0:
             count = mc.polyEvaluate(ctrl_path.fullPathName(), v=True)
             shapeComp = ctrl_path.fullPathName() + '.vtx[0:' + str(count - 1) + ']'
@@ -1864,9 +1884,14 @@ class Rig( Transform ):
 
         mc.polyColorPerVertex(ctrl_path.fullPathName(), rgb=color, alpha=alpha)
 
+        cluster = mc.deformer( ctrl_path.fullPathName(), type='cluster', name='aniMetaCluster')
+        compMatrix = mc.createNode('composeMatrix', ss=True, name=name+'HandleOffsetMatrix')
+
+        mc.connectAttr( ctrl_path.fullPathName()+'.controlOffset', compMatrix + '.inputTranslate')
+        mc.connectAttr( compMatrix+'.outputMatrix', cluster[0] + '.matrix')
+
         for node in mc.listHistory( ctrl_path.fullPathName()):
             if mc.nodeType( node ) == 'polyColorPerVertex':
-
                 mc.rename( node, name+'_Color')
 
         mc.setAttr(ctrl_path.fullPathName() + '.displayColors', True)
@@ -2236,7 +2261,7 @@ class Rig( Transform ):
 
         if len ( sel ) == 1:
 
-            joints = mc.listRelatives( sel[0], typ='joint', ad=True )
+            joints = mc.listRelatives( sel[0], typ='joint', ad=True, pa=True )
 
             for joint in joints:
 
@@ -2327,81 +2352,6 @@ class Rig( Transform ):
             except:
                 pass
 
-    '''
-    # There is another delete_body_guides method in Char
-    def delete_body_guides(self, *args, **kwargs ):
-
-        charRoot = self.get_active_char()
-        delNodes = []
-        metaData = None
-
-        if not charRoot:
-            mc.warning('Please select a Biped Root Group.')
-        else:
-            metaData = self.get_metaData(charRoot)
-            data = {'Type': kBodyGuide}
-            nodes = self.get_nodes(charRoot, data)
-
-            try:
-                mc.setAttr('Root_Jnt.overrideEnabled', 0)
-                mc.setAttr('Root_Jnt.overrideDisplayType', 0)
-            except:
-                pass
-
-            #####################################################################################
-            #
-            # Store joint positions
-            # ... or the positions may be off when the constraints get deleted
-            jointDict = self.get_joint_transform( charRoot )
-
-            # Store joint positions
-            #
-            #####################################################################################
-
-            #####################################################################################
-            #
-            # Delete Constraints
-
-
-            parents=[]
-            for node in nodes:
-                con = mc.listConnections(node+'.t', s=True)
-                if con:
-                    if mc.nodeType(con[0]) == 'parentConstraint':
-
-                        parents.append( con[0])
-            if parents:
-                try:
-                    if len ( parents) > 0:
-                        self.delete_nodes( charRoot, parents )
-                except:
-                    pass
-            if nodes:
-                try:
-                    if len ( nodes) > 0:
-                        self.delete_nodes( charRoot, nodes )
-
-                except:
-                    pass
-
-            metaData['RigState'] = kRigStateBind
-            self.set_metaData(charRoot, metaData)
-
-            # Delete Constraints
-            #
-            #####################################################################################
-
-            #####################################################################################
-            #
-            # Restore joint positions
-
-            self.set_joint_transform(charRoot, jointDict )
-
-            # Restore joint positions
-            #
-            #####################################################################################
-
-    '''
     def delete_nodes( self, char, nodes ):
 
         for node in nodes:
@@ -2471,7 +2421,7 @@ class Rig( Transform ):
                     except:
                         pass
                 try:
-                    parent = mc.listRelatives( joint, p = True )[ 0 ]
+                    parent = mc.listRelatives( joint, p = True, pa=True )[ 0 ]
 
                     if ':' in parent:
                         buff = parent.split( ':' )
@@ -2650,7 +2600,6 @@ class Rig( Transform ):
                         self.reset_handle( self.find_node( character, handle ) )
                 finally:
                     mc.undoInfo( closeChunk = True )
-            om.MGlobal.displayInfo( 'Handles to ' + mode + ': ' + str( len( handles ) ) )
         else:
             mc.warning( 'No handles to ' + mode + '. Please check you character set selection.' )
 
@@ -2763,7 +2712,7 @@ class Rig( Transform ):
                 xform_data = data['Skeleton']['Joints'][ joints[i] ]
 
                 if 'parent' in xform_data:
-                    parent = mc.listRelatives( joints[i], p=True ) or []
+                    parent = mc.listRelatives( joints[i], p=True, pa=True ) or []
                     if len( parent ):
                         if parent[0] != xform_data['parent']:
                             try:
@@ -2988,7 +2937,7 @@ class Rig( Transform ):
         charRoot = args[0]
         jointDict = args[1]
         joint_grp = self.find_node(charRoot, 'Joint_Grp')
-        joints = mc.listRelatives(joint_grp, c=True, ad=True, type='joint')
+        joints = mc.listRelatives(joint_grp, c=True, ad=True, type='joint', pa=True)
 
         for joint in joints:
 
@@ -3384,8 +3333,12 @@ class Char( Rig ):
 
         if guideList:
             for guide in guideList:
+                # This returns a string if the node exists
+                guide_ctrl = self.find_node( charRoot, guide[ 0 ] )
+                guide_tgt = self.find_node( charRoot, guide[ 1 ] )
+
                 ctrlDict[ 'name' ] = guide[ 0 ]
-                ctrlDict[ 'matchTransform' ] = guide[ 1 ]
+                ctrlDict[ 'matchTransform' ] = guide_tgt
                 ctrlDict[ 'constraint' ] = self.kParent
 
                 if len( guide ) > 4:
@@ -3398,15 +3351,12 @@ class Char( Rig ):
                 else:
                     ctrlDict[ 'parent' ] = guide[ 2 ]
 
-                # This returns a string if the node exists
-                guide_ctrl = self.find_node( charRoot, guide[ 0 ] )
-
                 # Create the Guide Control if it doesn`t exist, yet
                 if guide_ctrl is not None:
                     if mc.objExists( guide[1] ):
-                        mc.parentConstraint( guide[ 0 ], guide[ 1 ], mo=True )
+                        mc.parentConstraint( guide_ctrl, guide_tgt, mo=True )
                     # From now on we want an MDagPath
-                    guide_ctrl = self.get_path( guide[ 0 ] )
+                    guide_ctrl = self.get_path( guide_ctrl )
                 else:
                     guide_ctrl = self.create_handle( **ctrlDict )
 
@@ -3431,7 +3381,7 @@ class Char( Rig ):
                         # in this section we create additional transforms above the right side guides
 
                         # Get the parent
-                        parent_grp_lft = mc.listRelatives( guide_ctrl.fullPathName(), p=True )[0]
+                        parent_grp_lft = mc.listRelatives( guide_ctrl.fullPathName(), p=True, pa=True  )[0]
 
                         #if self.short_name(parent_rgt) != 'Guides_Body_Grp':
 
@@ -3493,12 +3443,15 @@ class Char( Rig ):
     def build_body_guides( self, *args ):
         sel = None
         type = kBiped
+        skipExisting = False
         if args:
-            sel = args[ 0 ]
+            sel = args[0]
 
             if len( args ) == 2:
-                type = args[ 1 ]
+                type = args[1]
 
+            if len( args ) == 3:
+                skipExisting = args[2]
         else:
             sel = self.get_active_char()
 
@@ -3647,6 +3600,13 @@ class Char( Rig ):
 
             if type == kBipedUE:
 
+                # If Guides have been created for this rig, skip this section
+                if skipExisting:
+                    node = self.find_node(charRoot, 'Hips'+guide_sfx)
+                    if node is not None:
+                        return
+
+
                 attrList = [ 'sx', 'sy', 'sz', 'v' ]
 
                 #rot_offset_1 = om.MEulerRotation( 0, math.radians(  90 ),math.radians(  -90 ) ).asMatrix()
@@ -3738,7 +3698,6 @@ class Char( Rig ):
 
                 # pinky middle
                 guideList.append( [ 'PinkyMeta_Lft'+guide_sfx, 'pinky_metacarpal_l', 'Hand_Lft'+guide_sfx, attrList, rot_offset_1 ] )
-
 
                 # Fingers
                 fngr_1 = [ 'thumb', 'index', 'middle', 'ring', 'pinky'  ]
@@ -4070,9 +4029,9 @@ class Char( Rig ):
                 return True
 
     def build_constraints( self, rootNode, type ):
-        print('build_constraints')
-        offset = om.MEulerRotation( math.radians( 180.0 ), 0.0, 0.0, 0 ).asMatrix()
 
+        offset = om.MEulerRotation( math.radians( 180.0 ), 0.0, 0.0, 0 ).asMatrix()
+        proxy_grp = self.find_node(rootNode, 'Proxy_Grp')
         if type == kBipedUE:
 
             GUIDE_SIDE = ['Lft', 'Rgt']
@@ -4097,7 +4056,7 @@ class Char( Rig ):
                         upperarm = 'thigh'
                         lowerarm = 'calf'
 
-                    up = mc.createNode('transform', name=UP_VEC[j]+'_'+GUIDE_SIDE[i]+'_upVec', p='Proxy_Grp', ss=True)
+                    up = mc.createNode('transform', name=UP_VEC[j]+'_'+GUIDE_SIDE[i]+'_upVec', p=proxy_grp, ss=True)
                     guide = self.find_node(rootNode, UP_VEC[j]+'_'+GUIDE_SIDE[i]+'_upVec_Guide')
                     mc.parentConstraint(guide, up)
 
@@ -4105,7 +4064,7 @@ class Char( Rig ):
                     loarm = self.find_node(rootNode, lowerarm+'_'+SIDE)
                     hand = self.find_node(rootNode, HAND[j]+'_'+SIDE)
 
-                    prx_uparm = mc.createNode('transform', name=upperarm+'_prx_01_'+SIDE, p='Proxy_Grp', ss=True)
+                    prx_uparm = mc.createNode('transform', name=upperarm+'_prx_01_'+SIDE, p=proxy_grp, ss=True)
                     prx_loarm = mc.createNode('transform', name=lowerarm+'_prx_01_'+SIDE, p=prx_uparm, ss=True)
                     prx_hand = mc.createNode('transform', name=HAND[j]+'_prx_01_'+SIDE, p=prx_loarm, ss=True)
 
@@ -5085,8 +5044,8 @@ class Char( Rig ):
         rig_grp = self.find_node( rootNode, 'Rig_Grp' )
         guides_grp = self.find_node( rootNode, 'Guides_Grp' )
 
-        if mc.listRelatives( joint_grp, c = True, ad = True, typ = 'joint' ):
-            for jnt in mc.listRelatives( joint_grp, c = True, ad = True, typ = 'joint' ):
+        if mc.listRelatives( joint_grp, c = True, ad = True, typ = 'joint' , pa=True):
+            for jnt in mc.listRelatives( joint_grp, c = True, ad = True, typ = 'joint', pa=True ):
                 mc.connectAttr( multi + '.output', jnt + '.radius', f = True )
 
         # Hook Up global Scale to Control Rig
@@ -5099,7 +5058,7 @@ class Char( Rig ):
 
     def create(self, *args, **kwargs):
 
-        char = 'Adam'
+        char = 'Eve'
         type = kBiped
 
         if 'char' in kwargs:
@@ -5159,7 +5118,7 @@ class Char( Rig ):
         # Refresh the character list
         ui = AniMetaUI( create=False )
         ui.char_list_refresh()
-
+        ui.set_active_char(rootNode)
         print ( 'aniMeta: Guide rig completed.' )
 
         return rootNode
@@ -5179,8 +5138,6 @@ class Char( Rig ):
                 foot_up_vec = self.find_node( rootNode, 'Ankle_'+SIDE+'_upVec' )
                 foot_jnt = self.find_node( rootNode, 'Foot_'+SIDE+'_Jnt' )
                 mc.parentConstraint( foot_jnt, foot_up_vec, mo=True )
-
-
 
     def delete_body_guides( self, *args, **kwargs ):
 
@@ -5202,13 +5159,14 @@ class Char( Rig ):
             data = { 'Type': kBodyGuide }
             nodes = self.get_nodes( charRoot, data )
 
-            try:
-                rootJnt = self.find_node( charRoot, 'Root_Jnt' )
+            root_jnt = self.find_node( charRoot, 'root' )
 
-                mc.setAttr( rootJnt + '.overrideEnabled', 0 )
-                mc.setAttr( rootJnt + '.overrideDisplayType', 0 )
+            try:
+                mc.setAttr( root_jnt + '.overrideEnabled', 0 )
+                mc.setAttr( root_jnt + '.overrideDisplayType', 0 )
             except:
                 pass
+            parents = mc.listRelatives( root_jnt, ad=True, typ='symmetryConstraint', pa=True) or []
 
             #####################################################################################
             #
@@ -5223,15 +5181,14 @@ class Char( Rig ):
             #####################################################################################
             #
             # Delete Constraints
-            parents = [ ]
             for node in nodes:
-                node_long = self.find_node( charRoot, node  )
+                node_long = self.find_node( charRoot, node )
                 con = mc.listConnections( node_long + '.t', s = True )
 
                 if con:
                     for c in con:
-                        if mc.nodeType( c  ) == 'parentConstraint' or mc.nodeType( c  ) == 'symConstraint':
-                            parents.append( c  )
+                        if mc.nodeType( c ) == 'parentConstraint' or mc.nodeType( c ) == 'symConstraint':
+                            parents.append( c )
             if parents:
                 try:
                     if len( parents ) > 0:
@@ -5256,10 +5213,6 @@ class Char( Rig ):
                     if mc.nodeType( con[0] ) == 'symmetryConstraint':
                         mc.delete( con )
 
-            # This causes issues
-            #metaData[ 'RigState' ] = kRigStateBind
-            #self.set_metaData( charRoot, metaData )
-
             # Delete Constraints
             #
             #####################################################################################
@@ -5281,7 +5234,7 @@ class Char( Rig ):
         if args:
             charRoot = args[0]
 
-        delNodes = [ ]
+        delNodes = []
 
         if not charRoot:
             mc.warning( 'Please select a Biped Root Group.' )
@@ -5336,7 +5289,7 @@ class Char( Rig ):
 
                 jointGrp = self.find_node( charRoot, 'Joint_Grp' )
 
-                for jnt in mc.listRelatives( jointGrp, ad = True, c = True, typ = 'joint' ):
+                for jnt in mc.listRelatives( jointGrp, ad = True, c = True, typ = 'joint', pa=True ):
                     nodes = mc.listConnections( jnt + '.t', s = True, d = False ) or None
                     if nodes is not None:
                         if mc.nodeType( nodes[ 0 ] ) == 'multiplyDivide':
@@ -5350,6 +5303,7 @@ class Char( Rig ):
                     con = mc.listConnections( charRoot + '.aux_nodes' ) or [ ]
                     if len( con ):
                         mc.delete( con )
+
                 # Store Custom Controls
                 customCtrls = self.get_char_handles( charRoot, { 'Type': kHandle, 'Side': kAll, 'Custom': True } )
 
@@ -5368,13 +5322,15 @@ class Char( Rig ):
                 if type == kBipedRoot:
                     upVecs = [ 'Shoulder_Lft_upVec', 'Shoulder_Rgt_upVec', 'Hips_Lft_upVec', 'Hips_Rgt_upVec' ]
 
-                    for u in upVecs:
+                    for up in upVecs:
+                        up = self.find_node(charRoot, up)
                         try:
-                            mc.delete( mc.listRelatives( u, c = 1, ad = 1 ) )
+                            mc.delete( mc.listRelatives( up, c = 1, ad = 1, pa=True ) )
                         except:
                             pass
 
                 controls = mc.listRelatives( rig_grp, c = True, pa = True )
+
                 if controls is not None:
                     try:
                         mc.delete( controls )
@@ -5383,9 +5339,6 @@ class Char( Rig ):
 
                 # Restore joint positions
                 self.set_joint_transform( charRoot, jointDict )
-
-
-                om.MGlobal.displayInfo( 'aniMeta: Control rig removed successfully.' )
 
     def delete_mocap( self, *args ):
 
@@ -7728,6 +7681,9 @@ class Char( Rig ):
         :return:
         '''
 
+        sel = mc.ls(sl=True)
+
+        state = None
 
         # Character list may need to be updated to show the current character in the scene
         if not self.get_active_char():
@@ -7786,6 +7742,7 @@ class Char( Rig ):
                 except:
                     pass
 
+                # Switch to Guide Mode
                 if rigState == kRigStateControl:
 
                     handles = self.get_char_handles( charRoot, { 'Type': kHandle } )
@@ -7822,7 +7779,6 @@ class Char( Rig ):
                     metaData[ 'GuidePose' ] = handleDict
 
                     self.set_metaData( charRoot, metaData )
-
                     # delete control rig
                     self.delete_controls( charRoot )
 
@@ -7830,7 +7786,8 @@ class Char( Rig ):
                         self.delete_mocap( charRoot )
 
                     # create guides
-                    self.build_body_guides( charRoot, type )
+                    skipExistingGuides = True
+                    self.build_body_guides( charRoot, type, skipExistingGuides )
 
                     om.MGlobal.displayInfo( 'aniMeta: ' + charRoot + ' is now in guide mode.' )
 
@@ -7842,14 +7799,12 @@ class Char( Rig ):
                             except:
                                 pass
 
-                    self.update_ui()
-
-                    mc.undoInfo( closeChunk = True )
-
                     mc.setAttr( charRoot + '.show_Guides', True )
+                    mc.setAttr( charRoot + '.show_Joints', True )
 
-                    return kRigStateGuide
+                    state= kRigStateGuide
 
+                # Switch to Control Mode
                 elif rigState == kRigStateGuide:
 
                     # delete guides
@@ -7881,12 +7836,13 @@ class Char( Rig ):
                         pose = metaData[ 'GuidePose' ]
 
                         for handle in pose.keys():
+                            handle_long = self.find_node(charRoot, handle)
                             for attr in pose[ handle ].keys():
                                 if pose[ handle ][ attr ][ 'input' ] == 'static':
                                     if pose[ handle ][ attr ][ 'dataType' ] == 'enum':
                                         pass
                                     else:
-                                        self.set_attr( handle, attr, pose[ handle ][ attr ][ 'value' ] )
+                                        self.set_attr( handle_long, attr, pose[ handle ][ attr ][ 'value' ] )
 
                                 if pose[ handle ][ attr ][ 'input' ] == 'animCurve':
 
@@ -7894,7 +7850,7 @@ class Char( Rig ):
                                     if not mc.objExists( src ):
                                         mc.warning( 'aniMeta: source does not exist', src )
 
-                                    dst = handle + '.' + attr
+                                    dst = handle_long + '.' + attr
                                     if not mc.objExists( dst ):
                                         mc.warning( 'aniMeta: dest does not exist', dst )
 
@@ -7907,14 +7863,15 @@ class Char( Rig ):
                                         else:
                                             mc.warning( 'Not connected:', src, dst )
 
-
-                    mc.undoInfo( closeChunk = True )
-
-                    self.update_ui()
-
                     mc.setAttr( charRoot + '.show_Guides', False )
+                    mc.setAttr( charRoot + '.show_Joints', True )
 
-                    return kRigStateControl
+                    state= kRigStateControl
+
+                mc.undoInfo( closeChunk = True )
+                self.update_ui(rig=charRoot)
+                mc.select(sel)
+                return state
 
 # Char
 #
@@ -8024,7 +7981,7 @@ class Biped( Char ):
             self.delete_body_guides( rootNode, deleteOnlyConstraints=True )
 
             # Delete SymConstraints in Proxy Grp
-            nodes = mc.listRelatives( self.find_node(rootNode, 'Proxy_Grp'))
+            nodes = mc.listRelatives( self.find_node(rootNode, prx_grp), pa=True)
             if nodes is not None:
                 for node in nodes:
                     con = mc.listConnections( node + '.t', s=True, d=False)
@@ -8806,14 +8763,12 @@ class Biped( Char ):
 
                 # Hook global scale here? We may need it pre PB
                 mc.connectAttr(pb + '.outTranslate', mlt2 + '.input2')
-                mc.connectAttr(mlt2 + '.output', joint.fullPathName() + '.translate')
-
-                mc.connectAttr(pb + '.outRotate', joint.fullPathName() + '.rotate')
-
-                # Is that a good idea? I don`t think so
-                #mc.setAttr(joint.fullPathName() + '.jointOrient', 0, 0, 0)
-                #mc.setAttr(joint_ik.fullPathName() + '.jointOrient', 0, 0, 0)
-
+                try:
+                    mc.connectAttr(mlt2 + '.output', joint.fullPathName() + '.translate')
+                    mc.connectAttr(pb + '.outRotate', joint.fullPathName() + '.rotate')
+                except:
+                    mc.warning("Can not connect to " + joint.fullPathName())
+                    print( mc.listConnections( joint.fullPathName() + '.translate', s=1, d=0))
                 return pb
 
             # Joints
@@ -8843,11 +8798,11 @@ class Biped( Char ):
                 return joint
 
             def joint_global_scale( joint ):
-                joint = self.find_node( rootNode, joint )
+                joint_long = self.find_node( rootNode, joint )
                 if joint is not None:
                     # Use the global Scale to make the rig scalable
-                    mlt1 = mc.createNode('multiplyDivide', name=self.short_name( joint ) + '_GS_' + SIDE + '_Multi1', ss=True)
-                    mlt2 = mc.createNode('multiplyDivide', name=self.short_name( joint ) + '_GS_' + SIDE + '_Multi2', ss=True)
+                    mlt1 = mc.createNode('multiplyDivide', name=self.short_name( joint_long ) + '_GS_' + SIDE + '_Multi1', ss=True)
+                    mlt2 = mc.createNode('multiplyDivide', name=self.short_name( joint_long ) + '_GS_' + SIDE + '_Multi2', ss=True)
 
                     save_for_cleanup(mlt1)
                     save_for_cleanup(mlt2)
@@ -8862,11 +8817,9 @@ class Biped( Char ):
 
                     mc.connectAttr( mlt1 + '.output', mlt2 + '.input1')
 
-                    t = mc.getAttr( self.find_node( rootNode, joint ) + '.t')[0]
+                    t = mc.getAttr( joint_long + '.t')[0]
                     mc.setAttr( mlt2 + '.input2', t[0], t[1], t[2])
-                    mc.connectAttr(mlt2 + '.output', joint + '.translate', force=True )
-                else:
-                    mc.warning( 'aniMeta.joint_global_scale: Can not find node:', joint )
+                    mc.connectAttr(mlt2 + '.output', joint_long + '.translate', force=True )
 
             def createWorldOrient(node, root, value):
                 # root = 'Main_Ctr_Ctrl'
@@ -8984,8 +8937,8 @@ class Biped( Char ):
 
                 pole_matrix = self.get_polevector_position( legUpJntIK, legLoJntIK, footJntIK, leg_preferred_angle )
 
-                parent = mc.listRelatives( controls[ 'LegPole_IK_' + SIDE + '_Ctrl' ].fullPathName(), p = True )[ 0 ]
-                parent = mc.listRelatives( parent, p = True )[ 0 ]
+                parent = mc.listRelatives( controls[ 'LegPole_IK_' + SIDE + '_Ctrl' ].fullPathName(), p=True, pa=True )[ 0 ]
+                parent = mc.listRelatives( parent, p = True, pa=True )[ 0 ]
 
                 self.set_matrix( parent, pole_matrix, kWorld )
 
@@ -9187,8 +9140,8 @@ class Biped( Char ):
 
                 pole_matrix = self.get_polevector_position( armUpJntIK, armLoJntIK, handJntIK, arm_preferred_angle )
 
-                parent = mc.listRelatives( controls[ 'ArmPole_IK_' + SIDE + '_Ctrl' ].fullPathName(), p = True )[ 0 ]
-                parent = mc.listRelatives( parent, p = True )[ 0 ]
+                parent = mc.listRelatives( controls[ 'ArmPole_IK_' + SIDE + '_Ctrl' ].fullPathName(), p=True, pa=True )[ 0 ]
+                parent = mc.listRelatives( parent, p=True, pa=True )[ 0 ]
 
                 self.set_matrix( parent, pole_matrix, kWorld )
 
@@ -10210,7 +10163,7 @@ class Model(Transform):
 
         for geo in geos:
             if mc.nodeType( geo ) == 'transform':
-                shapes = mc.listRelatives( geo, shapes=True ) or []
+                shapes = mc.listRelatives( geo, shapes=True, pa=True ) or []
 
                 if shapes:
                     if mc.nodeType( shapes[0]) == 'mesh' or mc.nodeType( shapes[0]) == 'nurbsSurface':
@@ -12565,6 +12518,7 @@ def initializePlugin( mobject ):
 
     scriptJobIds.append( mc.scriptJob( event = [ 'NewSceneOpened', AniMeta().update_ui ] ) )
     scriptJobIds.append( mc.scriptJob( event = [ 'SceneOpened', AniMeta().update_ui ] ) )
+    scriptJobIds.append( mc.scriptJob( event = [ 'Undo', AniMeta().update_ui ] ) )
 
 # Initialize
 #
@@ -12750,11 +12704,10 @@ class AniMetaUI( MayaQWidgetDockableMixin, QWidget):
         else:
             self.ui_delete()
 
-
         if mc.workspaceControl( self.ui_name + 'WorkspaceControl', exists=True ):
             mc.deleteUI (self.ui_name + 'WorkspaceControl')
 
-        self.setObjectName(self.ui_name )
+        self.setObjectName(self.ui_name)
         self.setWindowTitle('aniMeta')
 
         margin = 4
@@ -12763,7 +12716,8 @@ class AniMetaUI( MayaQWidgetDockableMixin, QWidget):
         self.main_layout = QVBoxLayout()
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(self.main_layout)
-        # self.setMinimumWidth( 300 )
+        self.setMinimumWidth( 600 )
+        self.setMinimumHeight( 600 )
 
         self.menubar = QMenuBar()
         optionsMenu = self.menubar.addMenu('&Options')
@@ -12927,10 +12881,11 @@ class AniMetaUI( MayaQWidgetDockableMixin, QWidget):
 
                 if mc.objExists( active_char ):
                     mc.delete( active_char )
-
         else:
             mc.warning( 'aniMeta: No character to delete.')
-            self.char_list_refresh()
+
+        self.char_list_refresh()
+        self.ui_refresh()
 
     # Select the active character
     def menu_select(self):
@@ -12966,36 +12921,41 @@ class AniMetaUI( MayaQWidgetDockableMixin, QWidget):
             mc.warning('aniMeta: Can not find character', character)
 
 class FrameWidget( QGroupBox ):
+ 
 
-    minimumHeight = 32
-
-    def __init__(self, title='', parent=None,  maxHeight=200 ):
+    def __init__(self, title='', parent=None):
         super(FrameWidget, self).__init__(title, parent)
 
+        self.set_frame_proportions()  # prepare frame_height, text-offset, triangle-points
+        self.setContentsMargins( px(4), self.frame_height, px(4), px(0))  # <- using frame_height
+
         layout =  QVBoxLayout()
-        layout.setContentsMargins( 4, 12, 4, 4)
+        layout.setContentsMargins( 0, 0, 0, 0)
         layout.setSpacing(0)
+
         super(FrameWidget, self).setLayout(layout)
 
         self.__widget =  QFrame(parent)
+
         self.__widget.setFrameShape( QFrame.Panel)
         self.__widget.setFrameShadow( QFrame.Plain)
         self.__widget.setLineWidth(0)
+
         layout.addWidget(self.__widget)
 
         self.__collapsed = False
-        self.maximumHeight = maxHeight
 
-        self.setMinimumHeight( self.maximumHeight )
-        self.setMaximumHeight( self.maximumHeight )
-
-
+        self.__widget.setAutoFillBackground(True)
+        pal = self.__widget.palette()
+        pal.setColor(QPalette.Window, QColor(73,73,73)) 
+        self.__widget.setPalette(pal)
+ 
 
     def setLayout(self, layout):
         self.__widget.setLayout(layout)
 
     def expandCollapseRect(self):
-        return  QRect(0, 0, self.width(), 32)
+        return  QRect(0, 0, self.width(), self.frame_height)
 
     def mouseReleaseEvent(self, event):
         if self.expandCollapseRect().contains(event.pos()):
@@ -13010,13 +12970,9 @@ class FrameWidget( QGroupBox ):
     def setCollapsed(self, state=True):
         self.__collapsed = state
 
-        if state:
-            self.setMinimumHeight( self.minimumHeight )
-            self.setMaximumHeight( self.minimumHeight )
+        if state: 
             self.__widget.setVisible(False)
-        else:
-            self.setMinimumHeight( self.maximumHeight )
-            self.setMaximumHeight( self.maximumHeight )
+        else: 
             self.__widget.setVisible(True)
 
     def paintEvent(self, event):
@@ -13024,41 +12980,93 @@ class FrameWidget( QGroupBox ):
         painter.begin(self)
 
         font = painter.font()
-        font.setBold(True)
+        font.setWeight(QFont.Bold) # font.setBold(True)
         painter.setFont(font)
 
-        x = self.rect().x()
-        y = self.rect().y() -2
-        w = self.rect().width()
-        offset = 30
-
-        #painter.setRenderHint(painter.Antialiasing)
-        painter.fillRect(self.expandCollapseRect(),  QColor(93, 93, 93))
-        painter.drawText(
-            x + offset, y + 7, w, 24,
-            Qt.AlignLeft | Qt.AlignTop,
-            self.title()
-        )
-        self.__drawTriangle(painter, x, y)
-        #painter.setRenderHint( QPainter.Antialiasing, False)
-        painter.end()
-
-    def __drawTriangle(self, painter, x, y):
-        if not self.__collapsed:
-            points = [ QPoint( x + 10, y + 11 ), QPoint( x + 20, y + 11 ), QPoint( x + 15, y + 16 ) ]
-
-        else:
-            points = [ QPoint( x + 10, y + 9 ), QPoint( x + 15, y + 14 ), QPoint(x + 10, y + 19 ) ]
+        painter.setRenderHint(QPainter.Antialiasing)
 
         currentBrush = painter.brush()
         currentPen   = painter.pen()
+        
+        # 1. draw background-rectang with tiny radius
+        painter.setPen(QtCore.Qt.NoPen)
+        painter.setBrush(QBrush(QColor(93, 93, 93), QtCore.Qt.SolidPattern)) 
+        painter.drawRoundedRect(self.expandCollapseRect(), 1.5,1.5)  
 
-        painter.setBrush( QBrush( QColor(187, 187, 187), Qt.SolidPattern ) )
-        painter.setPen( QPen(QtCore.Qt.NoPen ) )
+        # 2. draw triangle
+        painter.setBrush( QBrush( QColor(238, 238, 238), Qt.SolidPattern ) ) 
+        self.__drawTriangle(painter)  
+
+        # 3. draw text 
+        painter.setPen(currentPen)
+        painter.setBrush(currentBrush)
+
+        painter.drawText(
+            self.text_offset, 0, self.width()-self.text_offset, self.frame_height,
+            Qt.AlignLeft | Qt.AlignVCenter, 
+            self.title()
+            )
+        painter.end()
+
+    def __drawTriangle(self, painter, x, y):
+ 
+        if self.__collapsed:
+            points = self.points_collapsed
+        else:
+            points = self.points_open
+
+        painter.setRenderHint( QPainter.Antialiasing, False)
         painter.drawPolygon( QPolygon( points ) )
-        painter.setBrush( currentBrush )
-        painter.setPen( currentPen )
+        painter.setRenderHint( QPainter.Antialiasing)
 
+    def __drawTriangle(self, painter): # , x, y
+        
+        # set point list
+        if self.__collapsed:
+            points = self.points_collapsed
+        else:
+            points = self.points_open
+
+        painter.setRenderHint( QPainter.Antialiasing, False)
+        painter.drawPolygon( QPolygon( points ) )
+        painter.setRenderHint( QPainter.Antialiasing)
+
+    def set_frame_proportions(self):
+        # <------------------------------------------>
+        # depending on maya's dpi-scaling (real_scale)
+        # cmds.FrameLayout has:
+        # - nonLinear height-values
+        # - nonLinear placement and size of the triangle
+        # - nonLinear TextOffset
+        # exception: triangle of 125% version has same size as 100%-triangle
+        self.frame_height = 22;self.text_offset=38   # 100%
+        pnts_open = ((10,6), (19,6), (14.5,11));pnts_collapsed = ((12,4), (12,14), (17,8.5))
+        
+        # maya_custom_scale_variations:
+        if real_scale == 1.25:                      # 125%
+            self.frame_height = 24;self.text_offset=40;so=1.0
+            pnts_open = ((11,7), (20,7), (15.5,12));pnts_collapsed = ((13,5), (13,15), (18,9.5))
+        elif real_scale == 1.5:                     # 150%
+            self.frame_height = 28;self.text_offset=44
+            pnts_open = ((11,8), (24,8), (17.5,15));pnts_collapsed = ((14,5), (14,19), (21,11.5))
+        elif real_scale == 2.0:                     # 200%
+            self.frame_height = 37;self.text_offset=53
+            pnts_open = ((12,12), (33,12), (22.5,22));pnts_collapsed = ((18,7), (18,26), (28,16.5))
+        # <------------------------------------------>
+        
+        self.points_open =      [ QPoint( pnts_open[0][0], pnts_open[0][1]),
+                                  QPoint( pnts_open[1][0], pnts_open[1][1]),
+                                  QPoint( pnts_open[2][0], pnts_open[2][1]) ]
+        
+        self.points_collapsed = [ QPoint( pnts_collapsed[0][0], pnts_collapsed[0][1]),
+                                  QPoint( pnts_collapsed[1][0], pnts_collapsed[1][1]),
+                                  QPoint( pnts_collapsed[2][0], pnts_collapsed[2][1]) ]
+
+
+class NoWheelDoubleSpinBox(QDoubleSpinBox):
+    def wheelEvent(self, event: QWheelEvent):
+        # Ignore all wheel events (no change in value)
+        event.ignore()
 
 class MainTab( QWidget ):
 
@@ -13131,6 +13139,8 @@ class MainTab( QWidget ):
     def __ui__( self ):
 
         frames_layout = QVBoxLayout( self )
+        frames_layout.setSpacing(2) 
+
         self.setLayout(frames_layout)
 
         self.leg_mode_L = kIK
@@ -13141,9 +13151,8 @@ class MainTab( QWidget ):
 
         ########################################
         #   Create
-        row_height = px(48)
-
-        frame1 = FrameWidget('Create', None,  row_height*2   )
+ 
+        frame1 = FrameWidget('Create', None   )
         frames_layout.addWidget(frame1)
 
         widget = QWidget(frame1)
@@ -13159,7 +13168,7 @@ class MainTab( QWidget ):
         )
         layout.addWidget(createButton)
 
-        createButton.clicked.connect( partial( Char().create, name = 'Adam', type = kBipedUE  ))
+        createButton.clicked.connect( partial( Char().create, name = 'Eve', type = kBipedUE  ))
 
         #   Create
         ########################################
@@ -13167,13 +13176,16 @@ class MainTab( QWidget ):
         ########################################
         #   Edit
 
-        frame1 = FrameWidget('Edit', None, row_height*3  )
+        frame1 = FrameWidget('Edit', None  )
         frames_layout.addWidget(frame1)
 
         widget   = QWidget(frame1)
         layoutV  = QVBoxLayout(widget)
+        layoutV.setSpacing(px(2))
+        layoutV.setContentsMargins( px(8), px(12), px(8), px(12) )
+
         layoutH  = QHBoxLayout(self)
-        layoutH.setSpacing(0)
+        layoutH.setSpacing(px(2))
 
         layoutV.addLayout(layoutH)
         frame1.setLayout(layoutV)
@@ -13191,7 +13203,7 @@ class MainTab( QWidget ):
         layoutH.addWidget( self.modeControls )
 
         layoutH2  = QHBoxLayout(self)
-        layoutH2.setSpacing(0)
+        layoutH2.setSpacing(px(2))
         layoutV.addLayout(layoutH2)
 
         self.lockGuides1 = QPushButton( "Lock Guides", self )
@@ -13212,13 +13224,13 @@ class MainTab( QWidget ):
         ########################################
         #   Options
 
-        frame1 = FrameWidget('General Options', None, row_height*7  )
+        frame1 = FrameWidget('General Options', None  )
         frames_layout.addWidget( frame1 )
 
         widget = QWidget( frame1 )
         layout = QVBoxLayout( widget )
         layout.setSpacing( 0 )
-        layout.setContentsMargins( 0,0,0,0 )
+        layout.setContentsMargins( px(8), px(4), px(8), px(4) )
         frame1.setLayout(layout)
 
         self.showChar = QCheckBox( "Show Character", self )
@@ -13249,7 +13261,6 @@ class MainTab( QWidget ):
         self.showUpVecs = QCheckBox("Show Up Vectors", self )
         self.showUpVecs.clicked.connect(self.show_upVecs)
         layout.addWidget( self.showUpVecs )
-        # Show Geo?
 
         # Joint Display Type
         line = QHBoxLayout()
@@ -13282,12 +13293,17 @@ class MainTab( QWidget ):
         layout.addLayout( line )
 
         text = QLabel( 'Global Scale')
-        self.globalScale = QDoubleSpinBox ( )
+        self.globalScale = NoWheelDoubleSpinBox ( )
         self.globalScale.setValue( 1.0 )
         self.globalScale.setSingleStep( 0.1 )
         self.globalScale.setMinimum( 0.0001 )
         self.globalScale.setMaximum( 100.0 )
         self.globalScale.valueChanged[float].connect( self.set_global_scale )
+
+        def wheelEvent(self, event: QWheelEvent):
+            # Ignore all wheel events (no change in value)
+            event.ignore()
+
         line.addWidget(text)
         line.addWidget(self.globalScale)
 
@@ -13296,7 +13312,7 @@ class MainTab( QWidget ):
         layout.addLayout( line )
 
         text = QLabel( 'Control Scale')
-        self.ctrlScale = QDoubleSpinBox ( )
+        self.ctrlScale = NoWheelDoubleSpinBox ( )
         self.ctrlScale.setValue( 1.0 )
         self.ctrlScale.setSingleStep( 0.1 )
         self.ctrlScale.setMinimum( 0.0001 )
@@ -13310,7 +13326,7 @@ class MainTab( QWidget ):
         layout.addLayout( line )
 
         text = QLabel( 'Joint Radius')
-        self.jointRadius = QDoubleSpinBox ( )
+        self.jointRadius = NoWheelDoubleSpinBox ( )
         self.jointRadius.setValue( 1.0 )
         self.jointRadius.setSingleStep( 0.1 )
         self.jointRadius.setMinimum( 0.0001 )
@@ -13322,7 +13338,7 @@ class MainTab( QWidget ):
         #   Edit
         ########################################
 
-        frame1 = FrameWidget('Picker', None, self.picker_height+50  )
+        frame1 = FrameWidget('Picker', None  )
         frames_layout.addWidget(frame1)
         widget = QWidget(frame1)
         layout = QVBoxLayout(widget)
@@ -13334,7 +13350,6 @@ class MainTab( QWidget ):
         self.picker_create( layout )
 
         frames_layout.addStretch()
-
 
         self.ui_update()
 
@@ -13514,7 +13529,6 @@ class MainTab( QWidget ):
 
     def switch_space_ctx_menu(self, name):
 
-
         char = self.am.get_active_char()
         node_path = self.am.find_node( char, name )
 
@@ -13547,12 +13561,9 @@ class MainTab( QWidget ):
 
         self.pickerWidget = QWidget(self)
         self.pickerLayout = QGridLayout( self.pickerWidget )
-        #self.pickerWidget.setFixedHeight( self )
-        #self.pickerLayout = QGridLayout(self)
         self.pickerLayout.setSpacing(0)
         self.pickerLayout.setAlignment( Qt.AlignCenter )
         self.pickerLayout.setContentsMargins(0,0,0,0)
-
 
         two_units   = self.button_size*2
         three_units = self.button_size*3
@@ -14995,7 +15006,6 @@ class MainTab( QWidget ):
 
     def ui_update( self, char=None ):
 
-
         if char is None:
             char = self.am.get_active_char()
 
@@ -15163,6 +15173,7 @@ class MainTab( QWidget ):
             self.showJoints.setEnabled(mode)
             self.showGeo.setEnabled(mode)
             self.showRig.setEnabled(mode)
+            self.showGuides.setEnabled(mode)
             self.showMocap.setEnabled(mode)
             self.showUpVecs.setEnabled(mode)
             self.globalScale.setEnabled(mode)
@@ -15177,7 +15188,10 @@ class MainTab( QWidget ):
             self.lockGuides3.setEnabled(mode)
             self.pickerWidget.setEnabled(mode)
 
-kLibPose, kLibAnim, kLibRig = range(3)
+            if not mode:
+                self.modeControls.setStyleSheet(self.style_not_active)
+                self.modeGuides.setStyleSheet(self.style_not_active)
+
 
 class LibTab(QWidget):
 
@@ -15194,12 +15208,15 @@ class LibTab(QWidget):
         self.am = AniMeta()
         self.rig = Rig()
         mainLayout = QVBoxLayout( self )
+
         self.setLayout(mainLayout)
 
         self.menu = QMenu( self )
 
         l_widget = QWidget()
         self.l = QVBoxLayout( l_widget )
+        self.l.setSpacing(px(2))
+        self.l.setContentsMargins( px(8), px(4), px(8), px(4) )
 
         self.scrollArea = QScrollArea()
         self.layout().addWidget( self.scrollArea )
@@ -15229,10 +15246,13 @@ class LibTab(QWidget):
         self.button_height = 28
         self.button_width = 128
 
+        # Poses Frame Widget
         self.poses()
 
+        # Animation Frame Widget
         self.anims()
 
+        # Rig Frame Widget
         self.rigs()
 
         for section in [kLibPose, kLibAnim, kLibRig ]:
@@ -15253,13 +15273,13 @@ class LibTab(QWidget):
         ########################################
         #   Poses
 
-        self.pose_frame = FrameWidget( 'Poses', None, 600 )
+        self.pose_frame = FrameWidget( 'Poses', None )
         self.l.addWidget( self.pose_frame )
 
         widget = QWidget( self.pose_frame )
 
-
         vLayout = QVBoxLayout( self )
+
         self.pose_frame.setLayout( vLayout )
 
         hLayout = QHBoxLayout( self )
@@ -15326,7 +15346,7 @@ class LibTab(QWidget):
 
     def anims( self ):
 
-        self.anim_frame = FrameWidget( 'Animation', None, 600 )
+        self.anim_frame = FrameWidget( 'Animation', None )
         self.l.addWidget( self.anim_frame )
 
         widget = QWidget( self.anim_frame )
@@ -15399,7 +15419,7 @@ class LibTab(QWidget):
 
     def rigs( self ):
 
-        self.rig_frame = FrameWidget( 'Rigs', None, 600 )
+        self.rig_frame = FrameWidget( 'Rigs', None  )
         self.l.addWidget( self.rig_frame )
 
         widget = QWidget( self.rig_frame )
@@ -15941,7 +15961,7 @@ class LibTab(QWidget):
         except:
             pass
         if section == kLibRig:
-            rootNode = Char().create( name = 'Adam', type = rig_type  )
+            rootNode = Char().create( name = 'Eve', type = rig_type  )
 
             try:
                 ui = AniMetaUI( create=False )
@@ -16626,7 +16646,7 @@ class LibTab(QWidget):
                 if len( handles ) > 0:
 
                     joint_grp = self.am.find_node( char, 'Joint_Grp' ) or [ ]
-                    joints = mc.listRelatives( joint_grp, c = True, ad = True, typ = 'joint' )
+                    joints = mc.listRelatives( joint_grp, c = True, ad = True, typ = 'joint', pa=True )
                     attrs = [ 'controlSize', 'controlSizeX', 'controlSizeY', 'controlSizeZ', 'controlOffset', 'controlOffsetX', 'controlOffsetY', 'controlOffsetZ' ]
 
                     for handle in handles:
@@ -16712,7 +16732,7 @@ class LibTab(QWidget):
             if len(handles) > 0:
 
                 joint_grp = self.am.find_node(char, 'Joint_Grp') or []
-                joints = mc.listRelatives(joint_grp, c=True, ad=True, typ='joint')
+                joints = mc.listRelatives(joint_grp, c=True, ad=True, typ='joint', pa=True)
                 attrs = ['controlSize', 'controlSizeX', 'controlSizeY', 'controlSizeZ', 'controlOffset', 'controlOffsetX', 'controlOffsetY', 'controlOffsetZ']
 
                 for handle in handles:
@@ -16945,7 +16965,6 @@ class aniMetaLibItem( QPushButton ):
 
     def mousePressEvent (self, event):
         pass
-
 
 
 class AniMetaOptionsUI():
@@ -17644,7 +17663,7 @@ class Orient_Transform_UI():
 
         at = Transform()
 
-        for child in mc.listRelatives(source, children=True):
+        for child in mc.listRelatives(source, children=True, pa=True):
 
             if mc.nodeType(child) in ['transform', 'joint']:
 
