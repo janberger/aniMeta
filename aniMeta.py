@@ -66,6 +66,11 @@ else:
 
 from functools import partial
 
+mult_DL_node_type = 'multDoubleLinear'
+
+if maya_version > 2025:
+    mult_DL_node_type = 'multDL'
+
 real_scale = mc.mayaDpiSetting(query=True, realScaleValue=True)
 
 # override omui.MQtUtil.dpiScale px-function
@@ -73,7 +78,7 @@ def px(value):
     return real_scale*value
 
 kPluginName    = 'aniMeta'
-kPluginVersion = '01.00.157'
+kPluginVersion = '01.00.158'
 
 kLeft, kRight, kCenter, kAll, kSelection = range( 5 )
 kHandle, kIKHandle, kJoint, kMain, kBodyGuide, kBipedRoot, kQuadrupedRoot, kCustomHandle, kBodyGuideLock, kBipedRootUE = range(10)
@@ -487,6 +492,7 @@ class Menu(AniMeta):
 
         mc.menuItem( label = 'Create', divider=True )
         mc.menuItem( label = 'Biped UE',    c = partial( char.create, name='Adam', type=kBipedUE ) )
+        mc.menuItem( label = 'Quadruped',    c = partial( char.create, name='Horsy', type=kQuadruped ) )
 
         # Character
         #
@@ -1456,6 +1462,8 @@ class Rig( Transform ):
                 if mc.nodeType( new_joints[ joint ].fullPathName() ) == 'transform':
                     mc.parent( new_joints[ joint ].fullPathName(), guides_aux_grp )
 
+            mc.select( cl=True )
+
             if rootNode is not None:
                 return new_joints[ rootNode ].fullPathName()
             else:
@@ -2254,6 +2262,59 @@ class Rig( Transform ):
                 mc.setAttr( c + '.colorIfFalseR', 0 )
                 mc.connectAttr( c + '.outColorR', cnst + '.' + w )
                 index += 1
+
+    def create_spline_simple(self, name, src, dst, output_count=5, input_rot_offset=(0,0,0), output_rot_offset=(0,0,0)):
+        '''
+        Creates a cMuscleSpline IK spline set-up
+        '''
+
+
+        spline_transform = mc.createNode('transform', name=name + '_muscle_spline', ss=True)
+        spline_node = mc.createNode('cMuscleSpline', name=name + '_muscle_splineShape', parent=spline_transform,
+                                    ss=True)
+        # Turn off spline drawing
+        mc.setAttr( spline_node+'.draw', 0)
+
+        offset_cm = mc.createNode('composeMatrix', name=name + '_spline_node_offset_cm', ss=True)
+        mc.setAttr(offset_cm + '.inputRotate', *input_rot_offset)
+
+        src_offset_mm = mc.createNode('multMatrix', name=name + '_src_mm', ss=True)
+        dst_offset_mm = mc.createNode('multMatrix', name=name + '_dst_mm', ss=True)
+
+        mc.connectAttr(offset_cm + '.outputMatrix', src_offset_mm + '.matrixIn[0]')
+        mc.connectAttr(src + '.worldMatrix[0]', src_offset_mm + '.matrixIn[1]')
+        mc.connectAttr(src_offset_mm + '.matrixSum', spline_node + '.controlData[0].insertMatrix')
+
+        mc.connectAttr(offset_cm + '.outputMatrix', dst_offset_mm + '.matrixIn[0]')
+        mc.connectAttr(dst + '.worldMatrix[0]', dst_offset_mm + '.matrixIn[1]')
+        mc.connectAttr(dst_offset_mm + '.matrixSum', spline_node + '.controlData[1].insertMatrix')
+
+        xforms = []
+        inc = 1 / (output_count - 1)
+
+        # Creates the outputs and plugs into the offsetParentMatrix attribute
+        # adds a multMatrix and composeMatrix nodes to add an offset
+        for i in range(output_count):
+            xform = mc.createNode('transform', name=name + '_output_' + str(i + 1), ss=True)
+            cm1 = mc.createNode('composeMatrix', name=name + '_cm1_' + str(i + 1), ss=True)
+            cm2 = mc.createNode('composeMatrix', name=name + '_cm2_' + str(i + 1), ss=True)
+            mm = mc.createNode('multMatrix', name=name + '_mm_' + str(i + 1), ss=True)
+            mc.setAttr(cm1 + '.inputRotate', *output_rot_offset)
+            mc.setAttr(spline_node + '.readData[' + str(i) + '].readU', i * inc)
+            mc.connectAttr(spline_node + '.outputData[' + str(i) + '].outTranslate', cm2 + '.inputTranslate')
+            mc.connectAttr(spline_node + '.outputData[' + str(i) + '].outRotate', cm2 + '.inputRotate')
+            mc.connectAttr(cm1 + '.outputMatrix', mm + '.matrixIn[0]')
+            mc.connectAttr(cm2 + '.outputMatrix', mm + '.matrixIn[1]')
+
+            # in case we are working with Z up, we need to add a world orientation offset to the result
+            if mc.upAxis(query=True, axis=True) == 'z':
+                cm3 = mc.createNode('composeMatrix', name=name + '_cm3_' + str(i + 1), ss=True)
+                mc.setAttr(cm3 + '.inputRotate', -90, 0, 0)
+                mc.connectAttr(cm3 + '.outputMatrix', mm + '.matrixIn[2]')
+
+            mc.connectAttr(mm + '.matrixSum', xform + '.offsetParentMatrix')
+            xforms.append(xform)
+        return spline_transform, xforms
 
     def create_sym_con_hier(self, *args):
 
@@ -3541,7 +3602,7 @@ class Char( Rig ):
                            'ring_01_l', 'ring_02_l', 'ring_03_l',
                            'pinky_01_l', 'pinky_02_l', 'pinky_03_l'
                            ]
-            elif type == kQuadrupedRoot:
+            elif type == kQuadruped:
                 joints = [ 'Eye_Lft_Jnt',
                            'Scapula_Lft_Jnt', 'Humerus_Lft_Jnt', 'Radius_Lft_Jnt', 'CannonFront_Lft_Jnt',
                            'PasternFront_Lft_Jnt', 'HoofFront_Lft_Jnt', 'HoofFrontTip_Lft_Jnt',
@@ -3856,41 +3917,13 @@ class Char( Rig ):
                 m = [1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
                 mc.setAttr( 'Clavicle_Rgt_Guide_Grp.offsetParentMatrix', m, typ='matrix' )
 
-                '''
-                # Fingers
-                for fngr in [ 'Index', 'Pinky', 'Middle', 'Ring', 'Thumb'  ]:
-                    for i in range( 1, 5 ):
-                        ctrlDict[ 'name' ] = fngr + str( i ) + '_Lft_Guide'
-                        ctrlDict[ 'matchTransform' ] = fngr + str( i ) + '_Lft_Jnt'
-                        ctrlDict[ 'radius' ] = 1
-
-                        if i == 1:
-                            ctrlDict[ 'parent' ] = guideDict[ 'Palm_Lft_Guide' ]
-                            attrList = [ 'sx', 'sy', 'sz', 'v' ]
-                        else:
-                            ctrlDict[ 'parent' ] = guideDict[ fngr + str( i - 1 ) + '_Lft_Guide' ]
-                            attrList = [ 'ty', 'tz', 'rx', 'ry', 'sx', 'sy', 'sz', 'v' ]
-
-                        if fngr is not 'Thumb':
-                            guideDict[ ctrlDict[ 'name' ] ] = self.create_handle( **ctrlDict )
-                            self.swap_rotation_with_parent( guideDict[ ctrlDict[ 'name' ] ] )
-                            self.lock_attrs( guideDict[ ctrlDict[ 'name' ] ] , attrList )
-                            self.set_metaData( guideDict[ ctrlDict[ 'name' ] ] , data )
-
-                        if fngr is 'Thumb' and i < 4:
-                            guideDict[ ctrlDict[ 'name' ] ] = self.create_handle( **ctrlDict )
-                            self.swap_rotation_with_parent( guideDict[ ctrlDict[ 'name' ] ] )
-                            self.lock_attrs( guideDict[ ctrlDict[ 'name' ] ], attrList )
-                            self.set_metaData( guideDict[ ctrlDict[ 'name' ] ], data )
-                '''
                 for guide in guideDict.keys():
                     try:
                         mc.setAttr( guide + '.displayHandle', True )
                     except:
                         pass
 
-
-            if type == kQuadrupedRoot:
+            if type == kQuadruped:
 
                 ctrlDict[ 'radius' ] = 0.3
 
@@ -3929,10 +3962,10 @@ class Char( Rig ):
 
                 # Spine
                 guideList.append( [ 'Spine1_Guide', 'Spine1_Jnt', 'Pelvis_Guide', attrList ] )
-                guideList.append( [ 'Spine2_Guide', 'Spine6_Jnt', 'Shoulder_Guide', attrList ] )
+                guideList.append( [ 'Spine2_Guide', 'Spine7_Jnt', 'Shoulder_Guide', attrList ] )
 
                 # Head
-                guideList.append( [ 'Head_Guide', 'Head_Jnt', 'Shoulder_Guide', justTzRx ] )
+                guideList.append( [ 'Head_Guide', 'Head_Jnt', 'Shoulder_Guide',  [ 'tx', 'ry', 'rz', 'sx', 'sy', 'sz', 'v' ] ] )
 
                 # Neck 1
                 guideList.append( [ 'Neck1_Guide', 'Neck1_Jnt', 'Shoulder_Guide', attrList ] )
@@ -3983,48 +4016,50 @@ class Char( Rig ):
                 guideList.append(
                     [ 'HoofFrontTip_Lft_Guide', 'HoofFrontTip_Lft_Jnt', 'HoofFront_Lft_Guide', justTzRx ] )
 
-                for guide in guideList:
-                    ctrlDict[ 'name' ] = guide[ 0 ]
-                    ctrlDict[ 'matchTransform' ] = guide[ 1 ]
-                    if guide[ 2 ] in guideDict:
-                        ctrlDict[ 'parent' ] = guideDict[ guide[ 2 ] ][ 0 ]
-                    else:
-                        ctrlDict[ 'parent' ] = guide[ 2 ]
+                guideDict = self.build_guides( charRoot, guideList, ctrlDict, guideDict, data )
 
-                    guideDict[ ctrlDict[ 'name' ] ] = self.create_handle( **ctrlDict )
-                    self.swap_rotation_with_parent( guideDict[ ctrlDict[ 'name' ] ])
-                    self.lock_attrs( guideDict[ ctrlDict[ 'name' ] ], guide[ 3 ] )
-                    self.set_metaData( self.find_node( charRoot, guideDict[ ctrlDict[ 'name' ] ] ), data )
+                in_rot_offset = (90,0,0)
+                out_rot_offset = (-90,0,0)
 
                 # Spine
-                src = 'Spine1_Guide'
-                dst = 'Spine2_Guide'
-                spine = self.create_spline_simple( 'spine', src, dst, 4, [ 90, 0, 0 ], 5 )
+                src = self.find_node(charRoot, 'Spine1_Guide')
+                dst = self.find_node(charRoot, 'Spine2_Guide')
+                count = 7
+                node, spine = self.create_spline_simple( 'spine', src, dst, count, in_rot_offset, out_rot_offset  )
 
-                for i in range( 4 ):
-                    mc.parentConstraint( spine[ 2 ][ i ], 'Spine' + str( i + 2 ) + '_Jnt' )
+                for i in range( 1, count-1 ):
+                    jnt = self.find_node(charRoot, 'Spine' + str( i + 1 ) + '_Jnt')
+                    mc.parentConstraint( spine[ i ], jnt )
 
-                mc.parent( spine[ 0 ], 'Guides_Body_Grp' )
+                guide_grp = self.find_node(charRoot, 'Guides_Body_Grp')
+
+                mc.parent( node, spine, guide_grp )
 
                 # Neck
-                src = 'Neck1_Guide'
-                dst = 'Neck2_Guide'
-                neck = self.create_spline_simple( 'neck', src, dst, 6, [ 90, 0, 0 ], 5 )
+                src = self.find_node(charRoot, 'Neck1_Guide')
+                dst = self.find_node(charRoot, 'Neck2_Guide')
+                count = 8
+                node, neck = self.create_spline_simple( 'neck', src, dst, count, in_rot_offset, out_rot_offset )
 
-                for i in range( 6 ):
-                    mc.parentConstraint( neck[ 2 ][ i ], 'Neck' + str( i + 2 ) + '_Jnt' )
+                for i in range( 1, count-1  ):
+                    jnt = self.find_node(charRoot,  'Neck' + str( i + 1 ) + '_Jnt' )
+                    mc.parentConstraint( neck[ i ], jnt)
 
-                mc.parent( neck[ 0 ], 'Guides_Body_Grp' )
+                mc.parent( node, neck, guide_grp )
 
                 # Tail
-                src = 'Tail1_Guide'
-                dst = 'Tail2_Guide'
-                tail = self.create_spline_simple( 'tail', src, dst, 10, [ -90, 0, 0 ], 5 )
+                src = self.find_node(charRoot, 'Tail1_Guide')
+                dst = self.find_node(charRoot, 'Tail2_Guide')
+                count = 12
+                in_rot_offset = (-90,0,0)
+                out_rot_offset = (90,0,0)
+                node, tail = self.create_spline_simple( 'tail', src, dst, count, in_rot_offset, out_rot_offset  )
 
-                for i in range( 10 ):
-                    mc.parentConstraint( tail[ 2 ][ i ], 'Tail' + str( i + 2 ) + '_Jnt' )
+                for i in range(  1, count-1 ):
+                    jnt = self.find_node(charRoot,  'Tail' + str( i + 1 ) + '_Jnt' )
+                    mc.parentConstraint( tail[ i ], jnt )
 
-                mc.parent( tail[ 0 ], 'Guides_Body_Grp' )
+                mc.parent( node, tail, guide_grp )
 
                 return True
 
@@ -5024,7 +5059,7 @@ class Char( Rig ):
             # Pair Blends
             #
             ##################################################################################################
-        if type == kQuadrupedRoot:
+        if type == kQuadruped:
             return True
 
     def build_scaling( self, rootNode, type ):
@@ -5036,7 +5071,7 @@ class Char( Rig ):
         '''
 
         # Hook up joint radius attrs
-        multi = mc.createNode( 'multDoubleLinear', name = 'jointRadiusMulti', ss = True )
+        multi = mc.createNode( mult_DL_node_type, name = 'jointRadiusMulti', ss = True )
         mc.connectAttr( rootNode + '.globalScale', multi + '.input1' )
         mc.connectAttr( rootNode + '.jointRadius', multi + '.input2' )
 
@@ -5093,6 +5128,7 @@ class Char( Rig ):
         print ('aniMeta: Create the body guides.')
         self.build_body_guides( rootNode, type )
 
+        '''
         # Constraints
         print ('aniMeta: Build Constraints.')
         self.build_constraints( rootNode, type )
@@ -5109,7 +5145,7 @@ class Char( Rig ):
         mc.select( rootNode, replace=True)
         mc.setAttr( rootNode + '.show_Joints', 1 )
         mc.setAttr( rootNode + '.show_Guides', True )
-
+        '''
         if mc.upAxis(query=True, axis=True) == 'z':
             mc.setAttr( rootNode + '.rx', l=False)
             mc.setAttr( rootNode + '.rx', 90)
@@ -5807,7 +5843,7 @@ class Char( Rig ):
               }
              }
             }
-        if type == kQuadrupedRoot:
+        if type == kQuadruped:
           return  None
 
     def get_joints( self, type ):
@@ -7197,483 +7233,463 @@ class Char( Rig ):
                 }
             }
 
-        if type == kQuadrupedRoot:
+        if type == kQuadruped:
             return {
-                "Skeleton": {
-                    "Joints": {
-                        "Pelvis_Jnt": {
-                            "radius": 0.5,
-                            "tz": -4.1285,
-                            "nodeType": "joint",
-                            "parent": "Root_Jnt",
-                            "ty": 10.9146
-                        },
-                        "CannonFront_Rgt_Jnt": {
-                            "jox": 1.7534,
-                            "radius": 0.5,
-                            "tz": -2.7777,
-                            "nodeType": "joint",
-                            "parent": "Radius_Rgt_Jnt"
-                        },
-                        "HoofFrontTip_Rgt_Jnt": {
-                            "radius": 0.5,
-                            "tz": -0.4491,
-                            "nodeType": "joint",
-                            "parent": "HoofFront_Rgt_Jnt"
-                        },
-                        "HoofFront_Rgt_Jnt": {
-                            "tz": -0.708,
-                            "parent": "PasternFront_Rgt_Jnt",
-                            "ty": -0.02,
-                            "jox": -11.5177,
-                            "radius": 0.5,
-                            "nodeType": "joint"
-                        },
-                        "Scapula_Rgt_Jnt": {
-                            "tz": -0.428,
-                            "parent": "Shoulder_Jnt",
-                            "tx": -1.0706,
-                            "ty": 0.4564,
-                            "jox": -130.5331,
-                            "joy": -1.5141,
-                            "joz": 1.2943,
-                            "radius": 0.5,
-                            "nodeType": "joint"
-                        },
-                        "Radius_Rgt_Jnt": {
-                            "tz": -2.426,
-                            "parent": "Humerus_Rgt_Jnt",
-                            "jox": -49.1197,
-                            "joz": 180.0,
-                            "radius": 0.5,
-                            "nodeType": "joint"
-                        },
-                        "Neck8_Jnt": {
-                            "radius": 0.5,
-                            "tz": 0.9588,
-                            "nodeType": "joint",
-                            "parent": "Neck7_Jnt"
-                        },
-                        "Neck7_Jnt": {
-                            "radius": 0.5,
-                            "tz": 0.9588,
-                            "nodeType": "joint",
-                            "parent": "Neck6_Jnt"
-                        },
-                        "Spine5_Jnt": {
-                            "jox": -3.2086,
-                            "radius": 0.5,
-                            "tz": 1.2891,
-                            "nodeType": "joint",
-                            "parent": "Spine4_Jnt"
-                        },
-                        "Neck5_Jnt": {
-                            "radius": 0.5,
-                            "tz": 0.9588,
-                            "nodeType": "joint",
-                            "parent": "Neck4_Jnt"
-                        },
-                        "Neck4_Jnt": {
-                            "radius": 0.5,
-                            "tz": 0.9588,
-                            "nodeType": "joint",
-                            "parent": "Neck3_Jnt"
-                        },
-                        "Neck3_Jnt": {
-                            "radius": 0.5,
-                            "tz": 0.9588,
-                            "nodeType": "joint",
-                            "parent": "Neck2_Jnt"
-                        },
-                        "Neck2_Jnt": {
-                            "tz": 0.4277,
-                            "parent": "Neck1_Jnt",
-                            "ty": 0.2143,
-                            "jox": -9.026,
-                            "radius": 0.5,
-                            "nodeType": "joint"
-                        },
-                        "Neck1_Jnt": {
-                            "radius": 0.5,
-                            "tz": 0.2611,
-                            "nodeType": "joint",
-                            "parent": "Shoulder_Jnt"
-                        },
-                        "Eye_Lft_Jnt": {
-                            "nodeType": "joint",
-                            "tx": 0.7298,
-                            "parent": "Head_Jnt",
-                            "ty": 0.4374,
-                            "radius": 0.5,
-                            "tz": 0.587
-                        },
-                        "HoofBackTip_Lft_Jnt": {
-                            "tz": 0.708,
-                            "parent": "HoofBack_Lft_Jnt",
-                            "ty": 0.02,
-                            "jox": -5.1461,
-                            "radius": 0.5,
-                            "nodeType": "joint"
-                        },
-                        "HoofBack_Lft_Jnt": {
-                            "radius": 0.5,
-                            "tz": 0.7518,
-                            "nodeType": "joint",
-                            "parent": "PasternBack_Lft_Jnt"
-                        },
-                        "PasternBack_Lft_Jnt": {
-                            "jox": -32.0856,
-                            "radius": 0.5,
-                            "tz": 3.5052,
-                            "nodeType": "joint",
-                            "parent": "CannonBack_Lft_Jnt"
-                        },
-                        "CannonBack_Lft_Jnt": {
-                            "tz": 3.1596,
-                            "parent": "Fibula_Lft_Jnt",
-                            "jox": -37.8725,
-                            "joy": -1.4155,
-                            "joz": -1.5105,
-                            "radius": 0.5,
-                            "nodeType": "joint"
-                        },
-                        "Fibula_Lft_Jnt": {
-                            "nodeType": "joint",
-                            "tx": 0.1987,
-                            "parent": "Femur_Lft_Jnt",
-                            "jox": 77.9223,
-                            "radius": 0.5,
-                            "tz": 3.7827
-                        },
-                        "Spine1_Jnt": {
-                            "tz": 0.7968,
-                            "parent": "Pelvis_Jnt",
-                            "ty": -0.0125,
-                            "jox": 8.35,
-                            "radius": 0.5,
-                            "nodeType": "joint"
-                        },
-                        "Tail12_Jnt": {
-                            "radius": 0.5,
-                            "tz": -0.75,
-                            "nodeType": "joint",
-                            "parent": "Tail11_Jnt"
-                        },
-                        "Tail10_Jnt": {
-                            "radius": 0.5,
-                            "tz": -0.75,
-                            "nodeType": "joint",
-                            "parent": "Tail9_Jnt"
-                        },
-                        "Tail11_Jnt": {
-                            "radius": 0.5,
-                            "tz": -0.75,
-                            "nodeType": "joint",
-                            "parent": "Tail10_Jnt"
-                        },
-                        "JawTip_Jnt": {
-                            "radius": 0.5,
-                            "tz": 2.2192,
-                            "nodeType": "joint",
-                            "parent": "Jaw_Jnt"
-                        },
-                        "Jaw_Jnt": {
-                            "tz": 0.6392,
-                            "parent": "Head_Jnt",
-                            "ty": -0.6034,
-                            "jox": 4.3305,
-                            "radius": 0.5,
-                            "nodeType": "joint"
-                        },
-                        "Eye_Rgt_Jnt": {
-                            "tz": 0.587,
-                            "tx": -0.7298,
-                            "parent": "Head_Jnt",
-                            "ty": 0.4374,
-                            "jox": 180.0,
-                            "radius": 0.5,
-                            "nodeType": "joint"
-                        },
-                        "Humerus_Rgt_Jnt": {
-                            "tz": -3.9995,
-                            "tx": -0.1987,
-                            "parent": "Scapula_Rgt_Jnt",
-                            "jox": -87.8822,
-                            "joz": 180.0,
-                            "radius": 0.5,
-                            "nodeType": "joint"
-                        },
-                        "Spine4_Jnt": {
-                            "jox": -3.2086,
-                            "radius": 0.5,
-                            "tz": 1.2891,
-                            "nodeType": "joint",
-                            "parent": "Spine3_Jnt"
-                        },
-                        "Ear_Rgt_Jnt": {
-                            "tz": -0.4806,
-                            "parent": "Head_Jnt",
-                            "tx": -0.7128,
-                            "ty": 0.2438,
-                            "jox": 135.3,
-                            "joz": 17.7,
-                            "radius": 0.5,
-                            "nodeType": "joint"
-                        },
-                        "Root_Jnt": {
-                            "nodeType": "joint",
-                            "radius": 0.5,
-                            "parent": "Joint_Grp"
-                        },
-                        "Neck6_Jnt": {
-                            "radius": 0.5,
-                            "tz": 0.9588,
-                            "nodeType": "joint",
-                            "parent": "Neck5_Jnt"
-                        },
-                        "HoofFront_Lft_Jnt": {
-                            "tz": 0.708,
-                            "parent": "PasternFront_Lft_Jnt",
-                            "ty": 0.02,
-                            "jox": -5.1461,
-                            "radius": 0.5,
-                            "nodeType": "joint"
-                        },
-                        "CannonFront_Lft_Jnt": {
-                            "parent": "Radius_Lft_Jnt",
-                            "tz": 2.749,
-                            "radius": 0.5,
-                            "nodeType": "joint"
-                        },
-                        "PasternFront_Lft_Jnt": {
-                            "jox": -30.1682,
-                            "radius": 0.5,
-                            "tz": 3.0313,
-                            "nodeType": "joint",
-                            "parent": "CannonFront_Lft_Jnt"
-                        },
-                        "HeadTip_Jnt": {
-                            "radius": 0.5,
-                            "tz": 3.6066,
-                            "nodeType": "joint",
-                            "parent": "Head_Jnt",
-                            "ty": -0.1811
-                        },
-                        "HoofFrontTip_Lft_Jnt": {
-                            "radius": 0.5,
-                            "tz": 0.4491,
-                            "nodeType": "joint",
-                            "parent": "HoofFront_Lft_Jnt"
-                        },
-                        "Scapula_Lft_Jnt": {
-                            "tz": -0.428,
-                            "parent": "Shoulder_Jnt",
-                            "tx": 1.0706,
-                            "ty": 0.4564,
-                            "jox": 49.4669,
-                            "joy": 1.5141,
-                            "joz": -1.2943,
-                            "radius": 0.5,
-                            "nodeType": "joint"
-                        },
-                        "Spine2_Jnt": {
-                            "jox": -3.209,
-                            "radius": 0.5,
-                            "tz": 1.2891,
-                            "nodeType": "joint",
-                            "parent": "Spine1_Jnt"
-                        },
-                        "Head_Jnt": {
-                            "tz": 0.2096,
-                            "parent": "Neck8_Jnt",
-                            "ty": -0.0333,
-                            "jox": 67.609,
-                            "radius": 0.5,
-                            "nodeType": "joint"
-                        },
-                        "HoofBack_Rgt_Jnt": {
-                            "radius": 0.5,
-                            "tz": -0.7518,
-                            "nodeType": "joint",
-                            "parent": "PasternBack_Rgt_Jnt"
-                        },
-                        "HoofBackTip_Rgt_Jnt": {
-                            "tz": -0.708,
-                            "parent": "HoofBack_Rgt_Jnt",
-                            "ty": -0.02,
-                            "jox": -5.1461,
-                            "radius": 0.5,
-                            "nodeType": "joint"
-                        },
-                        "CannonBack_Rgt_Jnt": {
-                            "tz": -3.1596,
-                            "parent": "Fibula_Rgt_Jnt",
-                            "jox": -37.8932,
-                            "joy": -3.199,
-                            "joz": -2.4121,
-                            "radius": 0.5,
-                            "nodeType": "joint"
-                        },
-                        "PasternBack_Rgt_Jnt": {
-                            "jox": -32.0856,
-                            "radius": 0.5,
-                            "tz": -3.5053,
-                            "nodeType": "joint",
-                            "parent": "CannonBack_Rgt_Jnt"
-                        },
-                        "Femur_Rgt_Jnt": {
-                            "tz": -0.974,
-                            "parent": "Pelvis_Jnt",
-                            "tx": -1.071,
-                            "ty": -0.764,
-                            "jox": -130.444,
-                            "joy": 2.060,
-                            "joz": 1.788,
-                            "radius": 0.5,
-                            "nodeType": "joint"
-                        },
-                        "Fibula_Rgt_Jnt": {
-                            "tz": -3.7827,
-                            "parent": "Femur_Rgt_Jnt",
-                            "tx": -0.1987,
-                            "jox": 78.093,
-                            "joy": 0.974,
-                            "joz": 3.0262,
-                            "radius": 0.5,
-                            "nodeType": "joint"
-                        },
-                        "Radius_Lft_Jnt": {
-                            "jox": -49.1201,
-                            "radius": 0.5,
-                            "tz": 2.426,
-                            "nodeType": "joint",
-                            "parent": "Humerus_Lft_Jnt"
-                        },
-                        "Ear_Lft_Jnt": {
-                            "tz": -0.4806,
-                            "parent": "Head_Jnt",
-                            "tx": 0.7128,
-                            "ty": 0.2438,
-                            "jox": -44.7,
-                            "joz": -17.7,
-                            "radius": 0.5,
-                            "nodeType": "joint"
-                        },
-                        "Shoulder_Jnt": {
-                            "tz": 1.3656,
-                            "parent": "Spine6_Jnt",
-                            "ty": 0.0043,
-                            "jox": 7.6931,
-                            "radius": 0.5,
-                            "nodeType": "joint"
-                        },
-                        "Humerus_Lft_Jnt": {
-                            "tz": 3.9995,
-                            "tx": 0.1987,
-                            "parent": "Scapula_Lft_Jnt",
-                            "jox": 87.8821,
-                            "radius": 0.5,
-                            "nodeType": "joint"
-                        },
-                        "Tail7_Jnt": {
-                            "radius": 0.5,
-                            "tz": -0.75,
-                            "nodeType": "joint",
-                            "parent": "Tail6_Jnt"
-                        },
-                        "EarTip_Rgt_Jnt": {
-                            "nodeType": "joint",
-                            "radius": 0.5,
-                            "parent": "Ear_Rgt_Jnt",
-                            "ty": -0.85
-                        },
-                        "PasternFront_Rgt_Jnt": {
-                            "jox": -30.1682,
-                            "radius": 0.5,
-                            "tz": -3.0313,
-                            "nodeType": "joint",
-                            "parent": "CannonFront_Rgt_Jnt"
-                        },
-                        "Spine3_Jnt": {
-                            "radius": 0.5,
-                            "tz": 1.2891,
-                            "nodeType": "joint",
-                            "parent": "Spine2_Jnt"
-                        },
-                        "EarTip_Lft_Jnt": {
-                            "nodeType": "joint",
-                            "radius": 0.5,
-                            "parent": "Ear_Lft_Jnt",
-                            "ty": 0.85
-                        },
-                        "Spine6_Jnt": {
-                            "radius": 0.5,
-                            "tz": -0.75,
-                            "nodeType": "joint",
-                            "parent": "Spine5_Jnt"
-                        },
-                        "Tail8_Jnt": {
-                            "radius": 0.5,
-                            "tz": -0.75,
-                            "nodeType": "joint",
-                            "parent": "Tail7_Jnt"
-                        },
-                        "Tail9_Jnt": {
-                            "tz": -0.75,
-                            "parent": "Tail8_Jnt",
-                            "radius": 0.5,
-                            "nodeType": "joint"
-                        },
-                        "Tail4_Jnt": {
-                            "radius": 0.5,
-                            "tz": -0.75,
-                            "nodeType": "joint",
-                            "parent": "Tail3_Jnt"
-                        },
-                        "Tail5_Jnt": {
-                            "radius": 0.5,
-                            "tz": -0.75,
-                            "nodeType": "joint",
-                            "parent": "Tail4_Jnt"
-                        },
-                        "Tail6_Jnt": {
-                            "radius": 0.5,
-                            "tz": -0.75,
-                            "nodeType": "joint",
-                            "parent": "Tail5_Jnt"
-                        },
-                        "Tail3_Jnt": {
-                            "radius": 0.5,
-                            "tz": -0.75,
-                            "nodeType": "joint",
-                            "parent": "Tail2_Jnt"
-                        },
-                        "Tail1_Jnt": {
-                            "tz": -1.0,
-                            "parent": "Pelvis_Jnt",
-                            "radius": 0.5,
-                            "nodeType": "joint"
-                        },
-                        "Tail2_Jnt": {
-                            "tz": -0.75,
-                            "radius": 0.5,
-                            "nodeType": "joint",
-                            "parent": "Tail1_Jnt"
-                        },
-                        "Femur_Lft_Jnt": {
-                            "tz": -0.9737,
-                            "parent": "Pelvis_Jnt",
-                            "tx": 1.0706,
-                            "ty": -0.7635,
-                            "jox": 49.5564,
-                            "joy": -2.0598,
-                            "joz": -1.7875,
-                            "radius": 0.5,
-                            "nodeType": "joint"
-                        }
-                    }
+                 "Skeleton": {
+                  "Joints": {
+                   "Root_Jnt": {
+                    "radius": 0.5,
+                    "nodeType": "joint",
+                    "parent": "Joint_Grp"
+                   },
+                   "Pelvis_Jnt": {
+                    "ty": 11.2646,
+                    "tz": -5.0,
+                    "radius": 0.5,
+                    "parent": "Root_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Femur_Lft_Jnt": {
+                    "tx": 1.0706,
+                    "ty": -0.7635,
+                    "tz": -0.9737,
+                    "jox": 49.5564,
+                    "radius": 0.5,
+                    "parent": "Pelvis_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Fibula_Lft_Jnt": {
+                    "tz": 3.7827,
+                    "jox": 77.9223,
+                    "radius": 0.5,
+                    "parent": "Femur_Lft_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "CannonBack_Lft_Jnt": {
+                    "tz": 3.1596,
+                    "jox": -37.8725,
+                    "radius": 0.5,
+                    "parent": "Fibula_Lft_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "PasternBack_Lft_Jnt": {
+                    "tz": 3.5052,
+                    "jox": -32.0856,
+                    "radius": 0.5,
+                    "parent": "CannonBack_Lft_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "HoofBack_Lft_Jnt": {
+                    "tz": 0.75,
+                    "radius": 0.5,
+                    "parent": "PasternBack_Lft_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "HoofBackTip_Lft_Jnt": {
+                    "tz": 0.75,
+                    "jox": -5.1461,
+                    "radius": 0.5,
+                    "parent": "HoofBack_Lft_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Femur_Rgt_Jnt": {
+                    "tx": -1.0706,
+                    "ty": -0.7635,
+                    "tz": -0.9737,
+                    "jox": -130.4436,
+                    "radius": 0.5,
+                    "parent": "Pelvis_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Fibula_Rgt_Jnt": {
+                    "tz": -3.7827,
+                    "jox": 77.9223,
+                    "radius": 0.5,
+                    "parent": "Femur_Rgt_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "CannonBack_Rgt_Jnt": {
+                    "tz": -3.1596,
+                    "jox": -37.8725,
+                    "radius": 0.5,
+                    "parent": "Fibula_Rgt_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "PasternBack_Rgt_Jnt": {
+                    "tz": -3.5052,
+                    "jox": -32.0856,
+                    "radius": 0.5,
+                    "parent": "CannonBack_Rgt_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "HoofBack_Rgt_Jnt": {
+                    "tz": -0.75,
+                    "radius": 0.5,
+                    "parent": "PasternBack_Rgt_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "HoofBackTip_Rgt_Jnt": {
+                    "tz": -0.75,
+                    "jox": -5.1461,
+                    "radius": 0.5,
+                    "parent": "HoofBack_Rgt_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Spine1_Jnt": {
+                    "tz": 1.2,
+                    "radius": 0.5,
+                    "parent": "Pelvis_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Spine2_Jnt": {
+                    "tz": 1.2,
+                    "radius": 0.5,
+                    "parent": "Spine1_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Spine3_Jnt": {
+                    "tz": 1.2,
+                    "radius": 0.5,
+                    "parent": "Spine2_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Spine4_Jnt": {
+                    "tz": 1.2,
+                    "radius": 0.5,
+                    "parent": "Spine3_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Spine5_Jnt": {
+                    "tz": 1.2,
+                    "radius": 0.5,
+                    "parent": "Spine4_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Spine6_Jnt": {
+                    "tz": 1.2,
+                    "radius": 0.5,
+                    "parent": "Spine5_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Spine7_Jnt": {
+                    "tz": 1.2,
+                    "radius": 0.5,
+                    "parent": "Spine6_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Shoulder_Jnt": {
+                    "tz": 0.3654,
+                    "radius": 0.5,
+                    "parent": "Spine7_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Neck1_Jnt": {
+                    "tz": 0.528,
+                    "radius": 0.5,
+                    "parent": "Shoulder_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Neck2_Jnt": {
+                    "tz": 0.4277,
+                    "radius": 0.5,
+                    "parent": "Neck1_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Neck3_Jnt": {
+                    "tz": 0.9588,
+                    "radius": 0.5,
+                    "parent": "Neck2_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Neck4_Jnt": {
+                    "tz": 0.9588,
+                    "radius": 0.5,
+                    "parent": "Neck3_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Neck5_Jnt": {
+                    "tz": 0.9588,
+                    "radius": 0.5,
+                    "parent": "Neck4_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Neck6_Jnt": {
+                    "tz": 0.9588,
+                    "radius": 0.5,
+                    "parent": "Neck5_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Neck7_Jnt": {
+                    "tz": 0.9588,
+                    "radius": 0.5,
+                    "parent": "Neck6_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Neck8_Jnt": {
+                    "tz": 0.9588,
+                    "radius": 0.5,
+                    "parent": "Neck7_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Head_Jnt": {
+                    "ty": -0.0333,
+                    "tz": 0.2096,
+                    "jox": 67.609,
+                    "radius": 0.5,
+                    "parent": "Neck8_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Ear_Lft_Jnt": {
+                    "tx": 0.7128,
+                    "ty": 0.2438,
+                    "tz": -0.4806,
+                    "jox": -44.7,
+                    "joz": -17.7,
+                    "radius": 0.5,
+                    "parent": "Head_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "EarTip_Lft_Jnt": {
+                    "ty": 0.85,
+                    "radius": 0.5,
+                    "parent": "Ear_Lft_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Ear_Rgt_Jnt": {
+                    "tx": -0.7128,
+                    "ty": 0.2438,
+                    "tz": -0.4806,
+                    "jox": 135.3,
+                    "joz": 17.7,
+                    "radius": 0.5,
+                    "parent": "Head_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "EarTip_Rgt_Jnt": {
+                    "ty": -0.85,
+                    "radius": 0.5,
+                    "parent": "Ear_Rgt_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Eye_Lft_Jnt": {
+                    "tx": 0.7298,
+                    "ty": 0.4374,
+                    "tz": 0.587,
+                    "radius": 0.5,
+                    "parent": "Head_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Eye_Rgt_Jnt": {
+                    "tx": -0.7298,
+                    "ty": 0.4374,
+                    "tz": 0.587,
+                    "jox": 180.0,
+                    "radius": 0.5,
+                    "parent": "Head_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "HeadTip_Jnt": {
+                    "ty": -0.1811,
+                    "tz": 3.6066,
+                    "radius": 0.5,
+                    "parent": "Head_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Jaw_Jnt": {
+                    "ty": -0.6034,
+                    "tz": 0.6392,
+                    "jox": 4.3305,
+                    "radius": 0.5,
+                    "parent": "Head_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "JawTip_Jnt": {
+                    "tz": 2.2192,
+                    "radius": 0.5,
+                    "parent": "Jaw_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Scapula_Lft_Jnt": {
+                    "tx": 1.0706,
+                    "ty": 0.4564,
+                    "tz": -0.428,
+                    "jox": 49.4669,
+                    "joy": 1.5141,
+                    "joz": -1.2943,
+                    "radius": 0.5,
+                    "parent": "Shoulder_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Humerus_Lft_Jnt": {
+                    "tx": 0.1987,
+                    "tz": 3.9995,
+                    "jox": 87.8821,
+                    "radius": 0.5,
+                    "parent": "Scapula_Lft_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Radius_Lft_Jnt": {
+                    "tz": 2.426,
+                    "jox": -47.5437,
+                    "joy": 0.0003,
+                    "radius": 0.5,
+                    "parent": "Humerus_Lft_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "CannonFront_Lft_Jnt": {
+                    "tz": 2.778,
+                    "radius": 0.5,
+                    "parent": "Radius_Lft_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "PasternFront_Lft_Jnt": {
+                    "tz": 2.8,
+                    "jox": -30.1682,
+                    "radius": 0.5,
+                    "parent": "CannonFront_Lft_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "HoofFront_Lft_Jnt": {
+                    "ty": 0.02,
+                    "tz": 0.75,
+                    "radius": 0.5,
+                    "parent": "PasternFront_Lft_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "HoofFrontTip_Lft_Jnt": {
+                    "tz": 0.75,
+                    "radius": 0.5,
+                    "parent": "HoofFront_Lft_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Scapula_Rgt_Jnt": {
+                    "tx": -1.0706,
+                    "ty": 0.4564,
+                    "tz": -0.428,
+                    "jox": -130.5331,
+                    "joy": -1.5141,
+                    "joz": 1.2943,
+                    "radius": 0.5,
+                    "parent": "Shoulder_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Humerus_Rgt_Jnt": {
+                    "tx": -0.1987,
+                    "tz": -3.9995,
+                    "jox": 87.8821,
+                    "radius": 0.5,
+                    "parent": "Scapula_Rgt_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Radius_Rgt_Jnt": {
+                    "tz": -2.426,
+                    "jox": -47.5437,
+                    "joy": 0.0003,
+                    "radius": 0.5,
+                    "parent": "Humerus_Rgt_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "CannonFront_Rgt_Jnt": {
+                    "tz": -2.778,
+                    "radius": 0.5,
+                    "parent": "Radius_Rgt_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "PasternFront_Rgt_Jnt": {
+                    "tz": -2.8,
+                    "jox": -30.1682,
+                    "radius": 0.5,
+                    "parent": "CannonFront_Rgt_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "HoofFront_Rgt_Jnt": {
+                    "ty": -0.02,
+                    "tz": -0.75,
+                    "radius": 0.5,
+                    "parent": "PasternFront_Rgt_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "HoofFrontTip_Rgt_Jnt": {
+                    "tz": -0.75,
+                    "radius": 0.5,
+                    "parent": "HoofFront_Rgt_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Tail1_Jnt": {
+                    "tz": -1.0,
+                    "radius": 0.5,
+                    "parent": "Pelvis_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Tail2_Jnt": {
+                    "tz": -0.75,
+                    "radius": 0.5,
+                    "parent": "Tail1_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Tail3_Jnt": {
+                    "tz": -0.75,
+                    "radius": 0.5,
+                    "parent": "Tail2_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Tail4_Jnt": {
+                    "tz": -0.75,
+                    "radius": 0.5,
+                    "parent": "Tail3_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Tail5_Jnt": {
+                    "tz": -0.75,
+                    "radius": 0.5,
+                    "parent": "Tail4_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Tail6_Jnt": {
+                    "tz": -0.75,
+                    "radius": 0.5,
+                    "parent": "Tail5_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Tail7_Jnt": {
+                    "tz": -0.75,
+                    "radius": 0.5,
+                    "parent": "Tail6_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Tail8_Jnt": {
+                    "tz": -0.75,
+                    "radius": 0.5,
+                    "parent": "Tail7_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Tail9_Jnt": {
+                    "tz": -0.75,
+                    "radius": 0.5,
+                    "parent": "Tail8_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Tail10_Jnt": {
+                    "tz": -0.75,
+                    "radius": 0.5,
+                    "parent": "Tail9_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Tail11_Jnt": {
+                    "tz": -0.75,
+                    "radius": 0.5,
+                    "parent": "Tail10_Jnt",
+                    "nodeType": "joint"
+                   },
+                   "Tail12_Jnt": {
+                    "tz": -0.75,
+                    "radius": 0.5,
+                    "parent": "Tail11_Jnt",
+                    "nodeType": "joint"
+                   }
+                  }
+                 }
                 }
-            }
 
     def toggle_guides( self, *args ):
         '''
@@ -12914,11 +12930,12 @@ class AniMetaUI( MayaQWidgetDockableMixin, QWidget):
     def set_active_char( self, character ):
         self.char_list_refresh()
         char_list = self.get_char_list()
-        index = char_list.findText(character)
-        if index != -1:
-            char_list.setCurrentIndex(index)
-        else:
-            mc.warning('aniMeta: Can not find character', character)
+        if char_list:
+            index = char_list.findText(character)
+            if index != -1:
+                char_list.setCurrentIndex(index)
+            else:
+                mc.warning('aniMeta: Can not find character', character)
 
 class FrameWidget( QGroupBox ):
  
