@@ -2190,9 +2190,10 @@ class Rig( Transform ):
 
         return pair
 
-    def create_space_switch(self, ctrl, cnst_node='Head_Ctr_Ctrl', attrName='world', invert=False ):
+    def create_space_switch(self, ctrl, cnst_node='Head_Ctr_Ctrl', attrName='world', invert=False, char=None ):
 
-        char = self.get_active_char()
+        if not char:
+            char = self.get_active_char()
 
         ctrl_short = self.short_name( ctrl )
         cnst_short = self.short_name( cnst_node )
@@ -2318,7 +2319,9 @@ class Rig( Transform ):
             mmatrix = mc.createNode('multMatrix', name=name + '_mm_' + str(i + 1), ss=True)
             mc.setAttr(cm1 + '.inputRotate', *output_rot_offset)
 
-            mc.setAttr(spline_node + '.readData[' + str(i) + '].readU', (i+1) * inc)
+            mc.addAttr( xform, ln='uValue', min=0, max=1)
+            mc.setAttr(xform + '.uValue', (i+1) * inc)
+            mc.connectAttr(xform + '.uValue', spline_node + '.readData[' + str(i) + '].readU' )
 
             mc.connectAttr(spline_node + '.outputData[' + str(i) + '].outTranslate', cm2 + '.inputTranslate')
             mc.connectAttr(spline_node + '.outputData[' + str(i) + '].outRotate', cm2 + '.inputRotate')
@@ -3445,7 +3448,7 @@ class Char( Rig ):
 
                 # Create the Guide Control if it doesn't exist, yet
                 if guide_ctrl is not None:
-                    if mc.objExists( guide[1] ):
+                    if guide_tgt is not None:
                         mc.parentConstraint( guide_ctrl, guide_tgt, mo=True )
                     # From now on we want an MDagPath
                     guide_ctrl = self.get_path( guide_ctrl )
@@ -10328,6 +10331,88 @@ class Quadruped( Char ):
             #
             ########################################################################################################
 
+            ######################################
+            #
+            # Eyes
+            eyes_grp = mc.createNode( 'transform',
+                                      name='Eyes_Grp',
+                                      parent= self.controls['Main_Ctr_Ctrl'],
+                                      ss=True )
+
+            Eyes_Ctr_Ctrl = self.create_handle( name='EyesIK_Ctr_Ctrl',
+                                                matchTransform=self.find_node(self.rootNode, 'Eye_Lft_Jnt'),
+                                                parent = eyes_grp,
+                                                shapeType=self.kCube,
+                                                green=1, red=1,
+                                                width=3, height=3, depth=3,
+                                                character = self.rootNode,
+                                                globalScale = True )
+
+
+
+            eye_ctrl_grp = mc.listRelatives( Eyes_Ctr_Ctrl.fullPathName(), p=True, pa=True )[0]
+
+            mc.setAttr( eye_ctrl_grp + '.tx', l=0 )
+            mc.setAttr( eye_ctrl_grp + '.tz', l=0 )
+
+            # Move the control to the centre
+            mc.setAttr( eye_ctrl_grp + '.tx',  0 )
+
+            self.controls['Eye_Lft_Ctrl'] = self.create_handle(name='Eye_Lft_Ctrl',
+                                               matchTransform=self.find_node(self.rootNode, 'Eye_Lft_Jnt'),
+                                               parent=Eyes_Ctr_Ctrl.fullPathName(),
+                                               shapeType=self.kCube,
+                                               color=colors[0],
+                                               width=2, height=2, depth=2,
+                                               character=self.rootNode,
+                                               globalScale=True,
+                                               constraint=self.kAim,
+                                               aimVec=(0,0,1),
+                                               upVec=(0,1,0))
+
+            self.controls['Eye_Rgt_Ctrl'] = self.create_handle(name='Eye_Rgt_Ctrl',
+                                               matchTransform=self.find_node(self.rootNode, 'Eye_Rgt_Jnt'),
+                                               parent = Eyes_Ctr_Ctrl.fullPathName() ,
+                                               shapeType=self.kCube,
+                                               color=colors[1],
+                                               width=2, height=2, depth=2,
+                                               character = self.rootNode,
+                                               globalScale = True,
+                                               constraint=self.kAim,
+                                               aimVec=(0,0,1),
+                                               upVec = (0,1,0) )
+
+            eye_ctrl_grp_l = mc.listRelatives( self.controls['Eye_Lft_Ctrl'].fullPathName(), p=True, pa=True )[0]
+            eye_ctrl_grp_r = mc.listRelatives( self.controls['Eye_Rgt_Ctrl'].fullPathName(), p=True, pa=True )[0]
+
+            pos = mc.xform( self.find_node(self.rootNode, 'Eye_Lft_Guide'), q=True, ws=True, t=True)
+            pos[0] = 0
+            mc.matchTransform( eye_ctrl_grp, self.rootNode, pos=False, rot=True)
+            mc.xform( eye_ctrl_grp, t=pos, a=True, ws=True)
+            mc.move(0, 0, 50, eye_ctrl_grp, r=True, ws=True)
+
+            # zero out the rotation on the right side
+            mc.setAttr ( eye_ctrl_grp_r + '.rx', l=0 )
+            mc.setAttr ( eye_ctrl_grp_r + '.ry', l=0 )
+            mc.setAttr ( eye_ctrl_grp_r + '.rz', l=0 )
+            mc.setAttr ( eye_ctrl_grp_r + '.r', 0,0,0 )
+            mc.setAttr ( eye_ctrl_grp_r + '.rx', l=1 )
+            mc.setAttr ( eye_ctrl_grp_r + '.ry', l=1 )
+            mc.setAttr ( eye_ctrl_grp_r + '.rz', l=1 )
+
+            mc.setAttr( eye_ctrl_grp + '.tx', l=1 )
+            mc.setAttr( eye_ctrl_grp + '.tz', l=1 )
+
+            # Space Switch
+            self.create_space_switch( Eyes_Ctr_Ctrl,
+                                      self.controls['Head_Ctr_Ctrl'],
+                                      'world',
+                                      False,
+                                      self.rootNode )
+
+            # Eyes
+            #
+            ######################################
             for SIDE in SIDES:
 
                 ########################################################################################################
@@ -10407,7 +10492,6 @@ class Quadruped( Char ):
                 mc.parentConstraint( pasternJntFK.fullPathName(), pasternJnt)
                 mc.parentConstraint( hoofJntFK.fullPathName(), hoofJnt)
 
-
                 # Foreleg
                 #
                 ########################################################################################################
@@ -10483,6 +10567,7 @@ class Quadruped( Char ):
                 self.build_ik( DIR, SIDE, ik_joints, fk_controls, hoof_grps)
 
                 mc.parentConstraint( femurJntFK.fullPathName(), femurJnt)
+                mc.parentConstraint( fibulaJntFK.fullPathName(), fibulaJnt)
                 mc.parentConstraint( cannonJntFK.fullPathName(), cannonJnt)
                 mc.parentConstraint( pasternJntFK.fullPathName(), pasternJnt)
                 mc.parentConstraint( hoofJntFK.fullPathName(), hoofJnt)
@@ -10490,931 +10575,6 @@ class Quadruped( Char ):
                 # Hindleg
                 #
                 ########################################################################################################
-
-            return
-            '''
-            def create_constraint( target, node ):
-                mc.parentConstraint( target,  node,  mo=True )
-                mc.scaleConstraint(  target,  node,  mo=True )
-
-            if type == kBiped:
-                create_constraint( controls['Hips_Ctr_Ctrl'].fullPathName(), self.find_node( self.rootNode,  'Hips_Jnt' ) )
-                create_constraint( controls['Spine1_Ctr_Ctrl'].fullPathName(), self.find_node( self.rootNode,  'Spine1_Jnt' )   )
-                create_constraint( controls['Spine2_Ctr_Ctrl'].fullPathName(), self.find_node( self.rootNode,  'Spine2_Jnt' )   )
-                create_constraint( controls['Spine3_Ctr_Ctrl'].fullPathName(), self.find_node( self.rootNode,  'Spine3_Jnt' )  )
-            '''
-
-            ######################################################################################
-            #
-            # Position Pole Vectors
-
-            if self.DEBUG:
-                print ( 'Position Pole Vectors' )
-
-            poles = ['LegPole_IK_', 'ArmPole_IK_']
-
-            root_ctrls = ['LegUp_FK_', 'ArmUp_FK_']
-            eff_ctrls  = ['LegLo_FK_', 'ArmLo_FK_']
-            hndl_ctrls  = ['Foot_FK_', 'Hand_FK_']
-
-            for SIDE in [ 'Lft', 'Rgt'  ]:
-
-                for i in range( len ( poles ) ):
-
-                    for attr in ['tx', 'ty', 'tz', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz'  ]:
-                        mc.setAttr( controls[poles[i]+SIDE+'_Ctrl'].fullPathName()+ '.'+attr, l=False)
-
-                    #legUp_jnt = controls[ root_ctrls[i]+SIDE+'_Ctrl' ]
-                    #legLo_jnt = controls[ eff_ctrls[i] +SIDE+'_Ctrl' ]
-                    #foot_jnt  = controls[ hndl_ctrls[i]+SIDE+'_Ctrl' ]
-
-                    #legUp_jnt = self.find_node( controls[ root_ctrls[i]+SIDE+'_Ctrl' ] )
-                    legLo_jnt = controls[ eff_ctrls[i] +SIDE+'_Ctrl' ]
-                    foot_jnt  = controls[ hndl_ctrls[i]+SIDE+'_Ctrl' ]
-
-                    # Redundant? Wird beim IK Setup besser passen...
-                    '''
-                    pole_matrix = self.get_polevector_position( legUp_jnt, legLo_jnt, foot_jnt, preferred_angle )
-
-                    parent = mc.listRelatives ( controls[ poles[i]+SIDE+'_Ctrl' ].fullPathName(), p=True )[0]
-                    parent = mc.listRelatives ( parent, p=True )[0]
-
-                    self.set_matrix( parent, pole_matrix, kWorld)
-
-                    for attr in ['tx', 'ty', 'tz', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz'  ]:
-                        mc.setAttr( parent + '.'+attr, l=True)
-                    '''
-            if self.DEBUG:
-                print ( 'Position Pole Vector done' )
-
-            # Position Pole Vector
-            #
-            ######################################################################################
-
-            internal_grp = mc.createNode( 'transform', name='Internal_Grp', parent= self.find_node(self.rootNode, 'Rig_Grp' ) )
-            grp = mc.createNode( 'transform', name='IKFoot_Grp', parent=internal_grp )
-            mc.setAttr( internal_grp + '.v', False )
-            mc.setAttr( internal_grp + '.inheritsTransform', False )
-
-            # Legs
-            #
-            ########################################################################################################
-
-            ######################################
-            #
-            # Eyes
-            if type == kBiped:
-                eyes_grp = mc.createNode( 'transform', name='Eyes_Grp', parent= controls['Main_Ctr_Ctrl']  , ss=True )
-
-                Eyes_Ctr_Ctrl = self.create_handle( name='Eyes_Ctr_Ctrl', matchTransform=self.find_node(rootNode, 'Eye_Lft_Jnt'), parent = eyes_grp,
-                                             shapeType=self.kCube, green=1, red=1, width=3, height=3, depth=3,   character = rootNode, globalScale = True )
-
-                eye_ctrl_grp = mc.listRelatives( Eyes_Ctr_Ctrl.fullPathName(), p=True, pa=True )[0]
-                mc.setAttr( eye_ctrl_grp + '.tx', l=0 )
-                mc.setAttr( eye_ctrl_grp + '.tz', l=0 )
-
-                # Move the control to the centre
-                mc.setAttr( eye_ctrl_grp + '.tx',  0 )
-
-                Eyes_Lft_Ctrl = self.create_handle(name='Eye_Lft_Ctrl', matchTransform=self.find_node(rootNode, 'Eye_Lft_Jnt'),   parent =  Eyes_Ctr_Ctrl.fullPathName()  ,
-                                             shapeType=self.kCube, color=colors[0], width=2, height=2, depth=2,   character = rootNode, globalScale = True,
-                                             constraint=self.kAim, aimVec=(0,0,1), upVec = (0,1,0))
-
-                Eyes_Rgt_Ctrl = self.create_handle(name='Eye_Rgt_Ctrl', matchTransform=self.find_node(rootNode, 'Eye_Rgt_Jnt'),   parent = Eyes_Ctr_Ctrl.fullPathName() ,
-                                             shapeType=self.kCube, color=colors[1], width=2, height=2, depth=2,  character = rootNode, globalScale = True,
-                                             constraint=self.kAim, aimVec=(0,0,1), upVec = (0,1,0) )
-
-                eye_ctrl_grp_l = mc.listRelatives( Eyes_Lft_Ctrl.fullPathName(), p=True, pa=True )[0]
-                eye_ctrl_grp_r = mc.listRelatives( Eyes_Rgt_Ctrl.fullPathName(), p=True, pa=True )[0]
-
-                ty = mc.getAttr( eye_ctrl_grp + '.ty' )
-                mc.setAttr( eye_ctrl_grp+ '.tz', ty/3 )
-
-                # zero out the rotation on the right side
-                mc.setAttr ( eye_ctrl_grp_r + '.rx', l=0 )
-                mc.setAttr ( eye_ctrl_grp_r + '.ry', l=0 )
-                mc.setAttr ( eye_ctrl_grp_r + '.rz', l=0 )
-                mc.setAttr ( eye_ctrl_grp_r + '.r', 0,0,0 )
-                mc.setAttr ( eye_ctrl_grp_r + '.rx', l=1 )
-                mc.setAttr ( eye_ctrl_grp_r + '.ry', l=1 )
-                mc.setAttr ( eye_ctrl_grp_r + '.rz', l=1 )
-
-                mc.setAttr( eye_ctrl_grp + '.tx', l=1 )
-                mc.setAttr( eye_ctrl_grp + '.tz', l=1 )
-
-                # Space Switch
-                self.create_space_switch( Eyes_Ctr_Ctrl, controls['Head_Ctr_Ctrl'], 'world', False )
-
-            # Eyes
-            #
-            ######################################
-
-            ##################################################################################################
-            #
-            # IKs
-            iks = {}
-
-            if self.DEBUG:
-                print ('Create IK Legs')
-            scale = mc.getAttr( rootNode + '.globalScale' )
-
-            # Creates a constraint like transform calculation
-            def matrix_multi(
-                    name='matrix_multi',
-                    inputs=['LegUpFK_Lft_Ctrl2', 'Hips_Ctr_Ctrl_LegUpFK_Lft_Ctrl2_Grp'],
-                    inputs_inv=['LegUp_Lft_Jnt'],
-                    inputs_inv_attr=['jointOrient'],
-                    inputs_inv_comp_attr=['inputRotate']):
-
-                name = self.short_name( name )
-                mult = mc.createNode( 'multMatrix', name=name + '_multi', ss=True)
-                decomp = mc.createNode( 'decomposeMatrix', name=name + '_decomp', ss=True)
-
-                save_for_cleanup( mult )
-                save_for_cleanup( decomp )
-
-                mc.connectAttr( mult + '.matrixSum', decomp + '.inputMatrix' )
-
-                for i in range(len(inputs)):
-                    mc.connectAttr(inputs[i] + '.matrix', mult + '.matrixIn[{}]'.format(str(i + len(inputs_inv))))
-
-                for i in range(len(inputs_inv)):
-                    inv = mc.createNode('inverseMatrix', name=name + '_inv', ss=True)
-                    comp = mc.createNode('composeMatrix', name=name + '_comp', ss=True)
-                    for j in range(len(inputs_inv_attr)):
-                        mc.connectAttr( inputs_inv[i].fullPathName() + '.' + inputs_inv_attr[j], comp + '.' + inputs_inv_comp_attr[j])
-
-                    mc.connectAttr(comp + '.outputMatrix', inv + '.inputMatrix')
-                    mc.connectAttr(inv + '.outputMatrix', mult + '.matrixIn[{}]'.format(str(i)))
-
-                    save_for_cleanup(inv)
-                    save_for_cleanup(comp)
-
-                return decomp
-
-            def hook_up_fk(joint, joint_ik, joint_fk, loc, name ):
-                name = self.short_name( name )
-                pb = mc.createNode('pairBlend', name=name + '_IK_' + SIDE + '_PB', ss=True)
-                save_for_cleanup(pb)
-                mc.setAttr(pb + '.rotInterpolation', 1)
-                mc.connectAttr( loc.fullPathName() + '.' + ik_attr, pb + '.weight')
-
-                # Use the global Scale to make the rig scalable
-                mlt1 = mc.createNode('multiplyDivide', name=name + '_IK_' + SIDE + '_Multi1', ss=True)
-                mlt2 = mc.createNode('multiplyDivide', name=name + '_IK_' + SIDE + '_Multi2', ss=True)
-                save_for_cleanup(mlt1)
-                save_for_cleanup(mlt2)
-                mc.connectAttr( rootNode + '.globalScale', mlt1 + '.input1X' )
-                mc.connectAttr( rootNode + '.globalScale', mlt1 + '.input1Y' )
-                mc.connectAttr( rootNode + '.globalScale', mlt1 + '.input1Z' )
-
-                # Neutralize global scale, non-one values will screw the rig, buggy if global scale is changed in control mode
-                gs = mc.getAttr( rootNode + '.globalScale' )
-                mc.setAttr( mlt1 + '.input2', 1/gs, 1/gs, 1/gs )
-
-                mc.connectAttr( mlt1 + '.output', mlt2 + '.input1' )
-
-                '''
-                legUp_FK_decomp = matrix_multi(
-                    name=name + '_FK_' + SIDE,
-                    inputs=[
-                        name + '_FK_' + SIDE + '_Ctrl',
-                        name + '_FK_' + SIDE + '_Ctrl_Blnd_Grp',
-                        name + '_FK_' + SIDE + '_Ctrl_Grp'
-                    ],
-                    inputs_inv=[
-                        joints[ name + '_' + SIDE ]
-                    ]
-                )
-                mc.connectAttr( legUp_FK_decomp + '.outputRotate', pb + '.inRotate1' )
-                mc.connectAttr( legUp_FK_decomp + '.outputTranslate', pb + '.inTranslate1' )
-
-                '''
-                mc.connectAttr( joint_fk.fullPathName() + '.rotate', pb + '.inRotate1' )
-                mc.connectAttr( joint_fk.fullPathName() + '.translate', pb + '.inTranslate1' )
-
-                mc.connectAttr( joint_ik.fullPathName() + '.translate', pb + '.inTranslate2' )
-                mc.connectAttr( joint_ik.fullPathName() + '.rotate', pb + '.inRotate2' )
-
-                # Hook global scale here? We may need it pre PB
-                mc.connectAttr(pb + '.outTranslate', mlt2 + '.input2')
-                try:
-                    mc.connectAttr(mlt2 + '.output', joint.fullPathName() + '.translate')
-                    mc.connectAttr(pb + '.outRotate', joint.fullPathName() + '.rotate')
-                except:
-                    mc.warning("Can not connect to " + joint.fullPathName())
-                    print( mc.listConnections( joint.fullPathName() + '.translate', s=1, d=0))
-                return pb
-
-
-            def joint_global_scale( joint ):
-                joint_long = self.find_node( rootNode, joint )
-                if joint is not None:
-                    # Use the global Scale to make the rig scalable
-                    mlt1 = mc.createNode('multiplyDivide', name=self.short_name( joint_long ) + '_GS_' + SIDE + '_Multi1', ss=True)
-                    mlt2 = mc.createNode('multiplyDivide', name=self.short_name( joint_long ) + '_GS_' + SIDE + '_Multi2', ss=True)
-
-                    save_for_cleanup(mlt1)
-                    save_for_cleanup(mlt2)
-
-                    mc.connectAttr(rootNode + '.globalScale', mlt1 + '.input1X')
-                    mc.connectAttr(rootNode + '.globalScale', mlt1 + '.input1Y')
-                    mc.connectAttr(rootNode + '.globalScale', mlt1 + '.input1Z')
-
-                    # Neutralize global scale, non-one values will screw the rig
-                    gs = mc.getAttr(rootNode + '.globalScale')
-                    mc.setAttr(mlt1 + '.input2', 1 / gs, 1 / gs, 1 / gs)
-
-                    mc.connectAttr( mlt1 + '.output', mlt2 + '.input1')
-
-                    t = mc.getAttr( joint_long + '.t')[0]
-                    mc.setAttr( mlt2 + '.input2', t[0], t[1], t[2])
-                    mc.connectAttr(mlt2 + '.output', joint_long + '.translate', force=True )
-
-            def createWorldOrient(node, root, value):
-                # root = 'Main_Ctr_Ctrl'
-                # node = 'ArmUp_FK_Lft_Ctrl'
-                root = self.find_node( rootNode, root )
-
-                node = self.find_node( rootNode, node )
-
-                if node is None:
-                    return None
-
-                parent = mc.listRelatives(node, p=True, pa=True)[0]
-
-                node_path = self.get_path( node )
-
-                wo = mc.createNode( 'transform', name=self.short_name(node.replace('Ctrl', 'WorldOrient')), ss=True, parent=parent )
-
-                mc.parent( node_path.fullPathName(), wo )
-
-
-                orient = mc.orientConstraint( root, wo, mo=True)
-
-                mc.addAttr(node_path.fullPathName(), ln='worldOrient', min=0, max=1)
-                mc.setAttr(node_path.fullPathName() + '.worldOrient', k=True)
-
-                target = mc.orientConstraint(orient, q=True, wal=True)[0]
-
-                mc.connectAttr(node_path.fullPathName() + '.worldOrient', orient[0] + '.' + target)
-                mc.setAttr(node_path.fullPathName() + '.worldOrient', value)
-
-
-            ############################################################################################################
-            # Sides
-
-            for SIDE in ['Lft', 'Rgt']:
-
-                ######################################################################
-                # Leg
-
-                hipsJnt  = joints[ 'Hips_Ctr' ]
-                legUpJnt = joints[ 'LegUp_' + SIDE  ]
-                legLoJnt = joints[ 'LegLo_' + SIDE  ]
-                footJnt  = joints[ 'Foot_'  + SIDE  ]
-                toesJnt  = joints[ 'Toes_'  + SIDE  ]
-                hipsCtrl = controls['Hips_Ctr_Ctrl']
-
-                ikName   = 'LegIKHandle_' + SIDE
-                #poleVec  = 'LegPole_IK_' + SIDE + '_Ctrl'
-                footLift = controls['FootLift_IK_' + SIDE + '_Ctrl']
-                ik_attr  = 'FK_IK'
-
-                side=sides[0]
-                if SIDE == 'Rgt':
-                    side=sides[1]
-
-                blue = 1
-                red = 0
-                green = 0
-
-                if SIDE == 'Rgt':
-                    blue = 0
-                    red = 1
-
-                ########################################
-                # IK
-                # IK Loc
-                ik_loc = mc.createNode('locator', parent=controls['LegUp_FK_' + SIDE + '_Ctrl'].fullPathName(), name='Leg_IK_' + SIDE)
-                ik_loc = self.get_path( ik_loc )
-                iks['Leg_IK_' + SIDE] = ik_loc
-                mc.setAttr(ik_loc.fullPathName() + '.localScale', 0, 0, 0)
-                mc.addAttr(ik_loc.fullPathName(), longName=ik_attr, min=0, max=1, at='float', defaultValue=1)
-                mc.setAttr(ik_loc.fullPathName() + '.' + ik_attr, k=True)
-
-                # Hide Attrs
-                for attr in ['localScale', 'localPosition']:
-                    for axis in ['X', 'Y', 'Z']:
-                        mc.setAttr(ik_loc.fullPathName() + '.' + attr + axis, cb=False)
-
-                for node in [ 'LegLo_FK_' + SIDE + '_Ctrl', 'Foot_FK_' + SIDE + '_Ctrl', 'Foot_IK_' + SIDE + '_Ctrl',
-                             'FootLift_IK_' + SIDE + '_Ctrl', 'Toes_IK_' + SIDE + '_Ctrl',
-                             'ToesTip_IK_' + SIDE + '_Ctrl', 'LegPole_IK_' + SIDE + '_Ctrl',
-                             'Heel_IK_' + SIDE + '_Ctrl']:
-                    if node in controls:
-                        mc.parent( ik_loc.fullPathName(), controls[node].fullPathName(), add=True, shape=True)
-
-                # IK Grp
-                if self.DEBUG:
-                    print ( 'IK Grp')
-                ik_nul = mc.createNode('transform', name='legIK_' + SIDE + '_Grp', parent=hipsCtrl.fullPathName())
-                mc.setAttr( ik_nul + '.v', 0 )
-                mc.matchTransform(ik_nul, hipsJnt.fullPathName())
-
-                if type == kBiped:
-                    legUpJntIK_jnt_name = legUpJnt.partialPathName().replace( '_' + SIDE, '_IK_' + SIDE )
-                    legLoJntIK_jnt_name = legLoJnt.partialPathName().replace( '_' + SIDE, '_IK_' + SIDE )
-                    footJntIK_jnt_name  = footJnt.partialPathName().replace( '_' + SIDE, '_IK_' + SIDE )
-                    toesJntIK_jnt_name  = toesJnt.partialPathName().replace( '_' + SIDE, '_IK_' + SIDE )
-
-                elif type == kBipedUE:
-                    legUpJntIK_jnt_name = legUpJnt.partialPathName().replace( '_' + side, '_IK_' + side )
-                    legLoJntIK_jnt_name = legLoJnt.partialPathName().replace( '_' + side, '_IK_' + side )
-                    footJntIK_jnt_name  = footJnt.partialPathName().replace( '_' + side, '_IK_' + side )
-                    toesJntIK_jnt_name  = toesJnt.partialPathName().replace( '_' + side, '_IK_' + side )
-
-                legUpJntIK = self.joint_copy( legUpJnt, legUpJntIK_jnt_name, ik_nul     )
-                legLoJntIK = self.joint_copy( legLoJnt, legLoJntIK_jnt_name, legUpJntIK )
-                footJntIK  = self.joint_copy( footJnt,  footJntIK_jnt_name,  legLoJntIK )
-                toesJntIK  = self.joint_copy( toesJnt,  toesJntIK_jnt_name,  footJntIK  )
-
-                mc.parentConstraint( controls['Toes_IK_{}_Ctrl'.format(SIDE)].fullPathName(), toesJntIK.fullPathName(), mo=True, skipTranslate=['x','y','z'] )
-
-                ########################################################################################################
-                #
-                # Pole vector Position
-
-                pole_matrix = self.get_polevector_position( legUpJntIK, legLoJntIK, footJntIK, leg_preferred_angle )
-
-                parent = mc.listRelatives( controls[ 'LegPole_IK_' + SIDE + '_Ctrl' ].fullPathName(), p=True, pa=True )[ 0 ]
-                parent = mc.listRelatives( parent, p = True, pa=True )[ 0 ]
-
-                self.set_matrix( parent, pole_matrix, kWorld )
-
-                for attr in [ 'tx', 'ty', 'tz', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz' ]:
-                    mc.setAttr( parent + '.' + attr, l = True )
-
-                # Pole vector Position
-                #
-                ########################################################################################################
-
-                if type == kBiped:
-                    hipsJntFK_jnt_name  = hipsJnt.partialPathName().replace( '_Jnt' , '_FK_Jnt' )
-                    legUpJntFK_jnt_name = legUpJnt.partialPathName().replace( '_' + SIDE, '_FK_' + SIDE )
-                    legLoJntFK_jnt_name = legLoJnt.partialPathName().replace( '_' + SIDE, '_FK_' + SIDE )
-                    footJntFK_jnt_name  = footJnt.partialPathName().replace( '_' + SIDE, '_FK_' + SIDE )
-                    toesJntFK_jnt_name  = toesJnt.partialPathName().replace( '_' + SIDE, '_FK_' + SIDE )
-                elif type == kBipedUE:
-                    # Proxy FK Joints
-                    hipsJntFK_jnt_name  = hipsJnt.partialPathName() + '_FK'
-                    legUpJntFK_jnt_name = legUpJnt.partialPathName().replace( '_' + side, '_FK_' + side )
-                    legLoJntFK_jnt_name = legLoJnt.partialPathName().replace( '_' + side, '_FK_' + side )
-                    footJntFK_jnt_name  = footJnt.partialPathName().replace( '_' + side, '_FK_' + side )
-                    toesJntFK_jnt_name  = toesJnt.partialPathName().replace( '_' + side, '_FK_' + side )
-
-                if SIDE == 'Lft':
-                    hipsJntFK  = self.joint_copy( hipsJnt,  hipsJntFK_jnt_name,  prx_grp     )
-                    save_for_cleanup( hipsJntFK.fullPathName() )
-
-                legUpJntFK = self.joint_copy( legUpJnt, legUpJntFK_jnt_name, hipsJntFK   )
-                legLoJntFK = self.joint_copy( legLoJnt, legLoJntFK_jnt_name, legUpJntFK  )
-                footJntFK  = self.joint_copy( footJnt,  footJntFK_jnt_name,  legLoJntFK  )
-                toesJntFK  = self.joint_copy( toesJnt,  toesJntFK_jnt_name,  footJntFK   )
-
-                mc.parentConstraint( controls['Hips_Ctr_Ctrl'].fullPathName(),          hipsJntFK.fullPathName(),  mo=True )
-                mc.parentConstraint( controls['LegUp_FK_'+SIDE+'_Ctrl'].fullPathName(), legUpJntFK.fullPathName(), mo=True )
-                mc.parentConstraint( controls['LegLo_FK_'+SIDE+'_Ctrl'].fullPathName(), legLoJntFK.fullPathName(), mo=True )
-                mc.parentConstraint( controls['Foot_FK_'+SIDE+'_Ctrl'].fullPathName(),  footJntFK.fullPathName(),  mo=True )
-                mc.parentConstraint( controls['Toes_FK_'+SIDE+'_Ctrl'].fullPathName(),  toesJntFK.fullPathName(),  mo=True )
-
-                # Visibility based on IK/FK mode
-                rev = mc.createNode( 'reverse', name=self.short_name( ik_loc.partialPathName() ) +'_rev', ss=True  )
-                mc.connectAttr( ik_loc.fullPathName() + '.' + ik_attr, rev + '.inputX')
-
-                for ctl in [ 'LegUp_FK_' + SIDE + '_Ctrl', 'LegLo_FK_' + SIDE + '_Ctrl', 'Foot_FK_' + SIDE + '_Ctrl', 'Toes_FK_' + SIDE + '_Ctrl' ]:
-                    mc.connectAttr( rev + '.outputX', controls[ctl].fullPathName() + '.v')
-
-                for ctl in [ 'Foot_IK_' + SIDE + '_Ctrl', 'FootLift_IK_' + SIDE + '_Ctrl', 'Heel_IK_' + SIDE + '_Ctrl', 'Toes_IK_' + SIDE + '_Ctrl', 'ToesTip_IK_' + SIDE + '_Ctrl' ]:
-                    mc.connectAttr( ik_loc.fullPathName() + '.' + ik_attr, controls[ctl].fullPathName() + '.v')
-
-
-                # IK Handle
-                mc.orientConstraint( controls['FootLift_IK_'+SIDE+'_Ctrl'].fullPathName(), footJntIK, mo=True)
-                mc.setAttr( legLoJntIK.fullPathName() + '.preferredAngle',leg_preferred_angle[0], leg_preferred_angle[1], leg_preferred_angle[2] )
-                ik = mc.ikHandle(n=ikName, sj=legUpJntIK.fullPathName(), ee=footJntIK.fullPathName() )
-
-
-                ikHandle = '|'+ik[0]
-                effector = ik[1]
-                mc.poleVectorConstraint( controls['LegPole_IK_'+SIDE+'_Ctrl'].fullPathName(), ikHandle )
-                mc.setAttr(ikHandle + '.v', 0)
-                mc.setAttr(ikHandle + '.snapEnable', False)
-                mc.setAttr(ikHandle + '.stickiness', True)
-
-                mc.parent( ikHandle, controls['FootLift_IK_'+SIDE+'_Ctrl'].fullPathName() )
-
-                # IK
-                ########################################
-
-                hook_up_fk( legUpJnt, legUpJntIK, legUpJntFK, ik_loc,  'LegUp' )
-                hook_up_fk( legLoJnt, legLoJntIK, legLoJntFK, ik_loc,  'LegLo' )
-                hook_up_fk( footJnt,  footJntIK,  footJntFK,  ik_loc,  'Foot'  )
-                hook_up_fk( toesJnt,  toesJntIK,  toesJntFK,  ik_loc,  'Toes'  )
-
-                joint_global_scale( self.find_node( rootNode, 'Heel_'+SIDE+'_Jnt'    ))
-                joint_global_scale( self.find_node( rootNode, 'ToesTip_'+SIDE+'_Jnt' ))
-                joint_global_scale( self.find_node( rootNode, 'Eye_'+SIDE+'_Jnt'     ))
-
-                if SIDE == 'Lft':
-                    joint_global_scale( self.find_node( rootNode, 'Head_Jnt_Tip' ))
-                    joint_global_scale( self.find_node( rootNode, 'Jaw_Jnt'      ))
-                    joint_global_scale( self.find_node( rootNode, 'Jaw_Jnt_Tip'  ))
-
-                mc.setAttr (  ik_loc.fullPathName() + '.FK_IK', 1)
-
-                # Space Switch
-
-                feet_iks = [ controls[ 'Foot_IK_'+SIDE+'_Ctrl' ] ]
-
-                root_path = self.get_path(rootNode)
-
-                for node in feet_iks:
-                    self.create_multi_space_switch(
-                        node,
-                        [ controls[ 'Main_Ctr_Ctrl'], controls[ 'Hips_Ctr_Ctrl'], controls[ 'Torso_Ctr_Ctrl'], root_path ],
-                        attrName='space',
-                        attrNameList=['Main', 'Hips', 'Torso', 'World']
-                    )
-
-                # Leg
-                ######################################################################
-
-                ######################################################################
-                # Arm
-
-                clavJnt     = joints[ 'Clavicle_' + SIDE  ]
-                armUpJnt    = joints[ 'ArmUp_' + SIDE  ]
-                armLoJnt    = joints[ 'ArmLo_' + SIDE  ]
-                handJnt     = joints[ 'Hand_'  + SIDE  ]
-                main        = controls['Main_Ctr_Ctrl' ]
-                poleVec     = controls['ArmPole_IK_' + SIDE + '_Ctrl']
-                ikName      = 'ArmIKHandle_' + SIDE
-
-                # Clavicle
-                mc.parentConstraint( controls['Clavicle_'+SIDE+'_Ctrl'].fullPathName(), clavJnt, mo=True  )
-
-                # IK Loc
-                ik_loc = mc.createNode('locator', parent=controls['ArmUp_FK_'+SIDE+'_Ctrl'].fullPathName(), name='Arm_IK_' + SIDE)
-                ik_loc = self.get_path( ik_loc )
-                iks['Arm_IK_' + SIDE] = ik_loc
-                mc.setAttr(ik_loc.fullPathName() + '.localScale', 0, 0, 0)
-                mc.addAttr(ik_loc.fullPathName(), longName=ik_attr, min=0, max=1, at='float', defaultValue=0)
-                mc.setAttr(ik_loc.fullPathName() + '.' + ik_attr, k=True)
-
-                # Hide Attrs
-                for attr in ['localScale', 'localPosition']:
-                    for axis in ['X', 'Y', 'Z']:
-                        mc.setAttr(ik_loc.fullPathName() + '.' + attr + axis, cb=False)
-
-                # Parent IK Shape under Ctrl transforms for easy access
-                for node in [ 'ArmLo_FK_' + SIDE + '_Ctrl',
-                              'Hand_FK_' + SIDE + '_Ctrl',
-                              'ArmPole_IK_' + SIDE + '_Ctrl',
-                              'Hand_IK_' + SIDE + '_Ctrl' ]:
-                    mc.parent(ik_loc.fullPathName(), controls[node].fullPathName(), add=True, shape=True)
-
-                clav = controls['Clavicle_'+SIDE+'_Ctrl']
-
-                # Proxy FK Joints
-                if type == kBiped:
-                    clavJntIK_jnt_name  = clavJnt.partialPathName().replace(  '_' + SIDE, '_FK_' + SIDE )
-                    armUpJntIK_jnt_name = armUpJnt.partialPathName().replace( '_' + SIDE, '_FK_' + SIDE )
-                    armLoJntIK_jnt_name = armLoJnt.partialPathName().replace( '_' + SIDE, '_FK_' + SIDE )
-                    handJntIK_jnt_name  = handJnt.partialPathName().replace(  '_' + SIDE, '_FK_' + SIDE )
-
-                    armUpJntIK_jnt_name = armUpJnt.partialPathName().replace( '_' + SIDE, '_IK_' + SIDE )
-                    armLoJntIK_jnt_name = armLoJnt.partialPathName().replace( '_' + SIDE, '_IK_' + SIDE )
-                    handJntIK_jnt_name  = handJnt.partialPathName().replace(  '_' + SIDE, '_IK_' + SIDE )
-
-                elif type == kBipedUE:
-                    clavJntFK_jnt_name  = clavJnt.partialPathName().replace(  '_' + side, '_FK_' + side )
-                    armUpJntFK_jnt_name = armUpJnt.partialPathName().replace( '_' + side, '_FK_' + side )
-                    armLoJntFK_jnt_name = armLoJnt.partialPathName().replace( '_' + side, '_FK_' + side )
-                    handJntFK_jnt_name  = handJnt.partialPathName().replace(  '_' + side, '_FK_' + side )
-
-                    clavJntIK_jnt_name  = clavJnt.partialPathName().replace(  '_' + side, '_IK_' + side )
-                    armUpJntIK_jnt_name = armUpJnt.partialPathName().replace( '_' + side, '_IK_' + side )
-                    armLoJntIK_jnt_name = armLoJnt.partialPathName().replace( '_' + side, '_IK_' + side )
-                    handJntIK_jnt_name  = handJnt.partialPathName().replace(  '_' + side, '_IK_' + side )
-
-                arm_grp = mc.createNode('transform', name='arms_'+SIDE+'_grp', parent=prx_grp, ss=True)
-                mc.setAttr( arm_grp + '.v', False )
-                save_for_cleanup( arm_grp )
-
-                clavJntFK  = self.joint_copy( clavJnt,  clavJntFK_jnt_name, arm_grp       )
-                armUpJntFK = self.joint_copy( armUpJnt, armUpJntFK_jnt_name, clavJntFK   )
-                armLoJntFK = self.joint_copy( armLoJnt, armLoJntFK_jnt_name, armUpJntFK  )
-                handJntFK  = self.joint_copy( handJnt,  handJntFK_jnt_name,  armLoJntFK   )
-
-                armUpJntIK = self.joint_copy( armUpJnt, armUpJntIK_jnt_name, clavJntFK         )
-                armLoJntIK = self.joint_copy( armLoJnt, armLoJntIK_jnt_name, armUpJntIK   )
-                handJntIK  = self.joint_copy( handJnt,  handJntIK_jnt_name, armLoJntIK    )
-
-                mc.parentConstraint( controls['Clavicle_'+SIDE+'_Ctrl'].fullPathName(), clavJntFK.fullPathName(), mo=True  )
-                mc.parentConstraint( controls['ArmUp_FK_'+SIDE+'_Ctrl'].fullPathName(), armUpJntFK.fullPathName(), mo=True )
-                mc.parentConstraint( controls['ArmLo_FK_'+SIDE+'_Ctrl'].fullPathName(), armLoJntFK.fullPathName(), mo=True )
-                mc.parentConstraint( controls['Hand_FK_'+SIDE+'_Ctrl'].fullPathName(), handJntFK.fullPathName(), mo=True )
-
-                # IK Handle
-                mc.setAttr( armLoJntIK.fullPathName()  + '.preferredAngle', 0, 0, -45)
-                ik = mc.ikHandle(n=ikName, sj=armUpJntIK.fullPathName() , ee=handJntIK.fullPathName() , solver ='ikRPsolver' )
-
-                # It seems that the ikHandle command does not yield a unique DAG path
-                ikHandle = '|'+ik[0]
-                effector = ik[1]
-                mc.poleVectorConstraint(  poleVec.fullPathName(), ikHandle )
-                mc.setAttr(ikHandle + '.v', 0)
-                mc.setAttr(ikHandle + '.stickiness', True)
-                mc.setAttr(ikHandle + '.snapEnable', False)
-                mc.parent(ikHandle, controls['Hand_IK_'+SIDE+'_Ctrl'].fullPathName() )
-                #mc.orientConstraint('FootLift_IK_' + SIDE + '_Ctrl', footJntIK, mo=True)
-
-                hook_up_fk( armUpJnt, armUpJntIK,  armUpJntFK, ik_loc,  'ArmUp' )
-                hook_up_fk( armLoJnt, armLoJntIK,  armLoJntFK, ik_loc,  'ArmLo' )
-
-
-                ########################################################################################################
-                #
-                # Pole vector Position
-
-                pole_matrix = self.get_polevector_position( armUpJntIK, armLoJntIK, handJntIK, arm_preferred_angle )
-
-                parent = mc.listRelatives( controls[ 'ArmPole_IK_' + SIDE + '_Ctrl' ].fullPathName(), p=True, pa=True )[ 0 ]
-                parent = mc.listRelatives( parent, p=True, pa=True )[ 0 ]
-
-                self.set_matrix( parent, pole_matrix, kWorld )
-
-                for attr in [ 'tx', 'ty', 'tz', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz' ]:
-                    mc.setAttr( parent + '.' + attr, l = True )
-
-                # Pole vector Position
-                #
-                ########################################################################################################
-
-
-                # Create Switch to orient the hand to the IK Ctrl
-                hand_ctrl =  self.find_node(rootNode, 'Hand_FK_'+SIDE+'_Ctrl')
-                hand_parent = mc.listRelatives( hand_ctrl, p=True, pa=True )[0]
-                hand_parent = mc.listRelatives( hand_parent, p=True, pa=True )[0]
-
-                # Make the Hand follow the arm joint for IK/FK Blending
-                for attr in ['tx', 'ty', 'tz', 'rx', 'ry', 'rz']:
-                    mc.setAttr( hand_parent + '.' + attr, l=False)
-
-
-                cnst = mc.parentConstraint(
-                    armLoJnt,
-                    controls['Hand_IK_'+SIDE+'_Ctrl'].fullPathName(),
-                    hand_parent,
-                    mo=True
-                )
-                # Avoids flipping
-                mc.setAttr( cnst[0] + '.interpType', 2)
-
-                alias = mc.parentConstraint( cnst[0], q=True, wal=True )
-
-                mc.addAttr( ik_loc.fullPathName(), longName='lockHandRot', min=0, max=1, dv=0 )
-                mc.setAttr( ik_loc.fullPathName()+ '.lockHandRot', k=True )
-
-                mc.connectAttr( ik_loc.fullPathName()+ '.lockHandRot', cnst[0] + '.' + alias[1] )
-
-                rev = mc.createNode('reverse', ss=True, name=self.short_name( controls['Hand_IK_'+SIDE+'_Ctrl'].fullPathName() )+'_Lock_Rev')
-                mc.connectAttr( ik_loc.fullPathName() + '.lockHandRot', rev + '.inputX' )
-                mc.connectAttr( rev + '.outputX', cnst[0] + '.' + alias[0] )
-
-                mc.parent( hand_parent, controls['Main_Ctr_Ctrl'] )
-
-                hand_space_ctrls = []
-
-                for node in hand_space_switch_list:
-                    hand_space_ctrls.append( controls[node] )
-
-                root_path = self.get_path(rootNode)
-
-                # Space Switch
-                for node in [ controls['Hand_IK_'+SIDE+'_Ctrl'], controls['ArmPole_IK_'+SIDE+'_Ctrl'], root_path ]:
-                    self.create_multi_space_switch(
-                        node,
-                        hand_space_ctrls,
-                        attrName='space',
-                        attrNameList=['Main', 'Head', 'Chest', 'Hips', 'Torso', 'World']
-                    )
-                # Hide the attribute on the pole Vector
-                #ArmPoleVecIK_Ctrl[0] = self.find_node( rootNode, ArmPoleVecIK_Ctrl[0] )
-                mc.setAttr ( controls['ArmPole_IK_'+SIDE+'_Ctrl'].fullPathName() + '.space', k=False )
-
-                # Connect the Hand Ik to the PoleVec space to have matching spaces
-                #HandIK_Ctrl[0] = self.find_node( rootNode, HandIK_Ctrl[0] )
-                mc.connectAttr(
-                    controls['Hand_IK_'+SIDE+'_Ctrl'].fullPathName() + '.space',
-                    controls['ArmPole_IK_'+SIDE+'_Ctrl'].fullPathName() + '.space'
-                )
-
-                # Visibility based on IK/FK mode
-                rev = mc.createNode( 'reverse', name=self.short_name( ik_loc.fullPathName() )+'_rev', ss=True  )
-                mc.connectAttr( ik_loc.fullPathName() + '.' + ik_attr, rev + '.inputX')
-
-                for node in [
-                    controls['ArmUp_FK_' + SIDE + '_Ctrl'],
-                    controls['ArmLo_FK_' + SIDE + '_Ctrl']
-                ]:
-                    node = mc.listRelatives( node.fullPathName(), p=True, pa=True )[0]
-                    mc.setAttr( node + '.v', l=False )
-                    mc.connectAttr( rev + '.outputX', node + '.v')
-
-                for node in [ controls['Hand_IK_'+SIDE+'_Ctrl'], controls['ArmPole_IK_'+SIDE+'_Ctrl']]:
-                    mc.setAttr( node.fullPathName() + '.v', l=False )
-                    mc.connectAttr(  ik_loc.fullPathName() + '.' + ik_attr, node.fullPathName() + '.v' )
-
-                # Arm
-                ######################################################################
-
-            #######################################################################
-            #
-            # World Orient
-            if self.DEBUG:
-                print ('Create Orients')
-
-            for SIDE in ['Lft', 'Rgt']:
-                armUp = self.find_node( rootNode, 'ArmUp_FK_' + SIDE + '_Ctrl' )
-                createWorldOrient( armUp, controls['Main_Ctr_Ctrl'], 1)
-
-            createWorldOrient( controls['Head_Ctr_Ctrl'], controls['Main_Ctr_Ctrl'], 1)
-
-
-            for node in ['Spine1_Ctr_Ctrl', 'Spine2_Ctr_Ctrl', 'Spine3_Ctr_Ctrl', 'Chest_Ctr_Ctrl']:
-                node = self.find_node( rootNode, node )
-                createWorldOrient( node, controls['Main_Ctr_Ctrl'], 0 )
-
-            # World Orient
-            #
-            #######################################################################
-            #
-            # Meta Data
-            if self.DEBUG:
-                print ('Create Meta Data')
-
-            def set_data ( handles, data ):
-
-                for handle in handles:
-                    self.set_metaData(handle, data)
-
-            for SIDE in ['Lft', 'Rgt']:
-
-                data = {}
-                data['Type'] = kHandle
-
-                if SIDE == 'Rgt':
-                    data['Side'] = kRight
-                else:
-                    data['Side'] = kLeft
-
-                handles = [ iks['Arm_IK_'+SIDE], iks['Leg_IK_'+SIDE] ]
-
-                set_data( handles, data )
-
-                data['Mirror'] = kSymmetricRotation
-
-                handles = []
-
-                for ctl in controls.keys():
-                    if SIDE in ctl:
-                        handles.append( controls[ctl] )
-
-                set_data(  handles, data )
-
-                handles = [
-                    controls['LegPole_IK_'+SIDE+'_Ctrl'],
-                    controls['ShoulderUpVec_'+SIDE+'_Ctrl'],
-                    controls['Hand_IK_'+SIDE+'_Ctrl'],
-                    controls['ArmPole_IK_'+SIDE+'_Ctrl'],
-                    controls['HipsUpVec_'+SIDE+'_Ctrl']
-                ]
-
-                set_data(  handles, data )
-
-                data['Mirror'] = kBasic
-                data['Limb'] = 'Leg'
-                data['Kinematic'] = 'IK'
-                handles_ik = [controls['Foot_IK_'+SIDE+'_Ctrl'], controls['LegPole_IK_'+SIDE+'_Ctrl'] ]
-                set_data(  handles_ik, data )
-
-                data['Mirror'] = kSymmetricRotation
-                handles_ik = [controls['FootLift_IK_'+SIDE+'_Ctrl'],  controls['Toes_IK_'+SIDE+'_Ctrl'], controls['ToesTip_IK_'+SIDE+'_Ctrl'], controls['Heel_IK_'+SIDE+'_Ctrl'] ]
-
-                set_data(  handles_ik, data )
-
-                data['Kinematic'] = 'FK'
-                handles_fk = [controls['LegUp_FK_'+SIDE+'_Ctrl'], controls['LegLo_FK_'+SIDE+'_Ctrl'], controls['Foot_FK_'+SIDE+'_Ctrl'], controls['Toes_FK_'+SIDE+'_Ctrl'] ]
-
-                set_data( handles_fk, data )
-
-            data['Side'] = kCenter
-            data['Mirror'] = kBasic
-
-            handles_Ctr = []
-            for ctl in controls.keys():
-                if '_Ctr_' in ctl:
-                    handles_Ctr.append( controls[ctl] )
-
-            set_data(  handles_Ctr, data )
-
-            # Main Root
-            data = {}
-            data['Type'] = kMain
-            data['Side'] = kCenter
-
-            self.set_metaData( controls['Main_Ctr_Ctrl'], data)
-
-            # Meta Data
-            #
-            ##################################################################################################
-
-            if self.DEBUG:
-                print( 'Recreate custom controls')
-
-            # Recreate the custom Controls
-            if len(self.rigCustomCtrls):
-                self.create_custom_control( **self.rigCustomCtrls )
-
-            data = {}
-            data['Type'] = kHandle
-            handles = self.get_nodes( main, data)
-            handles = sorted(handles)
-
-            attrs = ['visibility']
-
-            for handle in handles:
-                handle = self.find_node( rootNode, handle )
-                for attr in attrs:
-                    mc.setAttr(handle + '.' + attr, l=True, k=False, cb=False)
-
-            #charName = 'Adam'
-            data = {}
-            data['Type'] = kMain
-            nodes = self.get_nodes(main, data)
-
-            if 'ControlShapeData' in rootData:
-
-                ctrlData = rootData['ControlShapeData']
-                for node in ctrlData.keys():
-                    actual_node = self.find_node( rootNode, node )
-                    if len ( ctrlData[node]) > 0:
-                        for attr in ctrlData[node].keys():
-                            try:
-                                mc.setAttr( actual_node + '.' + attr, ctrlData[node][attr])
-                            except:
-                                pass
-
-            if self.DEBUG:
-                print( 'Visbility switches')
-            mc.select(cl=True)
-
-            dict = {}
-            dict['Arms'] = ['Clavicle_Lft_Ctrl', 'ArmUp_FK_Lft_Ctrl', 'ArmLo_FK_Lft_Ctrl', 'Hand_FK_Lft_Ctrl' ]
-            dict['Finger'] = ['Index1_Lft_Ctrl', 'Index2_Lft_Ctrl', 'Index3_Lft_Ctrl', 'Index4_Lft_Ctrl',
-                                'Middle1_Lft_Ctrl', 'Middle2_Lft_Ctrl', 'Middle3_Lft_Ctrl', 'Middle4_Lft_Ctrl',
-                                'Ring1_Lft_Ctrl', 'Ring2_Lft_Ctrl', 'Ring3_Lft_Ctrl', 'Ring4_Lft_Ctrl',
-                                'Pinky1_Lft_Ctrl', 'Pinky2_Lft_Ctrl', 'Pinky3_Lft_Ctrl', 'Pinky4_Lft_Ctrl',
-                                'Thumb1_Lft_Ctrl', 'Thumb2_Lft_Ctrl', 'Thumb3_Lft_Ctrl' ]
-
-            dict['Legs'] = ['Foot_IK_Lft_Ctrl_Grp', 'LegUp_FK_Lft_Ctrl_Grp' ]
-            dict['Head'] = ['Head_Ctr_Ctrl', 'Neck_Ctr_Ctrl']
-            dict['Torso'] = ['Torso_Ctr_Ctrl', 'Hips_Ctr_Ctrl', 'Spine1_Ctr_Ctrl', 'Spine2_Ctr_Ctrl', 'Spine3_Ctr_Ctrl',
-                               'Chest_Ctr_Ctrl']
-            dict['UpVectors'] = [ 'ShoulderUpVec_Lft_Ctrl', 'HipsUpVec_Lft_Ctrl' ]
-
-            # Connect the visibility
-            visNode = rootNode
-            for key in dict.keys():
-                attrName = 'show_'+key
-                if not mc.attributeQuery( 'show_'+key, node=visNode, exists=True):
-                    mc.addAttr( visNode, longName=attrName, enumName='off:on', defaultValue=1, at='enum' )
-                    mc.setAttr(visNode+'.' + attrName, k=True)
-                for node in dict[key]:
-                    try:
-                        node = self.find_node( rootNode, node )
-                        mc.setAttr( node + '.v', lock=False )
-                        mc.connectAttr( visNode + '.' + attrName, node + '.v', force=True )
-
-                        if 'Lft' in node:
-                            rgtNode = node.replace('Lft', 'Rgt')
-                            rgtNode = self.find_node( rootNode, rgtNode )
-                            if mc.objExists(rgtNode):
-                                mc.setAttr( rgtNode + '.v', lock=False )
-                                mc.connectAttr( visNode + '.' + attrName, rgtNode + '.v', force=True )
-                    except:
-                        pass
-
-            # Hide Up Vectors per default
-            mc.setAttr( visNode + '.show_UpVectors', False )
-
-            if self.DEBUG:
-                print( 'Lock attributes')
-            # Lock Attrs
-            nodes = ['ToesTip_IK_Lft_Ctrl',
-                     'Heel_IK_Lft_Ctrl',
-                     'Toes_IK_Lft_Ctrl',
-                     'FootLift_IK_Lft_Ctrl',
-                     'Hips_Ctr_Ctrl',
-                     'Spine1_Ctr_Ctrl',
-                     'Spine2_Ctr_Ctrl',
-                     'Spine3_Ctr_Ctrl',
-                      'Chest_Ctr_Ctrl'
-                     ]
-            nodes.extend( dict['Arms'] )
-            nodes.extend( dict['Finger'] )
-            nodes.extend( dict['Head'] )
-
-            nodes = ['LegPole_IK_Lft_Ctrl', 'ShoulderUpVec_Lft_Ctrl', 'HipsUpVec_Lft_Ctrl',
-                     'ArmPole_IK_Lft_Ctrl']
-
-            if self.DEBUG:
-                print( 'Lock attributes IKs and UpVecs')
-
-            for node in nodes:
-                node = controls[node].fullPathName()
-
-                if node is not None:
-                    for attr in ['rx','ry','rz','sx','sy','sz']:
-                        if mc.objExists( node ):
-                            try:
-                                mc.setAttr( node + '.' + attr, l=True, k=False )
-                            except:
-                                pass
-                        rgtNode = node.replace('Lft', 'Rgt')
-                        rgtNode = self.find_node( rootNode, rgtNode )
-                        if mc.objExists(rgtNode):
-                            try:
-                                mc.setAttr( rgtNode + '.' + attr, l=True, k=False)
-                            except:
-                                pass
-                else:
-                    mc.warning( 'aniMeta: Can not find node ' + str( node ) )
-
-            #handles_Lft = self.get_nodes(rootNode, {'Side': kLeft, 'Type': kHandle }, hierarchy=True)
-            handles_Lft = []
-
-            for node in controls.keys():
-                if 'Lft' in node:
-                    handles_Lft.append( node )
-
-            if self.DEBUG:
-                print ( 'Connect Control Sizes')
-
-            for i in range(len(handles_Lft)):
-
-                lft = controls[ handles_Lft[i] ].fullPathName()
-                rgt = handles_Lft[i].replace('Lft', 'Rgt')
-                rgt = controls[ rgt ].fullPathName()
-
-                if mc.objExists(rgt):
-
-                    try:
-                        mc.connectAttr(lft + '.controlSize', rgt + '.controlSize')
-                    except:
-                        pass
-                    try:
-                        mc.connectAttr(lft + '.controlSizeX', rgt + '.controlSizeX')
-                        mc.connectAttr(lft + '.controlSizeY', rgt + '.controlSizeY')
-                        mc.connectAttr(lft + '.controlSizeZ', rgt + '.controlSizeZ')
-                    except:
-                        pass
-
-                    data = self.get_metaData( lft )
-
-                    if 'Mirror' in data:
-
-                        x,y,z = 1,1,1
-
-                        if data['Mirror'] == kSymmetricRotation:
-                            x,y,z = 1, -1, -1
-
-                        if data['Mirror'] == kBasic:
-                            x = -1
-
-                        try:
-                            rev = mc.createNode('multiplyDivide', name=self.short_name( rgt ) + '_controlOffset_inv', ss=True)
-                            mc.setAttr(rev + '.input2', x, y, z )
-                            mc.connectAttr(lft + '.controlOffset', rev + '.input1')
-                            mc.connectAttr(rev + '.output', rgt + '.controlOffset')
-                        except:
-                            pass
-                else:
-                    mc.warning('aniMeta: invalid right handle', rgt)
-
-            #self.build_pickwalking( rootNode )
 
     def build_hoof_groups(self, DIR, SIDE):
         """
@@ -11650,7 +10810,7 @@ class Quadruped( Char ):
             if not joint:
                 mc.warning( 'Can not find '+name + str(i + 1) + '_Jnt')
                 continue
-            mc.parentConstraint(outputs_lvl2[i], joint, mo=True)
+            mc.parentConstraint(outputs_lvl2[i], joint, mo=False)
 
 
     def switch_fkik(self, **kwargs):
@@ -12703,7 +11863,6 @@ class Skin(Transform):
 
             char = self.get_active_char()
             joints = self.get_skinning_joints()
-            print( char, geos, joints )
             if char is not None:
 
                 infs = []
