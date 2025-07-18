@@ -92,7 +92,7 @@ kRigStateBind, kRigStateGuide, kRigStateControl = range(3)
 kXYZ, kYZX, kZXY, kXZY, kYXZ, kZYX = range(6)
 kX, kY, kZ = range(3)
 kFK, kIK = range(2)
-kLibPose, kLibAnim, kLibRig = range(3)
+kLibPose, kLibAnim, kLibRig, kLibGuide = range(4)
 
 curveType = [ 'animCurveTA', 'animCurveTL', 'animCurveTT', 'animCurveTU',
               'animCurveUA', 'animCurveUL', 'animCurveUT', 'animCurveUU' ]
@@ -143,10 +143,12 @@ class AniMeta( object ):
         self.folder_pose = os.path.join( self.workspace, self.folder_aniMeta, 'Pose' )
         self.folder_anim = os.path.join( self.workspace, self.folder_aniMeta, 'Anim' )
         self.folder_rig = os.path.join( self.workspace, self.folder_aniMeta, 'Rig' )
+        self.folder_guide = os.path.join( self.workspace, self.folder_aniMeta, 'Guide' )
 
         self.check_folder( self.folder_pose )
         self.check_folder( self.folder_anim )
         self.check_folder( self.folder_rig )
+        self.check_folder( self.folder_guide )
 
         # Required plug-in that may or may not already be loaded
         mc.loadPlugin("mayaHIK", quiet=True)
@@ -273,10 +275,10 @@ class AniMeta( object ):
             pass
         return data
 
-    def get_nodes( self, root, dict = None, attr = aniMetaDataAttrName, hierarchy = True ):
+    def get_nodes( self, root, data_dict = None, attr = aniMetaDataAttrName, hierarchy = True ):
 
-        if dict is None:
-            dict = { }
+        if data_dict is None:
+            data_dict = { }
         if root is not None:
             if hierarchy:
                 if not mc.objExists( root ):
@@ -287,12 +289,12 @@ class AniMeta( object ):
                     for r in root:
                         if not mc.objExists( r ):
                             mc.warning( 'Object ' + r + ' does not exist.' )
-        if len( dict ) == 0:
+        if len( data_dict ) == 0:
             mc.warning( 'Please specify which metaData to look for.' )
             return False
 
-        keys = sorted( dict.keys() )
-        keyCount = len( dict.keys() )
+        keys = sorted( data_dict.keys() )
+        keyCount = len( data_dict.keys() )
 
         nodes = [ ]
         if hierarchy:
@@ -305,7 +307,7 @@ class AniMeta( object ):
 
         matches = [ ]
         for node in nodes:
-            if self.match_metaData( node, dict ):
+            if self.match_metaData( node, data_dict ):
                 # The IK nodes have pipes and we dont want those here
                 if '|' in node:
                     node = node.split('|')
@@ -924,6 +926,8 @@ class Transform(AniMeta):
         r = self.get_rotate( matrix )
         s = self.get_scale( matrix )
 
+        offset_x, offset_y, offset_z = 0, 0, 0
+
         if axis == kX:
             t.x *= -1
             r.y *= -1
@@ -1100,24 +1104,25 @@ class Transform(AniMeta):
             sel = mc.ls(sl=True)
 
         for s in sel:
-            r = self.get_matrix( s, space=kLocal )
-            obj = self.get_mobject( s )
-            dagFn1 = om.MFnDagNode( obj )
-            joPlug = dagFn1.findPlug('jointOrient', False)
-            joPlugX = joPlug.child(0)
-            joPlugY = joPlug.child(1)
-            joPlugZ = joPlug.child(2)
+            if mc.nodeType( s ) == 'joint':
+                r = self.get_matrix( s, space=kLocal )
+                obj = self.get_mobject( s )
+                dagFn1 = om.MFnDagNode( obj )
+                joPlug = dagFn1.findPlug('jointOrient', False)
+                joPlugX = joPlug.child(0)
+                joPlugY = joPlug.child(1)
+                joPlugZ = joPlug.child(2)
 
-            jo = om.MTransformationMatrix(
-                om.MEulerRotation(joPlugX.asDouble(), joPlugY.asDouble(), joPlugZ.asDouble()).asMatrix())
+                jo = om.MTransformationMatrix(
+                    om.MEulerRotation(joPlugX.asDouble(), joPlugY.asDouble(), joPlugZ.asDouble()).asMatrix())
 
-            m =  r * jo.asMatrix()
+                m =  r * jo.asMatrix()
 
-            r = self.get_rotate(m)
-            r.reorderIt(0)
+                r = self.get_rotate(m)
+                r.reorderIt(0)
 
-            mc.setAttr(s + '.r', 0, 0, 0)
-            mc.setAttr(s + '.jo', math.degrees(r.x), math.degrees(r.y), math.degrees(r.z))
+                mc.setAttr(s + '.r', 0, 0, 0)
+                mc.setAttr(s + '.jo', math.degrees(r.x), math.degrees(r.y), math.degrees(r.z))
 
     def zero_out_to_offsetParent( self,  *args ):
 
@@ -1682,7 +1687,7 @@ class Rig( Transform ):
                 ctrlDict['matchTransform'] = s
                 ctrlDict['constraintNode'] = s
 
-                ctrl = self.create_handle(**ctrlDict)
+                ctrl = self.create_control(**ctrlDict)
                 ctrl_parent = mc.listRelatives( ctrl, p=True, pa=True )[0]
 
                 self.set_metaData( ctrl.fullPathName(), data)
@@ -1698,7 +1703,7 @@ class Rig( Transform ):
         else:
             return None
 
-    def create_handle(self, **kwargs):
+    def create_control(self, **kwargs):
         name = 'Default_Ctrl'
         width = 0
         height = 0
@@ -2198,18 +2203,20 @@ class Rig( Transform ):
 
         return pair
 
-    def create_space_switch(self, ctrl, cnst_node='Head_Ctr_Ctrl', attrName='world', invert=False ):
+    def create_space_switch(self, ctrl, cnst_node='Head_Ctr_Ctrl', attrName='world', invert=False, char=None ):
 
-        char = self.get_active_char()
+        if not char:
+            char = self.get_active_char()
+        if not char:
+            mc.warning('AniMeta.create_space_switch: please specify a valid character')
 
         ctrl_short = self.short_name( ctrl )
         cnst_short = self.short_name( cnst_node )
 
-        node = self.find_node(char, ctrl_short)  # find the node
-        ctrl_parent = mc.listRelatives(node, p=True, pa=True)
+        node = ctrl.fullPathName()  # find the node
+        ctrl_parent = self.get_parent(node)
 
         if ctrl_parent is not None:
-            ctrl_parent = ctrl_parent[0]
 
             cnst_grp = mc.createNode(   'transform',
                                        parent=ctrl_parent,
@@ -2243,6 +2250,8 @@ class Rig( Transform ):
             node = self.find_node(char, cnst_node )  # find the node
 
             mc.parentConstraint(node, cnst_grp, mo=True)
+        else:
+            mc.warning("AniMeta.create_space_switch: can not find ", ctrl)
 
     def create_multi_space_switch(self, ctrl, cnst_nodes, attrName='space', attrNameList=['Main']):
 
@@ -2727,6 +2736,16 @@ class Rig( Transform ):
         # Store joint positions
         #
         #####################################################################################
+
+    def get_parent(self, obj):
+        if not mc.objExists(obj):
+            return None
+
+        parent = mc.listRelatives(obj, parent=True)
+        if not parent:
+            return None
+
+        return parent[0]
 
     def get_grandparent(self, obj):
         if not mc.objExists(obj):
@@ -3424,7 +3443,7 @@ class Char( Rig ):
         guideList  = args[1]
         ctrlDict   = args[2]
         guideDict  = args[3]
-        data       = args[4]
+
 
         # Setting this to True causes issues with the A-Pose
         swap_rot = False
@@ -3444,7 +3463,11 @@ class Char( Rig ):
                 guide_tgt = self.find_node( self.charRoot, guide[ 1 ] )
                 ctrlDict[ 'name' ] = guide[ 0 ]
                 ctrlDict[ 'matchTransform' ] = guide_tgt
-                ctrlDict[ 'constraint' ] = self.kParent
+
+                data = {}
+                data['Type'] = kBodyGuide
+                if guide[ 1 ] is not None:
+                    data['Guide_Target'] = guide[ 1 ] # Store the joint that we want to connect to later
 
                 if len( guide ) > 4:
                     ctrlDict[ 'offsetMatrix' ] = guide[ 4 ]
@@ -3456,6 +3479,19 @@ class Char( Rig ):
                 else:
                     ctrlDict[ 'parent' ] = guide[ 2 ]
 
+                guide_ctrl = self.create_control(**ctrlDict)
+
+                guideDict[ ctrlDict[ 'name' ] ] = guide_ctrl
+
+                if guide_ctrl is not None:
+                    if mc.objExists( guide_ctrl.fullPathName() ):
+                        if swap_rot:
+                            self.swap_rotation_with_parent( guide_ctrl )
+                        self.lock_attrs( guide_ctrl, guide[ 3 ] )
+                        self.set_metaData( guide_ctrl , data )
+                    else:
+                        mc.warning( 'aniMeta: There was a problem creating guide', guide[ 0 ] )
+                """       
                 # Create the Guide Control if it doesn't exist, yet
                 if guide_ctrl is not None:
                     if guide_tgt is not None:
@@ -3464,7 +3500,6 @@ class Char( Rig ):
                     # From now on we want an MDagPath
                     guide_ctrl = self.get_path( guide_ctrl )
                 else:
-                    guide_ctrl = self.create_handle( **ctrlDict )
 
                     # Check whether we need to build the right side for a left-sided guide
                     if 'Lft' in ctrlDict['name']:
@@ -3522,17 +3557,7 @@ class Char( Rig ):
                         mc.setAttr( guide_rgt+'.v', False )
 
                         self.create_sym_constraint( guide_ctrl, guide_rgt )
-
-                guideDict[ ctrlDict[ 'name' ] ] = guide_ctrl
-
-                if guide_ctrl is not None:
-                    if mc.objExists( guide_ctrl.fullPathName() ):
-                        if swap_rot:
-                            self.swap_rotation_with_parent( guide_ctrl )
-                        self.lock_attrs( guide_ctrl, guide[ 3 ] )
-                        self.set_metaData( guide_ctrl , data )
-                    else:
-                        mc.warning( 'aniMeta: There was a problem creating guide', guide[ 0 ] )
+                """
         return guideDict
 
     def build_body_guides( self, *args ):
@@ -3638,10 +3663,6 @@ class Char( Rig ):
                            'HindHoof_Lft_Jnt', 'HindHoofTip_Lft_Jnt',
                            'Ear_Lft_Jnt', 'EarTip_Lft_Jnt'
                            ]
-
-            data = { }
-            data[ 'Type' ] = kBodyGuide
-
             for joint_lft in joints:
                 joint_rgt = None
 
@@ -3656,9 +3677,7 @@ class Char( Rig ):
                     jr = self.find_node( self.charRoot, joint_rgt )
 
                     if jl is not None and jr is not None:
-
                         con = self.create_sym_constraint( jl, jr )
-                        self.set_metaData( con, data )
                 else:
                     mc.warning( 'aniMeta: No right joint found for node ' + joint_lft )
 
@@ -3693,7 +3712,6 @@ class Char( Rig ):
                     node = self.find_node(self.charRoot, 'Hips'+guide_sfx)
                     if node is not None:
                         return
-
 
                 attrList = [ 'sx', 'sy', 'sz', 'v' ]
 
@@ -3807,7 +3825,7 @@ class Char( Rig ):
 
                         guideList.append( [ guide_name, name, parent, attrList, rot_offset_4 ] )
 
-                guideDict = self.build_guides( self.charRoot, guideList, ctrlDict, guideDict, data, False )
+                guideDict = self.build_guides( self.charRoot, guideList, ctrlDict, guideDict, False )
 
                 # Position heel guide manually, we don't have a joint for this one
                 heel_guide = self.find_node(self.charRoot, 'Heel_Lft_Guide')
@@ -3937,7 +3955,7 @@ class Char( Rig ):
 
                         guideList.append( [ guide_name, name, parent, [  'sx', 'sy', 'sz', 'v' ], rot_offset_1 ] )
 
-                guideDict = self.build_guides( self.charRoot, guideList, ctrlDict, guideDict, data )
+                guideDict = self.build_guides( self.charRoot, guideList, ctrlDict, guideDict )
 
                 m = [1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
                 mc.setAttr( 'Clavicle_Rgt_Guide_Grp.offsetParentMatrix', m, typ='matrix' )
@@ -3949,247 +3967,313 @@ class Char( Rig ):
                         pass
 
             if type == kQuadruped:
-                ctrlDict[ 'radius' ] = 3
 
-                justTzRx = [ 'tx', 'ty', 'ry', 'rz', 'sx', 'sy', 'sz', 'v' ]
-                justTzTyRx = [ 'tx', 'ry', 'rz', 'sx', 'sy', 'sz', 'v' ]
+                # If Guides have been created for this rig, skip this section
+                if skipExisting:
+                    node = self.find_node(self.charRoot, 'COG'+guide_sfx)
+                    if node is None:
+                        ctrlDict[ 'radius' ] = 3
 
-                # Center of Gravity
-                guideList.append( [ 'COG_Guide', 'Spine4_Jnt', guideGrp, attrList ] )
+                        justTzRx = [ 'tx', 'ty', 'ry', 'rz', 'sx', 'sy', 'sz', 'v' ]
+                        justTzTyRx = [ 'tx', 'ry', 'rz', 'sx', 'sy', 'sz', 'v' ]
 
-                # Hips
-                guideList.append( [ 'Pelvis_Guide', 'Pelvis_Jnt', 'COG_Guide', attrList ] )
+                        # Center of Gravity
+                        guideList.append( [ 'COG_Guide', 'Spine4_Jnt', guideGrp, justTzTyRx ] )
 
-                # Femur
-                guideList.append( [ 'Femur_Lft_Guide', 'Femur_Lft_Jnt', 'Pelvis_Guide', [ 'sx', 'sy', 'sz', 'v' ] ] )
+                        # Hips
+                        guideList.append( [ 'Pelvis_Guide', 'Pelvis_Jnt', 'COG_Guide', justTzTyRx ] )
 
-                # Fibula
-                guideList.append( [ 'Fibula_Lft_Guide', 'Fibula_Lft_Jnt', 'Femur_Lft_Guide', justTzTyRx ] )
+                        # Femur
+                        guideList.append( [ 'Femur_Lft_Guide', 'Femur_Lft_Jnt', 'Pelvis_Guide', [ 'sx', 'sy', 'sz', 'v' ] ] )
 
-                # Cannon
-                guideList.append( [ 'HindCannon_Lft_Guide', 'HindCannon_Lft_Jnt', 'Fibula_Lft_Guide', justTzTyRx ] )
+                        # Fibula
+                        guideList.append( [ 'Fibula_Lft_Guide', 'Fibula_Lft_Jnt', 'Femur_Lft_Guide', justTzTyRx ] )
 
-                # Pastern
-                guideList.append( [ 'HindPastern_Lft_Guide', 'HindPastern_Lft_Jnt', 'HindCannon_Lft_Guide',justTzTyRx ] )
+                        # Cannon
+                        guideList.append( [ 'HindCannon_Lft_Guide', 'HindCannon_Lft_Jnt', 'Fibula_Lft_Guide', justTzTyRx ] )
 
-                # Hoof
-                guideList.append( [ 'HindHoof_Lft_Guide', 'HindHoof_Lft_Jnt', 'HindPastern_Lft_Guide', justTzRx ] )
+                        # Pastern
+                        guideList.append( [ 'HindPastern_Lft_Guide', 'HindPastern_Lft_Jnt', 'HindCannon_Lft_Guide',justTzTyRx ] )
 
-                # Hoof Tip
-                guideList.append( [ 'HindHoofTip_Guide', 'HindHoofTip_Lft_Jnt', 'HindHoof_Lft_Guide', justTzRx ] )
+                        # Hoof
+                        guideList.append( [ 'HindHoof_Lft_Guide', 'HindHoof_Lft_Jnt', 'HindPastern_Lft_Guide', justTzRx ] )
 
-                # Hind Hoof Front
-                guideList.append( [ 'HindHoofBack_Lft_Guide', 'Heel_Lft_Jnt', 'HindHoof_Lft_Guide', attrList ] )
+                        # Hoof Tip
+                        guideList.append( [ 'HindHoofTip_Lft_Guide', 'HindHoofTip_Lft_Jnt', 'HindHoof_Lft_Guide', justTzRx ] )
 
-                # Hind Hoof Back
-                guideList.append( [ 'HindHoofFront_Lft_Guide', 'Heel_Lft_Jnt', 'HindHoof_Lft_Guide', attrList ] )
+                        # Hind Hoof Front
+                        guideList.append( [ 'HindHoofBack_Lft_Guide', 'Heel_Lft_Jnt', 'HindHoof_Lft_Guide', attrList ] )
 
-                # Hind Hoof In
-                guideList.append( [ 'HindHoofIn_Lft_Guide', 'Heel_Lft_Jnt', 'HindHoof_Lft_Guide', attrList ] )
+                        # Hind Hoof Back
+                        guideList.append( [ 'HindHoofFront_Lft_Guide', 'Heel_Lft_Jnt', 'HindHoof_Lft_Guide', attrList ] )
 
-                # Hind Hoof Out
-                guideList.append( [ 'HindHoofOut_Lft_Guide', 'Heel_Lft_Jnt', 'HindHoof_Lft_Guide', attrList ] )
+                        # Hind Hoof In
+                        guideList.append( [ 'HindHoofIn_Lft_Guide', 'Heel_Lft_Jnt', 'HindHoof_Lft_Guide', attrList ] )
 
-                # Hind Leg Pole
-                guideList.append( [ 'HindLegPole_Lft_Guide', None, 'HindCannon_Lft_Guide', attrList] )
+                        # Hind Hoof Out
+                        guideList.append( [ 'HindHoofOut_Lft_Guide', 'Heel_Lft_Jnt', 'HindHoof_Lft_Guide', attrList ] )
 
-                # Tail
-                guideList.append( [ 'Tail1_Guide', 'Tail1_Jnt', 'Pelvis_Guide', attrList ] )
-                guideList.append( [ 'Tail2_Guide', 'Tail2_Jnt', 'Tail1_Guide', attrList ] )
-                guideList.append( [ 'Tail3_Guide', 'Tail3_Jnt', 'Tail2_Guide', attrList ] )
-                guideList.append( [ 'Tail4_Guide', 'Tail4_Jnt', 'Tail3_Guide', attrList ] )
-                guideList.append( [ 'Tail5_Guide', 'Tail5_Jnt', 'Tail4_Guide', attrList ] )
-                guideList.append( [ 'Tail6_Guide', 'Tail6_Jnt', 'Tail5_Guide', attrList ] )
-                guideList.append( [ 'Tail7_Guide', 'Tail7_Jnt', 'Tail6_Guide', attrList ] )
+                        # Hind Leg Pole
+                        guideList.append( [ 'HindLegPole_Lft_Guide', None, 'HindCannon_Lft_Guide', attrList] )
 
-                # Chest
-                guideList.append( [ 'Chest_Guide', 'Chest_Jnt', 'COG_Guide', attrList ] )
+                        # Tail
+                        guideList.append( [ 'Tail1_Guide', 'Tail1_Jnt', 'Pelvis_Guide', justTzTyRx ] )
+                        guideList.append( [ 'Tail2_Guide', 'Tail2_Jnt', 'Tail1_Guide', justTzRx ] )
+                        guideList.append( [ 'Tail3_Guide', 'Tail3_Jnt', 'Tail2_Guide', justTzRx ] )
+                        guideList.append( [ 'Tail4_Guide', 'Tail4_Jnt', 'Tail3_Guide', justTzRx ] )
+                        guideList.append( [ 'Tail5_Guide', 'Tail5_Jnt', 'Tail4_Guide', justTzRx ] )
+                        guideList.append( [ 'Tail6_Guide', 'Tail6_Jnt', 'Tail5_Guide', justTzRx ] )
+                        guideList.append( [ 'Tail7_Guide', 'Tail7_Jnt', 'Tail6_Guide', justTzRx ] )
 
-                # Neck FK 1
-                guideList.append( [ 'NeckFK1_Guide', None, 'Chest_Guide', attrList ] )
+                        # Chest
+                        guideList.append( [ 'Chest_Guide', 'Chest_Jnt', 'COG_Guide', justTzTyRx ] )
 
-                # Neck FK 2
-                guideList.append( [ 'NeckFK2_Guide', None, 'NeckFK1_Guide', attrList ] )
+                        # Neck FK 1
+                        guideList.append( [ 'NeckFK1_Guide', None, 'Chest_Guide', justTzTyRx ] )
 
-                # Neck FK 3
-                guideList.append( [ 'NeckFK3_Guide', None, 'NeckFK2_Guide', attrList ] )
+                        # Neck FK 2
+                        guideList.append( [ 'NeckFK2_Guide', None, 'NeckFK1_Guide', justTzTyRx ] )
 
-                # Neck FK 4
-                guideList.append( [ 'NeckFK4_Guide', None, 'NeckFK3_Guide', attrList ] )
+                        # Neck FK 3
+                        guideList.append( [ 'NeckFK3_Guide', None, 'NeckFK2_Guide', justTzTyRx ] )
 
-                # Head
-                guideList.append( [ 'Head_Guide', 'Head_Jnt', 'NeckFK4_Guide',  [ 'tx', 'ry', 'rz', 'sx', 'sy', 'sz', 'v' ] ] )
+                        # Neck FK 4
+                        guideList.append( [ 'NeckFK4_Guide', None, 'NeckFK3_Guide', justTzTyRx ] )
 
-                # HeadTip
-                guideList.append( [ 'HeadTip_Guide', 'HeadTip_Jnt', 'Head_Guide', justTzRx ] )
+                        # Head
+                        guideList.append( [ 'Head_Guide', 'Head_Jnt', 'NeckFK4_Guide',  justTzTyRx ] )
 
-                # Neck 1
-                guideList.append( [ 'Neck1_Guide', 'Neck1_Jnt', 'Chest_Guide', attrList ] )
+                        # HeadTip
+                        guideList.append( [ 'HeadTip_Guide', 'HeadTip_Jnt', 'Head_Guide', justTzRx ] )
 
-                # Neck 2
-                guideList.append( [ 'Neck2_Guide', 'Neck7_Jnt', 'Head_Guide', attrList ] )
+                        # Neck 1
+                        guideList.append( [ 'Neck1_Guide', 'Neck1_Jnt', 'Chest_Guide', attrList ] )
 
-                # Jaw
-                guideList.append( [ 'Jaw_Guide', 'Jaw_Jnt', 'Head_Guide', attrList ] )
+                        # Neck 2
+                        guideList.append( [ 'Neck2_Guide', 'Neck7_Jnt', 'Head_Guide', attrList ] )
 
-                # JawTip
-                guideList.append( [ 'JawTip_Guide', 'JawTip_Jnt', 'Jaw_Guide', attrList ] )
+                        # Jaw
+                        guideList.append( [ 'Jaw_Guide', 'Jaw_Jnt', 'Head_Guide', justTzTyRx ] )
 
-                # Eyes
-                guideList.append( [ 'Eye_Lft_Guide', 'Eye_Lft_Jnt', 'Head_Guide', [ 'sx', 'sy', 'sz', 'v' ] ] )
+                        # JawTip
+                        guideList.append( [ 'JawTip_Guide', 'JawTip_Jnt', 'Jaw_Guide', attrList ] )
 
-                # Ear
-                guideList.append( [ 'Ear_Lft_Guide', 'Ear_Lft_Jnt', 'Head_Guide', [ 'sx', 'sy', 'sz', 'v' ] ] )
+                        # Eyes
+                        guideList.append( [ 'Eye_Lft_Guide', 'Eye_Lft_Jnt', 'Head_Guide', [ 'sx', 'sy', 'sz', 'v' ] ] )
 
-                # EarTip
-                guideList.append( [ 'EarTip_Lft_Guide', 'EarTip_Lft_Jnt', 'Ear_Lft_Guide', attrList ] )
+                        # Ear
+                        guideList.append( [ 'Ear_Lft_Guide', 'Ear_Lft_Jnt', 'Head_Guide', [ 'sx', 'sy', 'sz', 'v' ] ] )
 
-                # Scapula
-                guideList.append(
-                    [ 'Scapula_Lft_Guide', 'Scapula_Lft_Jnt', 'Chest_Guide', [ 'sx', 'sy', 'sz', 'v' ] ] )
+                        # EarTip
+                        guideList.append( [ 'EarTip_Lft_Guide', 'EarTip_Lft_Jnt', 'Ear_Lft_Guide', attrList ] )
 
-                # Humerus
-                guideList.append( [ 'Humerus_Lft_Guide', 'Humerus_Lft_Jnt', 'Scapula_Lft_Guide', justTzRx ] )
+                        # Scapula
+                        guideList.append(
+                            [ 'Scapula_Lft_Guide', 'Scapula_Lft_Jnt', 'Chest_Guide', [ 'sx', 'sy', 'sz', 'v' ] ] )
 
-                # Radius
-                guideList.append( [ 'Radius_Lft_Guide', 'Radius_Lft_Jnt', 'Humerus_Lft_Guide', justTzRx ] )
+                        # Humerus
+                        guideList.append( [ 'Humerus_Lft_Guide', 'Humerus_Lft_Jnt', 'Scapula_Lft_Guide', justTzRx ] )
 
-                # ForeCannon
-                guideList.append( [ 'ForeCannon_Lft_Guide', 'ForeCannon_Lft_Jnt', 'Radius_Lft_Guide', justTzRx ] )
+                        # Radius
+                        guideList.append( [ 'Radius_Lft_Guide', 'Radius_Lft_Jnt', 'Humerus_Lft_Guide', justTzRx ] )
 
-                # ForePastern
-                guideList.append(
-                    [ 'ForePastern_Lft_Guide', 'ForePastern_Lft_Jnt', 'ForeCannon_Lft_Guide', justTzRx ] )
+                        # ForeCannon
+                        guideList.append( [ 'ForeCannon_Lft_Guide', 'ForeCannon_Lft_Jnt', 'Radius_Lft_Guide', justTzRx ] )
 
-                # ForeHoof
-                guideList.append(
-                    [ 'ForeHoof_Lft_Guide', 'ForeHoof_Lft_Jnt', 'ForePastern_Lft_Guide', justTzRx ] )
+                        # ForePastern
+                        guideList.append(
+                            [ 'ForePastern_Lft_Guide', 'ForePastern_Lft_Jnt', 'ForeCannon_Lft_Guide', justTzRx ] )
 
-                # ForeHoofTip
-                guideList.append(
-                    [ 'ForeHoofTip_Lft_Guide', 'ForeHoofTip_Lft_Jnt', 'ForeHoof_Lft_Guide', justTzRx ] )
+                        # ForeHoof
+                        guideList.append(
+                            [ 'ForeHoof_Lft_Guide', 'ForeHoof_Lft_Jnt', 'ForePastern_Lft_Guide', justTzRx ] )
 
-                # Fore Hoof Front
-                guideList.append( [ 'ForeHoofBack_Lft_Guide', 'Heel_Lft_Jnt', 'ForeHoof_Lft_Guide', attrList ] )
+                        # ForeHoofTip
+                        guideList.append(
+                            [ 'ForeHoofTip_Lft_Guide', 'ForeHoofTip_Lft_Jnt', 'ForeHoof_Lft_Guide', justTzRx ] )
 
-                # Fore Hoof Back
-                guideList.append( [ 'ForeHoofFront_Lft_Guide', 'Heel_Lft_Jnt', 'ForeHoof_Lft_Guide', attrList ] )
+                        # Fore Hoof Front
+                        guideList.append( [ 'ForeHoofBack_Lft_Guide', 'Heel_Lft_Jnt', 'ForeHoofTip_Lft_Guide', attrList ] )
 
-                # Fore Hoof In
-                guideList.append( [ 'ForeHoofIn_Lft_Guide', 'Heel_Lft_Jnt', 'ForeHoof_Lft_Guide', attrList ] )
+                        # Fore Hoof Back
+                        guideList.append( [ 'ForeHoofFront_Lft_Guide', 'Heel_Lft_Jnt', 'ForeHoofTip_Lft_Guide', attrList ] )
 
-                # Fore Hoof Out
-                guideList.append( [ 'ForeHoofOut_Lft_Guide', 'Heel_Lft_Jnt', 'ForeHoof_Lft_Guide', attrList ] )
+                        # Fore Hoof In
+                        guideList.append( [ 'ForeHoofIn_Lft_Guide', 'Heel_Lft_Jnt', 'ForeHoofTip_Lft_Guide', attrList ] )
 
-                # Fore Leg Pole
-                guideList.append( [ 'ForeLegPole_Lft_Guide', None, 'ForeCannon_Lft_Guide', attrList] )
+                        # Fore Hoof Out
+                        guideList.append( [ 'ForeHoofOut_Lft_Guide', 'Heel_Lft_Jnt', 'ForeHoofTip_Lft_Guide', attrList ] )
 
-                guideDict = self.build_guides( self.charRoot, guideList, ctrlDict, guideDict, data )
+                        # Fore Leg Pole
+                        guideList.append( [ 'ForeLegPole_Lft_Guide', None, 'ForeCannon_Lft_Guide', attrList] )
 
-                # Delete redundant constraints
-                for guide in ['Pelvis_Guide', 'Chest_Guide', 'COG_Guide']:
-                    guide = self.find_node(self.charRoot, guide)
-                    try:
-                        mc.delete( mc.listConnections( guide + '.t', d=True, s=False))
-                    except:
-                        pass
+                        guideDict = self.build_guides( self.charRoot, guideList, ctrlDict, guideDict )
 
-                # Make COG Guide bigger
-                cog_guide = self.find_node(self.charRoot, 'COG_Guide')
-                mc.setAttr(cog_guide+'.controlSize', 12 )
+                        # Position IK Poles
+                        offset = 40
+                        src = self.find_node(self.charRoot, 'ForeLegPole_Lft_Guide')
+                        grp = self.get_parent(src)
+                        dst = self.find_node(self.charRoot, 'ForeCannon_Lft_Guide')
+                        mc.matchTransform(grp, dst, pos=True, rot=False)
+                        mc.move(0, 0, offset, grp, r=True, ws=True)
 
-                # Position hoof guides manually, we don't have a joint for them
-                offset = []
-                offset.append( [0,0,4])
-                offset.append( [0,0,12])
-                offset.append( [-4,0,8])
-                offset.append( [4,0,8])
-                for i, DIR in enumerate (['Back', 'Front', 'In', 'Out']):
-                    for prefix in ['Fore', 'Hind']:
-                        foreHoof_guide = self.find_node(self.charRoot, prefix+'Hoof'+DIR+'_Lft_Guide')
-                        foot_guide = self.find_node(self.charRoot, prefix+'Pastern_Lft_Guide')
+                        src = self.find_node(self.charRoot, 'HindLegPole_Lft_Guide')
+                        grp = self.get_parent(src)
+                        dst = self.find_node(self.charRoot, 'HindCannon_Lft_Guide')
+                        mc.matchTransform(grp, dst, pos=True, rot=False)
+                        mc.move(0, 0, -offset, grp, r=True, ws=True)
 
-                        mc.matchTransform( foreHoof_guide, foot_guide, pos=True, rot=False)
-                        pos = mc.xform(foreHoof_guide, q=True, ws=True, t=True)
-                        if mc.upAxis(query=True, axis=True) == 'y':
-                            pos[1] = 0
-                        else:
-                            pos[2] = 0
-                        mc.xform(foreHoof_guide, ws=True, t=pos)
-                        mc.xform(foreHoof_guide, t=offset[i], relative=True, objectSpace=True )
+                        # Position hoof guides manually, we don't have a joint for them
+                        offset = []
+                        offset.append([0, 0, 4])
+                        offset.append([0, 0, 12])
+                        offset.append([-4, 0, 8])
+                        offset.append([4, 0, 8])
+                        for i, DIR in enumerate(['Back', 'Front', 'In', 'Out']):
+                            for prefix in ['Fore', 'Hind']:
+                                foreHoof_guide = self.find_node(self.charRoot, prefix + 'Hoof' + DIR + '_Lft_Guide')
+                                foot_guide = self.find_node(self.charRoot, prefix + 'Pastern_Lft_Guide')
 
-                # Position IK Poles
-                offset = 40
-                src = self.find_node(self.charRoot, 'ForeLegPole_Lft_Guide')
-                dst = self.find_node(self.charRoot, 'ForeCannon_Lft_Guide')
-                mc.matchTransform( src, dst, pos=True, rot=False)
-                mc.move(0, 0, offset, src, r=True, ws=True)
+                                mc.matchTransform(foreHoof_guide, foot_guide, pos=True, rot=False)
+                                pos = mc.xform(foreHoof_guide, q=True, ws=True, t=True)
+                                if mc.upAxis(query=True, axis=True) == 'y':
+                                    pos[1] = 0
+                                else:
+                                    pos[2] = 0
+                                mc.xform(foreHoof_guide, ws=True, t=pos)
+                                mc.xform(foreHoof_guide, t=offset[i], relative=True, objectSpace=True)
 
-                src = self.find_node(self.charRoot, 'HindLegPole_Lft_Guide')
-                dst = self.find_node(self.charRoot, 'HindCannon_Lft_Guide')
-                mc.matchTransform( src, dst, pos=True, rot=False)
-                mc.move(0, 0, -offset, src, r=True, ws=True)
+                        # Delete redundant constraints
+                        for guide in ['Pelvis_Guide', 'Chest_Guide', 'COG_Guide']:
+                            guide = self.find_node(self.charRoot, guide)
+                            try:
+                                con = mc.listConnections(guide + '.t', d=True, s=False)
+                                if con:
+                                    mc.delete( con )
+                            except:
+                                pass
 
-                # IK Splines
-                in_rot_offset = (90,0,0)
-                out_rot_offset = (-90,0,0)
+                        # Make COG Guide bigger
+                        cog_guide = self.find_node(self.charRoot, 'COG_Guide')
+                        mc.setAttr(cog_guide + '.controlSize', 12)
 
-                # Spine
-                src = self.find_node(self.charRoot, 'Pelvis_Guide')
-                dst = self.find_node(self.charRoot, 'Chest_Guide')
+                        # IK Splines
+                        in_rot_offset = (90, 0, 0)
+                        out_rot_offset = (-90, 0, 0)
 
-                count = 9
+                        # Spine
+                        src = self.find_node(self.charRoot, 'Pelvis_Guide')
+                        dst = self.find_node(self.charRoot, 'Chest_Guide')
 
-                main_grp, outputs = Quadruped().create_advanced_spline_ik( name='Spine',
-                                                                           no=1,
-                                                                           src=src,
-                                                                           dst=dst,
-                                                                           rootNode=self.charRoot,
-                                                                           joint_count=count,
-                                                                           in_rot_offset=in_rot_offset,
-                                                                           out_rot_offset=out_rot_offset)
+                        count = 9
 
-                Quadruped().connect_spine_joints( self.charRoot, outputs )
+                        main_grp, outputs = Quadruped().create_advanced_spline_ik(name='Spine',
+                                                                                  no=1,
+                                                                                  src=src,
+                                                                                  dst=dst,
+                                                                                  rootNode=self.charRoot,
+                                                                                  joint_count=count,
+                                                                                  in_rot_offset=in_rot_offset,
+                                                                                  out_rot_offset=out_rot_offset)
 
-                proxy_grp = self.find_node(self.charRoot, 'Proxy_Grp')
-                mc.parent(main_grp, proxy_grp)
+                        #Quadruped().connect_spine_joints(self.charRoot, outputs)
 
-                # Neck
+                        proxy_grp = self.find_node(self.charRoot, 'Proxy_Grp')
+                        mc.parent(main_grp, proxy_grp)
 
-                src = self.find_node(self.charRoot, 'Neck1_Guide')
-                dst = self.find_node(self.charRoot, 'Neck2_Guide')
-                count = 7
-                node, neck = self.create_spline_simple( 'neck', [src, dst], count, in_rot_offset, out_rot_offset )
+                        # Neck
+                        src = self.find_node(self.charRoot, 'Neck1_Guide')
+                        dst = self.find_node(self.charRoot, 'Neck2_Guide')
+                        count = 7
+                        node, neck = self.create_spline_simple('neck', [src, dst], count, in_rot_offset, out_rot_offset)
+                        print('node, neck', node, neck)
+                        for i in range(count):
+                            neck[i] = mc.rename( neck[i], 'Neck'+str(i+1)+'_Guide')[0]
 
-                for i in range(  count  ):
-                    jnt = self.find_node(self.charRoot,  'Neck' + str( i + 1 ) + '_Jnt' )
-                    mc.parentConstraint( neck[ i ], jnt)
 
-                mc.parent( node, neck, guidesGrp )
-                # Position Neck FK
-                # temporarily unparent so we can move the neck FK guides around and align them to the neck`s joints
-                head_grp = mc.listRelatives( self.find_node(self.charRoot, 'Head_Guide'),p=True, pa=True )[0]
-                head_parent = mc.listRelatives( head_grp,p=True, pa=True )[0]
-                head_grp = mc.parent(head_grp, w=True )
+                        #for i in range(count):
+                        #    jnt = self.find_node(self.charRoot, 'Neck' + str(i + 1) + '_Jnt')
+                        #    mc.parentConstraint(neck[i], jnt)
 
-                src = self.find_node(self.charRoot, 'NeckFK1_Guide')
-                dst = self.find_node(self.charRoot, 'Chest_Guide')
-                mc.matchTransform( src, dst, pos=True, rot=False)
+                        mc.parent(node, neck, guidesGrp)
+                        # Position Neck FK
+                        # temporarily unparent so we can move the neck FK guides around and align them to the neck`s joints
+                        head_grp = mc.listRelatives(self.find_node(self.charRoot, 'Head_Guide'), p=True, pa=True)[0]
+                        head_parent = mc.listRelatives(head_grp, p=True, pa=True)[0]
+                        head_grp = mc.parent(head_grp, w=True)
 
-                src = self.find_node(self.charRoot, 'NeckFK2_Guide')
-                dst = self.find_node(self.charRoot, 'Neck2_Jnt')
-                mc.matchTransform( src, dst, pos=True, rot=False)
+                        src = self.find_node(self.charRoot, 'NeckFK1_Guide')
+                        dst = self.find_node(self.charRoot, 'Chest_Guide')
+                        mc.matchTransform(src, dst, pos=True, rot=False)
 
-                src = self.find_node(self.charRoot, 'NeckFK3_Guide')
-                dst = self.find_node(self.charRoot, 'Neck4_Jnt')
-                mc.matchTransform( src, dst, pos=True, rot=False)
+                        src = self.find_node(self.charRoot, 'NeckFK2_Guide')
+                        dst = self.find_node(self.charRoot, 'Neck2_Jnt')
+                        mc.matchTransform(src, dst, pos=True, rot=False)
 
-                src = self.find_node(self.charRoot, 'NeckFK4_Guide')
-                dst = self.find_node(self.charRoot, 'Neck6_Jnt')
-                mc.matchTransform( src, dst, pos=True, rot=False)
+                        src = self.find_node(self.charRoot, 'NeckFK3_Guide')
+                        dst = self.find_node(self.charRoot, 'Neck4_Jnt')
+                        mc.matchTransform(src, dst, pos=True, rot=False)
 
-                # reparent the head guide`s group
-                mc.parent( head_grp, head_parent)
+                        src = self.find_node(self.charRoot, 'NeckFK4_Guide')
+                        dst = self.find_node(self.charRoot, 'Neck6_Jnt')
+                        mc.matchTransform(src, dst, pos=True, rot=False)
+
+                        for i in range(4):
+                            guide = self.find_node(self.charRoot, 'NeckFK' + str(i + 1) + '_Guide')
+                            mc.setAttr(guide + '.controlOffset', 0, 12, 0)
+
+                        # reparent the head guide`s group
+                        mc.parent(head_grp, head_parent)
+
+                        # Tweak em
+                        attr = 'tz'
+                        t_attrs = ['tx', 'ty', 'tz']
+                        length_guides = ['ForeCannon_Lft_Guide',
+                                         'Radius_Lft_Guide',
+                                         'Humerus_Lft_Guide',
+                                         'ForePastern_Lft_Guide',
+                                         'ForeHoof_Lft_Guide',
+                                         'ForeHoofTip_Lft_Guide',
+                                         'HeadTip_Guide',
+                                         'JawTip_Guide',
+                                         'Fibula_Lft_Guide',
+                                         'HindCannon_Lft_Guide',
+                                         'HindPastern_Lft_Guide',
+                                         'HindHoof_Lft_Guide',
+                                         'HindHoofTip_Lft_Guide',
+                                         'ForeLegPole_Lft_Guide',
+                                         'HindLegPole_Lft_Guide',
+                                         'Tail2_Guide',
+                                         'Tail3_Guide',
+                                         'Tail4_Guide',
+                                         'Tail5_Guide',
+                                         'Tail6_Guide',
+                                         'Tail7_Guide']
+
+                        for guide in length_guides:
+                            if 'Pole' in guide:
+                                attr = 'ty'
+                            else:
+                                attr = 'tz'
+                            grp = self.get_parent(guide)
+                            length = mc.getAttr(grp + '.' + attr)
+                            mc.addAttr(guide, ln='offset', k=True, at='float', dv=length)
+                            mc.connectAttr(guide + '.offset', grp + '.' + attr)
+                            for t_attr in t_attrs:
+                                # Lock and hide translate attributes
+                                mc.setAttr(guide + '.' + t_attr, l=False)
+                                mc.setAttr(guide + '.' + t_attr, 0)
+                                mc.setAttr(guide + '.' + t_attr, l=True, k=False)
+
+                        # Make the Hoof guides stay oriented towards the world
+                        for DIR in ['Fore', 'Hind']:
+                            guide = self.find_node(self.charRoot, DIR + 'HoofTip_Lft_Guide')
+                            grp = mc.createNode('transform', name=DIR + 'Hoof_Guide_Grp', parent=guide)
+                            mc.orientConstraint(self.charRoot, grp)
+                            for SIDE in ['Back', 'Front', 'In', 'Out']:
+                                guide = self.find_node(self.charRoot, DIR + 'Hoof' + SIDE + '_Lft_Guide')
+                                parent = self.get_parent(guide)
+                                mc.parent(parent, grp)
 
                 return True
 
@@ -5308,7 +5392,10 @@ class Char( Rig ):
 
         # Create the body guides
         print ('aniMeta: Create the body guides.')
-        self.build_body_guides( rootNode, type )
+        if type == kBipedUE:
+            self.build_body_guides( rootNode, type )
+        elif type == kQuadruped:
+            Quadruped().create_guides( rootNode )
 
         mc.setAttr(rootNode+".show_Guides", True )
         mc.setAttr(rootNode+".show_Joints", True )
@@ -5483,7 +5570,7 @@ class Char( Rig ):
                 # Save Control Shape data on Root node
                 ctrlDict = { }
 
-                nodes = self.get_nodes( rig_grp, dict = { 'Type': kHandle }, hierarchy = True )
+                nodes = self.get_nodes( rig_grp, data_dict = { 'Type': kHandle }, hierarchy = True )
 
                 attrs = [ 'controlSizeX', 'controlSizeY', 'controlSizeZ', 'controlSize', 'controlSmoothing', 'controlOffsetX', 'controlOffsetY', 'controlOffsetZ', 'controlOffset' ]
 
@@ -5549,7 +5636,9 @@ class Char( Rig ):
                     for up in upVecs:
                         up = self.find_node(self.charRoot, up)
                         try:
-                            mc.delete( mc.listRelatives( up, c = 1, ad = 1, pa=True ) )
+                            nodes = mc.listRelatives( up, c = 1, ad = 1, pa=True )
+                            if nodes:
+                                mc.delete( nodes )
                         except:
                             pass
 
@@ -7856,7 +7945,6 @@ class Char( Rig ):
         Toggles the select character between guide and control rig mode.
         :return:
         '''
-
         sel = mc.ls(sl=True)
 
         state = None
@@ -7955,6 +8043,7 @@ class Char( Rig ):
                     metaData[ 'GuidePose' ] = handleDict
 
                     self.set_metaData( self.charRoot, metaData )
+
                     # delete control rig
                     self.delete_controls( self.charRoot )
 
@@ -7966,9 +8055,9 @@ class Char( Rig ):
                     if type == kBiped or type == kBipedUE:
                         self.delete_mocap( self.charRoot )
 
-                    # create guides
-                    skipExistingGuides = True
-                    self.build_body_guides( self.charRoot, type, skipExistingGuides )
+                        # create guides
+                        skipExistingGuides = True
+                        self.build_body_guides( self.charRoot, type, skipExistingGuides )
 
                     om.MGlobal.displayInfo( 'aniMeta: ' + self.charRoot + ' is now in guide mode.' )
 
@@ -7987,7 +8076,6 @@ class Char( Rig ):
 
                 # Switch to Control Mode
                 elif rigState == kRigStateGuide:
-
                     # delete guides
                     # Dont delete the actual guides because we need them for rigging
                     self.delete_body_guides( self.charRoot, deleteOnlyConstraints=True )
@@ -8051,6 +8139,11 @@ class Char( Rig ):
                     mc.setAttr( self.charRoot + '.show_Joints', True )
 
                     state= kRigStateControl
+                else:
+                    print('Invalid state', state)
+
+                metaData[ 'RigState' ] = state
+                self.set_metaData( self.charRoot, metaData )
 
                 mc.undoInfo( closeChunk = True )
                 try:
@@ -8614,7 +8707,7 @@ class Biped( Char ):
             ctrlDict['globalScale']    = True
             ctrlDict['scale']          = global_scale
             ctrlDict['createBlendGrp'] = True
-            controls['Main_Ctr_Ctrl']  = self.create_handle( **ctrlDict )
+            controls['Main_Ctr_Ctrl']  = self.create_control(**ctrlDict)
 
             # We have to parent this one manually
             parent = mc.listRelatives( controls['Main_Ctr_Ctrl'].fullPathName(), p=True, pa=True )[0]
@@ -8697,7 +8790,7 @@ class Biped( Char ):
                     ctrlDict.update( handleDict[control] )
 
                     # Build the control
-                    controls[control]           = self.create_handle( **ctrlDict )
+                    controls[control]           = self.create_control(**ctrlDict)
 
             if type == kBiped:
                 if 'Jaw_Ctr_Ctrl' in handleDict:
@@ -8806,8 +8899,8 @@ class Biped( Char ):
             if type == kBiped:
                 eyes_grp = mc.createNode( 'transform', name='Eyes_Grp', parent= controls['Main_Ctr_Ctrl']  , ss=True )
 
-                Eyes_Ctr_Ctrl = self.create_handle( name='Eyes_Ctr_Ctrl', matchTransform=self.find_node(rootNode, 'Eye_Lft_Jnt'), parent = eyes_grp,
-                                             shapeType=self.kCube, green=1, red=1, width=3, height=3, depth=3,   character = rootNode, globalScale = True )
+                Eyes_Ctr_Ctrl = self.create_control(name='Eyes_Ctr_Ctrl', matchTransform=self.find_node(rootNode, 'Eye_Lft_Jnt'), parent = eyes_grp,
+                                                    shapeType=self.kCube, green=1, red=1, width=3, height=3, depth=3, character = rootNode, globalScale = True)
 
                 eye_ctrl_grp = mc.listRelatives( Eyes_Ctr_Ctrl.fullPathName(), p=True, pa=True )[0]
                 mc.setAttr( eye_ctrl_grp + '.tx', l=0 )
@@ -8816,13 +8909,13 @@ class Biped( Char ):
                 # Move the control to the centre
                 mc.setAttr( eye_ctrl_grp + '.tx',  0 )
 
-                Eyes_Lft_Ctrl = self.create_handle(name='Eye_Lft_Ctrl', matchTransform=self.find_node(rootNode, 'Eye_Lft_Jnt'),   parent =  Eyes_Ctr_Ctrl.fullPathName()  ,
-                                             shapeType=self.kCube, color=colors[0], width=2, height=2, depth=2,   character = rootNode, globalScale = True,
-                                             constraint=self.kAim, aimVec=(0,0,1), upVec = (0,1,0))
+                Eyes_Lft_Ctrl = self.create_control(name='Eye_Lft_Ctrl', matchTransform=self.find_node(rootNode, 'Eye_Lft_Jnt'), parent =  Eyes_Ctr_Ctrl.fullPathName(),
+                                                    shapeType=self.kCube, color=colors[0], width=2, height=2, depth=2, character = rootNode, globalScale = True,
+                                                    constraint=self.kAim, aimVec=(0,0,1), upVec = (0,1,0))
 
-                Eyes_Rgt_Ctrl = self.create_handle(name='Eye_Rgt_Ctrl', matchTransform=self.find_node(rootNode, 'Eye_Rgt_Jnt'),   parent = Eyes_Ctr_Ctrl.fullPathName() ,
-                                             shapeType=self.kCube, color=colors[1], width=2, height=2, depth=2,  character = rootNode, globalScale = True,
-                                             constraint=self.kAim, aimVec=(0,0,1), upVec = (0,1,0) )
+                Eyes_Rgt_Ctrl = self.create_control(name='Eye_Rgt_Ctrl', matchTransform=self.find_node(rootNode, 'Eye_Rgt_Jnt'), parent = Eyes_Ctr_Ctrl.fullPathName(),
+                                                    shapeType=self.kCube, color=colors[1], width=2, height=2, depth=2, character = rootNode, globalScale = True,
+                                                    constraint=self.kAim, aimVec=(0,0,1), upVec = (0,1,0))
 
                 eye_ctrl_grp_l = mc.listRelatives( Eyes_Lft_Ctrl.fullPathName(), p=True, pa=True )[0]
                 eye_ctrl_grp_r = mc.listRelatives( Eyes_Rgt_Ctrl.fullPathName(), p=True, pa=True )[0]
@@ -9650,7 +9743,13 @@ class Biped( Char ):
         if side == 'Rgt':
             side_UE = 'r'
 
-        # TODO: Make sure rig is in control mode
+        data = self.get_metaData(char)
+
+        if 'RigState' in data:
+            state = data['RigState']
+            if state != kRigStateControl:
+                mc.warning('AniMeta: Rig needs to be in control mode to switch between IK and FK')
+                return
 
         if char and limb and side:
 
@@ -9895,10 +9994,17 @@ class Quadruped( Char ):
         self.DEBUG = True
 
     def build_control_rig( self, *args ):
-
-        # TODO [ ] make neck keep length when chest is moved (attach to chest joint )
+        print( 'build_control_rig')
+        # TODO [x] make neck keep length when chest is moved (attach to chest joint )
         # TODO [ ] add length attribute to IK legs to tweak leg length
-        # TODO [ ] hoof should keep still when pastern rolls
+        # TODO [x] hoof should keep still when pastern rolls
+        # TODO [x] mirror hoof roll groups properly
+        # TODO [x] tag quadruped controls
+        # TODO [x] make basic picker functions work with quadrupeds
+        # TODO [ ] make rig scalable
+        # TODO [ ] add pick-walking
+        # TODO [x] add (sym)constraints in guide mode
+        # TODO [ ] change symmetry behaviour for pole vectors
 
         if self.DEBUG:
             print( 'Quadruped.build_control_rig start')
@@ -9922,7 +10028,7 @@ class Quadruped( Char ):
         if self.charRoot is None:
             mc.warning('aniMeta: No Valid character specified. Aborting rig build.')
             return False
-        print('\nself.charRoot ', self.charRoot )
+
         ctrlsDict = {}
         ctrlsDict['character']      = self.charRoot
         ctrlsDict['globalScale']    = True
@@ -10014,11 +10120,8 @@ class Quadruped( Char ):
                 joints[ 'HindHoof_'    + SIDES[i]] = self.get_path( self.find_node(self.charRoot, 'HindHoof_' + SIDES[i] + '_Jnt'))
 
             for key in joints.keys():
-                print ( key )
                 joint = joints[key]
                 self.zero_out_joint_orient( joint )
-
-
 
             # Joint Mapping
             #
@@ -10049,7 +10152,7 @@ class Quadruped( Char ):
             }
             handleDict[ 'NeckIK1_Ctr_Ctrl' ] = {
                 'name': 'NeckIK1_Ctr_Ctrl',
-                'parent': 'Chest_Ctr_Ctrl',
+                'parent': 'NeckFK1_Ctr_Ctrl',
                 'matchTransform': 'Neck1_Guide',
                 'size': [ 30, 4, 4 ]
             }
@@ -10178,8 +10281,8 @@ class Quadruped( Char ):
             }
 
             for i in range( 2 ):
-                handleDict[ 'Scapula_' + SIDES[ i ] + '_Ctrl' ] = {
-                    'name': 'Scapula_' + SIDES[ i ] + '_Ctrl',
+                handleDict[ 'Scapula_FK_' + SIDES[ i ] + '_Ctrl' ] = {
+                    'name': 'Scapula_FK_' + SIDES[ i ] + '_Ctrl',
                     'parent': 'Chest_Ctr_Ctrl',
                     'matchTransform': 'Scapula_' + SIDES[ i ] + '_Guide',
                     'size': [ 10, 10, 10 ],
@@ -10188,9 +10291,9 @@ class Quadruped( Char ):
                     'constraintNode': joints['Scapula_' + SIDES[ i ]  ],
                     'maintainOffset': True
                 }
-                handleDict[ 'Humerus_' + SIDES[ i ] + '_Ctrl' ] = {
-                    'name': 'Humerus_' + SIDES[ i ] + '_Ctrl',
-                    'parent': 'Scapula_' + SIDES[ i ] + '_Ctrl',
+                handleDict[ 'Humerus_FK_' + SIDES[ i ] + '_Ctrl' ] = {
+                    'name': 'Humerus_FK_' + SIDES[ i ] + '_Ctrl',
+                    'parent': 'Scapula_FK_' + SIDES[ i ] + '_Ctrl',
                     'matchTransform': 'Humerus_' + SIDES[ i ] + '_Guide',
                     'size': [ 10, 10, 10 ],
                     'color': colors[ i ],
@@ -10200,7 +10303,7 @@ class Quadruped( Char ):
                 }
                 handleDict[ 'Radius_FK_' + SIDES[ i ] + '_Ctrl' ] = {
                     'name': 'Radius_FK_' + SIDES[ i ] + '_Ctrl',
-                    'parent': 'Humerus_' + SIDES[ i ] + '_Ctrl',
+                    'parent': 'Humerus_FK_' + SIDES[ i ] + '_Ctrl',
                     'matchTransform': 'Radius_' + SIDES[ i ] + '_Guide',
                     'color': colors[ i ],
                     'shapeType': self.kSphere,
@@ -10254,8 +10357,8 @@ class Quadruped( Char ):
                     'size': [ 4, 4, 4 ]
                 }
                 # Hind
-                handleDict[ 'Femur_' + SIDES[ i ] + '_Ctrl' ] = {
-                    'name': 'Femur_' + SIDES[ i ] + '_Ctrl',
+                handleDict[ 'Femur_FK_' + SIDES[ i ] + '_Ctrl' ] = {
+                    'name': 'Femur_FK_' + SIDES[ i ] + '_Ctrl',
                     'parent': 'Pelvis_Ctr_Ctrl',
                     'matchTransform': 'Femur_' + SIDES[ i ] + '_Guide',
                     'size': [ 10, 10, 10 ],
@@ -10266,7 +10369,7 @@ class Quadruped( Char ):
                 }
                 handleDict[ 'Fibula_FK_' + SIDES[ i ] + '_Ctrl' ] = {
                     'name': 'Fibula_FK_' + SIDES[ i ] + '_Ctrl',
-                    'parent': 'Femur_' + SIDES[ i ] + '_Ctrl',
+                    'parent': 'Femur_FK_' + SIDES[ i ] + '_Ctrl',
                     'matchTransform': 'Fibula_' + SIDES[ i ] + '_Guide',
                     'color': colors[ i ],
                     'shapeType': self.kSphere,
@@ -10337,7 +10440,7 @@ class Quadruped( Char ):
             ctrlDict['globalScale']    = True
             ctrlDict['scale']          = global_scale
             ctrlDict['createBlendGrp'] = True
-            self.controls['Main_Ctr_Ctrl']  = self.create_handle( **ctrlDict )
+            self.controls['Main_Ctr_Ctrl']  = self.create_control(**ctrlDict)
 
             # We have to parent this one manually
             grandparent = self.get_grandparent( self.controls['Main_Ctr_Ctrl'].fullPathName() )
@@ -10368,8 +10471,8 @@ class Quadruped( Char ):
             ]
             for i in range( 2 ):
                 # Fore Leg
-                controlsList.append(  'Scapula_' + SIDES[ i ] + '_Ctrl'  )
-                controlsList.append(  'Humerus_' + SIDES[ i ] + '_Ctrl'  )
+                controlsList.append(  'Scapula_FK_' + SIDES[ i ] + '_Ctrl'  )
+                controlsList.append(  'Humerus_FK_' + SIDES[ i ] + '_Ctrl'  )
                 controlsList.append(  'Radius_FK_' + SIDES[ i ] + '_Ctrl'  )
                 controlsList.append(  'ForeCannon_FK_' + SIDES[ i ] + '_Ctrl'  )
                 controlsList.append(  'ForePastern_FK_' + SIDES[ i ] + '_Ctrl'  )
@@ -10377,7 +10480,7 @@ class Quadruped( Char ):
                 controlsList.append(  'ForeFoot_IK_' + SIDES[ i ] + '_Ctrl'  )
                 controlsList.append(  'ForeLegPole_IK_' + SIDES[ i ] + '_Ctrl'  )
                 # Hind Leg
-                controlsList.append(  'Femur_' + SIDES[ i ] + '_Ctrl'  )
+                controlsList.append(  'Femur_FK_' + SIDES[ i ] + '_Ctrl'  )
                 controlsList.append(  'Fibula_FK_' + SIDES[ i ] + '_Ctrl'  )
                 controlsList.append(  'HindCannon_FK_' + SIDES[ i ] + '_Ctrl'  )
                 controlsList.append(  'HindPastern_FK_' + SIDES[ i ] + '_Ctrl'  )
@@ -10398,7 +10501,7 @@ class Quadruped( Char ):
                     ctrlDict.update( handleDict[control] )
 
                     # Build the control
-                    self.controls[control] = self.create_handle( **ctrlDict )
+                    self.controls[control] = self.create_control(**ctrlDict)
 
             if self.DEBUG:
                 print ('Build Centre completed')
@@ -10445,15 +10548,15 @@ class Quadruped( Char ):
             mc.parent(main_grp, proxy_grp)
 
             # Connect things to Pelvis
-            grp = self.get_grandparent(self.controls['Femur_Lft_Ctrl'])
+            grp = self.get_grandparent(self.controls['Femur_FK_Lft_Ctrl'])
             mc.parentConstraint( outputs[0], grp, mo=True)
-            grp = self.get_grandparent(self.controls['Femur_Rgt_Ctrl'])
+            grp = self.get_grandparent(self.controls['Femur_FK_Rgt_Ctrl'])
             mc.parentConstraint( outputs[0], grp, mo=True)
 
             # Connect things to Chest
-            grp = self.get_grandparent(self.controls['Scapula_Lft_Ctrl'])
+            grp = self.get_grandparent(self.controls['Scapula_FK_Lft_Ctrl'])
             mc.parentConstraint( outputs[count-1], grp, mo=True)
-            grp = self.get_grandparent(self.controls['Scapula_Rgt_Ctrl'])
+            grp = self.get_grandparent(self.controls['Scapula_FK_Rgt_Ctrl'])
             mc.parentConstraint( outputs[count-1], grp, mo=True)
             grp = self.get_grandparent(self.controls['NeckIK1_Ctr_Ctrl'])
             mc.parentConstraint( outputs[count-1], grp, mo=True)
@@ -10472,6 +10575,10 @@ class Quadruped( Char ):
             self.create_spline_ik('Neck', self.controls, self.charRoot, 7)
 
             self.build_world_orient( self.controls['NeckFK1_Ctr_Ctrl'], self.controls['Main_Ctr_Ctrl'], 1)
+
+            grp =  self.get_grandparent( self.controls['NeckFK1_Ctr_Ctrl'].fullPathName() )
+            mc.parentConstraint( joints['Chest_Ctr' ], grp, mo=True)
+
             # Neck
             #
             ########################################################################################################
@@ -10489,31 +10596,15 @@ class Quadruped( Char ):
             #
             ########################################################################################################
 
-
-
             ########################################################################################################
             #
             # Tail
-            """
-            if self.DEBUG:
-                print('Build Tail')
 
-            self.create_spline_ik('Tail',
-                                  self.controls,
-                                  self.charRoot,
-                                  12,
-                                  in_rot_offset = (-90, 0, 0),
-                                  out_rot_offset=(90, 0, 0))
+            grp =  self.get_grandparent( self.controls['TailFK1_Ctr_Ctrl'].fullPathName() )
+            mc.parentConstraint( joints['Pelvis_Ctr' ], grp, mo=True)
 
-            tail1_jnt = joints['Tail4_Ctr' ]
-            mc.matchTransform( self.controls['TailFK2_Ctr_Ctrl'].fullPathName(), tail1_jnt)
+            self.build_world_orient( self.controls['TailFK1_Ctr_Ctrl'], self.controls['Main_Ctr_Ctrl'], 1)
 
-            tail2_jnt = joints['Tail7_Ctr' ]
-            mc.matchTransform( self.controls['TailFK3_Ctr_Ctrl'].fullPathName(), tail2_jnt)
-
-            tail3_jnt = joints['Tail10_Ctr']
-            mc.matchTransform(self.controls['TailFK4_Ctr_Ctrl'].fullPathName(), tail3_jnt)
-            """
             # Tail
             #
             ########################################################################################################
@@ -10522,14 +10613,14 @@ class Quadruped( Char ):
 
                 ########################################################################################################
                 #
-                # Foreleg
+                # ForeLeg
 
                 if self.DEBUG:
-                    print('Build Foreleg', SIDE)
+                    print('Build ForeLeg', SIDE)
 
                 DIR = 'Fore'
 
-                foreleg_grp = mc.createNode( 'transform', name='ForelegIK_'+SIDE+'_Grp', parent=rig_grp)
+                foreleg_grp = mc.createNode( 'transform', name='ForeLegIK_'+SIDE+'_Grp', parent=rig_grp)
 
                 humerusJnt = joints[ 'Humerus_' + SIDE  ]
                 radiusJnt = joints[ 'Radius_' + SIDE  ]
@@ -10552,7 +10643,7 @@ class Quadruped( Char ):
 
                 mc.setAttr( humerusJntFK.fullPathName()+'.v', False )
 
-                mc.parentConstraint( self.controls['Humerus_'+SIDE+'_Ctrl'].fullPathName(), humerusJntFK.fullPathName(), mo=True  )
+                mc.parentConstraint( self.controls['Humerus_FK_'+SIDE+'_Ctrl'].fullPathName(), humerusJntFK.fullPathName(), mo=True  )
                 mc.parentConstraint( self.controls['Radius_FK_'+SIDE+'_Ctrl'].fullPathName(), radiusJntFK.fullPathName(), mo=True  )
                 mc.parentConstraint( self.controls['ForeCannon_FK_'+SIDE+'_Ctrl'].fullPathName(), cannonJntFK.fullPathName(), mo=True  )
                 mc.parentConstraint( self.controls['ForePastern_FK_'+SIDE+'_Ctrl'].fullPathName(), pasternJntFK.fullPathName(), mo=True  )
@@ -10616,9 +10707,9 @@ class Quadruped( Char ):
                 bones = ['Scapula', 'Humerus' ]
                 default_values = [0.2, 0.6 ]
                 for i, bone in enumerate( bones ):
-                    parent = mc.listRelatives( self.controls[bone+'_'+SIDE+'_Ctrl'].fullPathName(), p=True, pa=True)[0]
+                    parent = mc.listRelatives( self.controls[bone+'_FK_'+SIDE+'_Ctrl'].fullPathName(), p=True, pa=True)[0]
                     self.build_autorotation(   name=bone,
-                                               control=self.controls[bone+'_'+SIDE+'_Ctrl'].fullPathName(),
+                                               control=self.controls[bone+'_FK_'+SIDE+'_Ctrl'].fullPathName(),
                                                grp=parent,
                                                target=self.controls[DIR+'Foot_IK_'+SIDE+'_Ctrl'].fullPathName(),
                                                aim_vec=(0, 0, 1),
@@ -10627,18 +10718,18 @@ class Quadruped( Char ):
                                                default_value=default_values[i])
 
                 if self.DEBUG:
-                    print('Build Foreleg Done', SIDE)
+                    print('Build ForeLeg Done', SIDE)
 
-                # Foreleg
+                # ForeLeg
                 #
                 ########################################################################################################
 
                 ########################################################################################################
                 #
-                # Hindleg
+                # HindLeg
 
                 if self.DEBUG:
-                    print('Build Hindleg', SIDE)
+                    print('Build HindLeg', SIDE)
 
                 DIR = 'Hind'
                 hindleg_grp = mc.createNode( 'transform', name=DIR+'legIK_'+SIDE+'_Grp', parent=rig_grp)
@@ -10663,9 +10754,9 @@ class Quadruped( Char ):
 
                 mc.setAttr( femurJntFK.fullPathName()+'.v', False )
 
-                mc.parentConstraint( self.controls['Femur_'+SIDE+'_Ctrl'].fullPathName(), femurJntFK.fullPathName(), mo=True  )
+                mc.parentConstraint( self.controls['Femur_FK_'+SIDE+'_Ctrl'].fullPathName(), femurJntFK.fullPathName(), mo=True  )
                 constraint = mc.parentConstraint( self.controls['Fibula_FK_'+SIDE+'_Ctrl'].fullPathName(), fibulaJntFK.fullPathName(), mo=True  )
-                print('con', constraint)
+
                 mc.parentConstraint( self.controls[DIR+'Cannon_FK_'+SIDE+'_Ctrl'].fullPathName(), cannonJntFK.fullPathName(), mo=True  )
                 mc.parentConstraint( self.controls[DIR+'Pastern_FK_'+SIDE+'_Ctrl'].fullPathName(), pasternJntFK.fullPathName(), mo=True  )
                 mc.parentConstraint( self.controls[DIR+'Hoof_FK_'+SIDE+'_Ctrl'].fullPathName(), hoofJntFK.fullPathName(), mo=True  )
@@ -10675,11 +10766,13 @@ class Quadruped( Char ):
                 fibulaJntIK_jnt_name = fibulaJnt.partialPathName().replace('_' + SIDE, '_IK_' + SIDE)
                 cannonJntIK_jnt_name = cannonJnt.partialPathName().replace('_' + SIDE, '_IK_' + SIDE)
                 pasternJntIK_jnt_name = pasternJnt.partialPathName().replace('_' + SIDE, '_IK_' + SIDE)
+                hoofJntIK_jnt_name = hoofJnt.partialPathName().replace('_' + SIDE, '_IK_' + SIDE)
 
                 femurJntIK = self.joint_copy( femurJnt, femurJntIK_jnt_name, femurJntFK   )
                 fibulaJntIK = self.joint_copy( fibulaJnt, fibulaJntIK_jnt_name, femurJntIK  )
                 cannonJntIK  = self.joint_copy( cannonJnt,  cannonJntIK_jnt_name,  fibulaJntIK  )
                 pasternJntIK  = self.joint_copy( pasternJnt,  pasternJntIK_jnt_name,  cannonJntIK  )
+                hoofJntIK  = self.joint_copy( hoofJnt,  hoofJntIK_jnt_name,  pasternJntIK  )
 
                 grandparent = self.get_grandparent(self.controls[DIR+'Foot_IK_'+SIDE+'_Ctrl'].fullPathName())
 
@@ -10720,655 +10813,99 @@ class Quadruped( Char ):
                 bones = ['Femur' ]
                 default_values = [1]
                 for i, bone in enumerate( bones ):
-                    parent = mc.listRelatives( self.controls[bone+'_'+SIDE+'_Ctrl'].fullPathName(), p=True, pa=True)[0]
+                    parent = mc.listRelatives( self.controls[bone+'_FK_'+SIDE+'_Ctrl'].fullPathName(), p=True, pa=True)[0]
                     self.build_autorotation(   name=bone,
-                                               control=self.controls[bone+'_'+SIDE+'_Ctrl'].fullPathName(),
+                                               control=self.controls[bone+'_FK_'+SIDE+'_Ctrl'].fullPathName(),
                                                grp=parent,
                                                target=self.controls[DIR+'Foot_IK_'+SIDE+'_Ctrl'].fullPathName(),
                                                aim_vec=(0, 0, 1),
                                                up_vec=(1, 0, 0),
                                                up_vec_offset=(5, 0, 0),
                                                default_value=default_values[i])
-                # Hindleg
+                # HindLeg
                 #
                 ########################################################################################################
-
-            return
-            '''
-            def create_constraint( target, node ):
-                mc.parentConstraint( target,  node,  mo=True )
-                mc.scaleConstraint(  target,  node,  mo=True )
-
-            if type == kBiped:
-                create_constraint( controls['Hips_Ctr_Ctrl'].fullPathName(), self.find_node( self.charRoot,  'Hips_Jnt' ) )
-                create_constraint( controls['Spine1_Ctr_Ctrl'].fullPathName(), self.find_node( self.charRoot,  'Spine1_Jnt' )   )
-                create_constraint( controls['Spine2_Ctr_Ctrl'].fullPathName(), self.find_node( self.charRoot,  'Spine2_Jnt' )   )
-                create_constraint( controls['Spine3_Ctr_Ctrl'].fullPathName(), self.find_node( self.charRoot,  'Spine3_Jnt' )  )
-            '''
-
-            ######################################################################################
-            #
-            # Position Pole Vectors
-
-            if self.DEBUG:
-                print ( 'Position Pole Vectors' )
-
-            poles = ['LegPole_IK_', 'ArmPole_IK_']
-
-            root_ctrls = ['LegUp_FK_', 'ArmUp_FK_']
-            eff_ctrls  = ['LegLo_FK_', 'ArmLo_FK_']
-            hndl_ctrls  = ['Foot_FK_', 'Hand_FK_']
-
-            for SIDE in [ 'Lft', 'Rgt'  ]:
-
-                for i in range( len ( poles ) ):
-
-                    for attr in ['tx', 'ty', 'tz', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz'  ]:
-                        mc.setAttr( controls[poles[i]+SIDE+'_Ctrl'].fullPathName()+ '.'+attr, l=False)
-
-                    #legUp_jnt = controls[ root_ctrls[i]+SIDE+'_Ctrl' ]
-                    #legLo_jnt = controls[ eff_ctrls[i] +SIDE+'_Ctrl' ]
-                    #foot_jnt  = controls[ hndl_ctrls[i]+SIDE+'_Ctrl' ]
-
-                    #legUp_jnt = self.find_node( controls[ root_ctrls[i]+SIDE+'_Ctrl' ] )
-                    legLo_jnt = controls[ eff_ctrls[i] +SIDE+'_Ctrl' ]
-                    foot_jnt  = controls[ hndl_ctrls[i]+SIDE+'_Ctrl' ]
-
-                    # Redundant? Wird beim IK Setup besser passen...
-                    '''
-                    pole_matrix = self.get_polevector_position( legUp_jnt, legLo_jnt, foot_jnt, preferred_angle )
-
-                    parent = mc.listRelatives ( controls[ poles[i]+SIDE+'_Ctrl' ].fullPathName(), p=True )[0]
-                    parent = mc.listRelatives ( parent, p=True )[0]
-
-                    self.set_matrix( parent, pole_matrix, kWorld)
-
-                    for attr in ['tx', 'ty', 'tz', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz'  ]:
-                        mc.setAttr( parent + '.'+attr, l=True)
-                    '''
-            if self.DEBUG:
-                print ( 'Position Pole Vector done' )
-
-            # Position Pole Vector
-            #
-            ######################################################################################
-
-            internal_grp = mc.createNode( 'transform', name='Internal_Grp', parent= self.find_node(self.charRoot, 'Rig_Grp' ) )
-            grp = mc.createNode( 'transform', name='IKFoot_Grp', parent=internal_grp )
-            mc.setAttr( internal_grp + '.v', False )
-            mc.setAttr( internal_grp + '.inheritsTransform', False )
-
-            # Legs
-            #
-            ########################################################################################################
 
             ######################################
             #
             # Eyes
-            if type == kBiped:
-                eyes_grp = mc.createNode( 'transform', name='Eyes_Grp', parent= controls['Main_Ctr_Ctrl']  , ss=True )
+            eyes_grp = mc.createNode( 'transform', name='Eyes_Grp', parent= self.controls['Main_Ctr_Ctrl']  , ss=True )
 
-                Eyes_Ctr_Ctrl = self.create_handle( name='Eyes_Ctr_Ctrl', matchTransform=self.find_node(charRoot, 'Eye_Lft_Jnt'), parent = eyes_grp,
-                                             shapeType=self.kCube, green=1, red=1, width=3, height=3, depth=3,   character = charRoot, globalScale = True )
+            self.controls['Eyes_Ctr_Ctrl'] = self.create_control(name='Eyes_Ctr_Ctrl',
+                                                                 matchTransform=self.find_node(self.charRoot, 'Eye_Lft_Jnt'),
+                                                                 parent = eyes_grp,
+                                                                 shapeType=self.kCube,
+                                                                 green=1, red=1,
+                                                                 width=3, height=3, depth=3,
+                                                                 character = self.charRoot,
+                                                                 globalScale = True
+                                                                 )
 
-                eye_ctrl_grp = mc.listRelatives( Eyes_Ctr_Ctrl.fullPathName(), p=True, pa=True )[0]
-                mc.setAttr( eye_ctrl_grp + '.tx', l=0 )
-                mc.setAttr( eye_ctrl_grp + '.tz', l=0 )
+            eye_ctrl_grp = self.get_parent( self.controls['Eyes_Ctr_Ctrl'].fullPathName() )
+            mc.setAttr( eye_ctrl_grp + '.tx', l=0 )
+            mc.setAttr( eye_ctrl_grp + '.tz', l=0 )
 
-                # Move the control to the centre
-                mc.setAttr( eye_ctrl_grp + '.tx',  0 )
+            # Move the control to the centre
+            mc.setAttr( eye_ctrl_grp + '.tx',  0 )
+            mc.setAttr( eye_ctrl_grp + '.rx',  0 )
+            mc.setAttr( eye_ctrl_grp + '.ry',  0 )
+            mc.setAttr( eye_ctrl_grp + '.rz',  0 )
 
-                Eyes_Lft_Ctrl = self.create_handle(name='Eye_Lft_Ctrl', matchTransform=self.find_node(charRoot, 'Eye_Lft_Jnt'),   parent =  Eyes_Ctr_Ctrl.fullPathName()  ,
-                                             shapeType=self.kCube, color=colors[0], width=2, height=2, depth=2,   character = charRoot, globalScale = True,
-                                             constraint=self.kAim, aimVec=(0,0,1), upVec = (0,1,0))
+            self.controls['Eye_Lft_Ctrl'] = self.create_control(name='Eye_Lft_Ctrl',
+                                                                matchTransform=self.find_node(self.charRoot, 'Eye_Lft_Jnt'),
+                                                                parent =  self.controls['Eyes_Ctr_Ctrl'].fullPathName(),
+                                                                shapeType=self.kCube,
+                                                                color=colors[0],
+                                                                width=2, height=2, depth=2,
+                                                                character = self.charRoot,
+                                                                globalScale = True,
+                                                                constraint=self.kAim,
+                                                                aimVec=(0,0,1),
+                                                                upVec = (0,1,0)
+                                                                )
 
-                Eyes_Rgt_Ctrl = self.create_handle(name='Eye_Rgt_Ctrl', matchTransform=self.find_node(charRoot, 'Eye_Rgt_Jnt'),   parent = Eyes_Ctr_Ctrl.fullPathName() ,
-                                             shapeType=self.kCube, color=colors[1], width=2, height=2, depth=2,  character = charRoot, globalScale = True,
-                                             constraint=self.kAim, aimVec=(0,0,1), upVec = (0,1,0) )
+            self.controls['Eye_Rgt_Ctrl'] = self.create_control(name='Eye_Rgt_Ctrl',
+                                                                matchTransform=self.find_node(self.charRoot, 'Eye_Rgt_Jnt'),
+                                                                parent = self.controls['Eyes_Ctr_Ctrl'].fullPathName(),
+                                                                shapeType=self.kCube,
+                                                                color=colors[1],
+                                                                width=2, height=2, depth=2,
+                                                                character = self.charRoot, globalScale = True,
+                                                                constraint=self.kAim,
+                                                                aimVec=(0,0,1),
+                                                                upVec = (0,1,0)
+                                                                )
 
-                eye_ctrl_grp_l = mc.listRelatives( Eyes_Lft_Ctrl.fullPathName(), p=True, pa=True )[0]
-                eye_ctrl_grp_r = mc.listRelatives( Eyes_Rgt_Ctrl.fullPathName(), p=True, pa=True )[0]
+            eye_ctrl_grp_l = self.get_parent( self.controls['Eye_Lft_Ctrl'].fullPathName() )
+            eye_ctrl_grp_r = self.get_parent( self.controls['Eye_Rgt_Ctrl'].fullPathName() )
 
-                ty = mc.getAttr( eye_ctrl_grp + '.ty' )
-                mc.setAttr( eye_ctrl_grp+ '.tz', ty/3 )
+            ty = mc.getAttr( eye_ctrl_grp + '.ty' )
+            mc.move(0, 0, ty/3 , eye_ctrl_grp, r=True, ws=True)
+
+            for grp in [eye_ctrl_grp_l, eye_ctrl_grp_r]:
 
                 # zero out the rotation on the right side
-                mc.setAttr ( eye_ctrl_grp_r + '.rx', l=0 )
-                mc.setAttr ( eye_ctrl_grp_r + '.ry', l=0 )
-                mc.setAttr ( eye_ctrl_grp_r + '.rz', l=0 )
-                mc.setAttr ( eye_ctrl_grp_r + '.r', 0,0,0 )
-                mc.setAttr ( eye_ctrl_grp_r + '.rx', l=1 )
-                mc.setAttr ( eye_ctrl_grp_r + '.ry', l=1 )
-                mc.setAttr ( eye_ctrl_grp_r + '.rz', l=1 )
+                mc.setAttr ( grp + '.rx', l=0 )
+                mc.setAttr ( grp + '.ry', l=0 )
+                mc.setAttr ( grp + '.rz', l=0 )
+                mc.setAttr ( grp + '.r', 0,0,0 )
+                mc.setAttr ( grp + '.rx', l=1 )
+                mc.setAttr ( grp + '.ry', l=1 )
+                mc.setAttr ( grp + '.rz', l=1 )
 
                 mc.setAttr( eye_ctrl_grp + '.tx', l=1 )
                 mc.setAttr( eye_ctrl_grp + '.tz', l=1 )
 
-                # Space Switch
-                self.create_space_switch( Eyes_Ctr_Ctrl, controls['Head_Ctr_Ctrl'], 'world', False )
+            # Space Switch
+            self.create_space_switch( self.controls['Eyes_Ctr_Ctrl'],
+                                      self.controls['Head_Ctr_Ctrl'],
+                                      'world',
+                                      False,
+                                      char=self.charRoot)
 
             # Eyes
             #
             ######################################
-
-            ##################################################################################################
-            #
-            # IKs
-            iks = {}
-
-            if self.DEBUG:
-                print ('Create IK Legs')
-            scale = mc.getAttr( rootNode + '.globalScale' )
-
-            # Creates a constraint like transform calculation
-            def matrix_multi(
-                    name='matrix_multi',
-                    inputs=['LegUpFK_Lft_Ctrl2', 'Hips_Ctr_Ctrl_LegUpFK_Lft_Ctrl2_Grp'],
-                    inputs_inv=['LegUp_Lft_Jnt'],
-                    inputs_inv_attr=['jointOrient'],
-                    inputs_inv_comp_attr=['inputRotate']):
-
-                name = self.short_name( name )
-                mult = mc.createNode( 'multMatrix', name=name + '_multi', ss=True)
-                decomp = mc.createNode( 'decomposeMatrix', name=name + '_decomp', ss=True)
-
-                self.save_for_cleanup( mult )
-                self.save_for_cleanup( decomp )
-
-                mc.connectAttr( mult + '.matrixSum', decomp + '.inputMatrix' )
-
-                for i in range(len(inputs)):
-                    mc.connectAttr(inputs[i] + '.matrix', mult + '.matrixIn[{}]'.format(str(i + len(inputs_inv))))
-
-                for i in range(len(inputs_inv)):
-                    inv = mc.createNode('inverseMatrix', name=name + '_inv', ss=True)
-                    comp = mc.createNode('composeMatrix', name=name + '_comp', ss=True)
-                    for j in range(len(inputs_inv_attr)):
-                        mc.connectAttr( inputs_inv[i].fullPathName() + '.' + inputs_inv_attr[j], comp + '.' + inputs_inv_comp_attr[j])
-
-                    mc.connectAttr(comp + '.outputMatrix', inv + '.inputMatrix')
-                    mc.connectAttr(inv + '.outputMatrix', mult + '.matrixIn[{}]'.format(str(i)))
-
-                    self.save_for_cleanup(inv)
-                    self.save_for_cleanup(comp)
-
-                return decomp
-
-            def hook_up_fk(joint, joint_ik, joint_fk, loc, name ):
-                name = self.short_name( name )
-                pb = mc.createNode('pairBlend', name=name + '_IK_' + SIDE + '_PB', ss=True)
-                self.save_for_cleanup(pb)
-                mc.setAttr(pb + '.rotInterpolation', 1)
-                mc.connectAttr( loc.fullPathName() + '.' + ik_attr, pb + '.weight')
-
-                # Use the global Scale to make the rig scalable
-                mlt1 = mc.createNode('multiplyDivide', name=name + '_IK_' + SIDE + '_Multi1', ss=True)
-                mlt2 = mc.createNode('multiplyDivide', name=name + '_IK_' + SIDE + '_Multi2', ss=True)
-                self.save_for_cleanup(mlt1)
-                self.save_for_cleanup(mlt2)
-                mc.connectAttr( self.charRoot + '.globalScale', mlt1 + '.input1X' )
-                mc.connectAttr( self.charRoot + '.globalScale', mlt1 + '.input1Y' )
-                mc.connectAttr( self.charRoot + '.globalScale', mlt1 + '.input1Z' )
-
-                # Neutralize global scale, non-one values will screw the rig, buggy if global scale is changed in control mode
-                gs = mc.getAttr( self.charRoot + '.globalScale' )
-                mc.setAttr( mlt1 + '.input2', 1/gs, 1/gs, 1/gs )
-
-                mc.connectAttr( mlt1 + '.output', mlt2 + '.input1' )
-
-                '''
-                legUp_FK_decomp = matrix_multi(
-                    name=name + '_FK_' + SIDE,
-                    inputs=[
-                        name + '_FK_' + SIDE + '_Ctrl',
-                        name + '_FK_' + SIDE + '_Ctrl_Blnd_Grp',
-                        name + '_FK_' + SIDE + '_Ctrl_Grp'
-                    ],
-                    inputs_inv=[
-                        joints[ name + '_' + SIDE ]
-                    ]
-                )
-                mc.connectAttr( legUp_FK_decomp + '.outputRotate', pb + '.inRotate1' )
-                mc.connectAttr( legUp_FK_decomp + '.outputTranslate', pb + '.inTranslate1' )
-
-                '''
-                mc.connectAttr( joint_fk.fullPathName() + '.rotate', pb + '.inRotate1' )
-                mc.connectAttr( joint_fk.fullPathName() + '.translate', pb + '.inTranslate1' )
-
-                mc.connectAttr( joint_ik.fullPathName() + '.translate', pb + '.inTranslate2' )
-                mc.connectAttr( joint_ik.fullPathName() + '.rotate', pb + '.inRotate2' )
-
-                # Hook global scale here? We may need it pre PB
-                mc.connectAttr(pb + '.outTranslate', mlt2 + '.input2')
-                try:
-                    mc.connectAttr(mlt2 + '.output', joint.fullPathName() + '.translate')
-                    mc.connectAttr(pb + '.outRotate', joint.fullPathName() + '.rotate')
-                except:
-                    mc.warning("Can not connect to " + joint.fullPathName())
-                return pb
-
-
-            def joint_global_scale( joint ):
-                joint_long = self.find_node( self.charRoot, joint )
-                if joint is not None:
-                    # Use the global Scale to make the rig scalable
-                    mlt1 = mc.createNode('multiplyDivide', name=self.short_name( joint_long ) + '_GS_' + SIDE + '_Multi1', ss=True)
-                    mlt2 = mc.createNode('multiplyDivide', name=self.short_name( joint_long ) + '_GS_' + SIDE + '_Multi2', ss=True)
-
-                    self.save_for_cleanup(mlt1)
-                    self.save_for_cleanup(mlt2)
-
-                    mc.connectAttr(self.charRoot + '.globalScale', mlt1 + '.input1X')
-                    mc.connectAttr(self.charRoot + '.globalScale', mlt1 + '.input1Y')
-                    mc.connectAttr(self.charRoot + '.globalScale', mlt1 + '.input1Z')
-
-                    # Neutralize global scale, non-one values will screw the rig
-                    gs = mc.getAttr(self.charRoot + '.globalScale')
-                    mc.setAttr(mlt1 + '.input2', 1 / gs, 1 / gs, 1 / gs)
-
-                    mc.connectAttr( mlt1 + '.output', mlt2 + '.input1')
-
-                    t = mc.getAttr( joint_long + '.t')[0]
-                    mc.setAttr( mlt2 + '.input2', t[0], t[1], t[2])
-                    mc.connectAttr(mlt2 + '.output', joint_long + '.translate', force=True )
-
-            ############################################################################################################
-            # Sides
-
-            for SIDE in ['Lft', 'Rgt']:
-
-                ######################################################################
-                # Leg
-
-                hipsJnt  = joints[ 'Hips_Ctr' ]
-                legUpJnt = joints[ 'LegUp_' + SIDE  ]
-                legLoJnt = joints[ 'LegLo_' + SIDE  ]
-                footJnt  = joints[ 'Foot_'  + SIDE  ]
-                toesJnt  = joints[ 'Toes_'  + SIDE  ]
-                hipsCtrl = controls['Hips_Ctr_Ctrl']
-
-                ikName   = 'LegIKHandle_' + SIDE
-                #poleVec  = 'LegPole_IK_' + SIDE + '_Ctrl'
-                footLift = controls['FootLift_IK_' + SIDE + '_Ctrl']
-                ik_attr  = 'FK_IK'
-
-                side=sides[0]
-                if SIDE == 'Rgt':
-                    side=sides[1]
-
-                blue = 1
-                red = 0
-                green = 0
-
-                if SIDE == 'Rgt':
-                    blue = 0
-                    red = 1
-
-                ########################################
-                # IK
-                # IK Loc
-                ik_loc = mc.createNode('locator', parent=controls['LegUp_FK_' + SIDE + '_Ctrl'].fullPathName(), name='Leg_IK_' + SIDE)
-                ik_loc = self.get_path( ik_loc )
-                iks['Leg_IK_' + SIDE] = ik_loc
-                mc.setAttr(ik_loc.fullPathName() + '.localScale', 0, 0, 0)
-                mc.addAttr(ik_loc.fullPathName(), longName=ik_attr, min=0, max=1, at='float', defaultValue=1)
-                mc.setAttr(ik_loc.fullPathName() + '.' + ik_attr, k=True)
-
-                # Hide Attrs
-                for attr in ['localScale', 'localPosition']:
-                    for axis in ['X', 'Y', 'Z']:
-                        mc.setAttr(ik_loc.fullPathName() + '.' + attr + axis, cb=False)
-
-                for node in [ 'LegLo_FK_' + SIDE + '_Ctrl', 'Foot_FK_' + SIDE + '_Ctrl', 'Foot_IK_' + SIDE + '_Ctrl',
-                             'FootLift_IK_' + SIDE + '_Ctrl', 'Toes_IK_' + SIDE + '_Ctrl',
-                             'ToesTip_IK_' + SIDE + '_Ctrl', 'LegPole_IK_' + SIDE + '_Ctrl',
-                             'Heel_IK_' + SIDE + '_Ctrl']:
-                    if node in controls:
-                        mc.parent( ik_loc.fullPathName(), controls[node].fullPathName(), add=True, shape=True)
-
-                # IK Grp
-                if self.DEBUG:
-                    print ( 'IK Grp')
-                ik_nul = mc.createNode('transform', name='legIK_' + SIDE + '_Grp', parent=hipsCtrl.fullPathName())
-                mc.setAttr( ik_nul + '.v', 0 )
-                mc.matchTransform(ik_nul, hipsJnt.fullPathName())
-
-                if type == kBiped:
-                    legUpJntIK_jnt_name = legUpJnt.partialPathName().replace( '_' + SIDE, '_IK_' + SIDE )
-                    legLoJntIK_jnt_name = legLoJnt.partialPathName().replace( '_' + SIDE, '_IK_' + SIDE )
-                    footJntIK_jnt_name  = footJnt.partialPathName().replace( '_' + SIDE, '_IK_' + SIDE )
-                    toesJntIK_jnt_name  = toesJnt.partialPathName().replace( '_' + SIDE, '_IK_' + SIDE )
-
-                elif type == kBipedUE:
-                    legUpJntIK_jnt_name = legUpJnt.partialPathName().replace( '_' + side, '_IK_' + side )
-                    legLoJntIK_jnt_name = legLoJnt.partialPathName().replace( '_' + side, '_IK_' + side )
-                    footJntIK_jnt_name  = footJnt.partialPathName().replace( '_' + side, '_IK_' + side )
-                    toesJntIK_jnt_name  = toesJnt.partialPathName().replace( '_' + side, '_IK_' + side )
-
-                legUpJntIK = self.joint_copy( legUpJnt, legUpJntIK_jnt_name, ik_nul     )
-                legLoJntIK = self.joint_copy( legLoJnt, legLoJntIK_jnt_name, legUpJntIK )
-                footJntIK  = self.joint_copy( footJnt,  footJntIK_jnt_name,  legLoJntIK )
-                toesJntIK  = self.joint_copy( toesJnt,  toesJntIK_jnt_name,  footJntIK  )
-
-                mc.parentConstraint( controls['Toes_IK_{}_Ctrl'.format(SIDE)].fullPathName(), toesJntIK.fullPathName(), mo=True, skipTranslate=['x','y','z'] )
-
-                ########################################################################################################
-                #
-                # Pole vector Position
-
-                pole_matrix = self.get_polevector_position( legUpJntIK, legLoJntIK, footJntIK, leg_preferred_angle )
-
-                parent = mc.listRelatives( controls[ 'LegPole_IK_' + SIDE + '_Ctrl' ].fullPathName(), p=True, pa=True )[ 0 ]
-                parent = mc.listRelatives( parent, p = True, pa=True )[ 0 ]
-
-                self.set_matrix( parent, pole_matrix, kWorld )
-
-                for attr in [ 'tx', 'ty', 'tz', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz' ]:
-                    mc.setAttr( parent + '.' + attr, l = True )
-
-                # Pole vector Position
-                #
-                ########################################################################################################
-
-                if type == kBiped:
-                    hipsJntFK_jnt_name  = hipsJnt.partialPathName().replace( '_Jnt' , '_FK_Jnt' )
-                    legUpJntFK_jnt_name = legUpJnt.partialPathName().replace( '_' + SIDE, '_FK_' + SIDE )
-                    legLoJntFK_jnt_name = legLoJnt.partialPathName().replace( '_' + SIDE, '_FK_' + SIDE )
-                    footJntFK_jnt_name  = footJnt.partialPathName().replace( '_' + SIDE, '_FK_' + SIDE )
-                    toesJntFK_jnt_name  = toesJnt.partialPathName().replace( '_' + SIDE, '_FK_' + SIDE )
-                elif type == kBipedUE:
-                    # Proxy FK Joints
-                    hipsJntFK_jnt_name  = hipsJnt.partialPathName() + '_FK'
-                    legUpJntFK_jnt_name = legUpJnt.partialPathName().replace( '_' + side, '_FK_' + side )
-                    legLoJntFK_jnt_name = legLoJnt.partialPathName().replace( '_' + side, '_FK_' + side )
-                    footJntFK_jnt_name  = footJnt.partialPathName().replace( '_' + side, '_FK_' + side )
-                    toesJntFK_jnt_name  = toesJnt.partialPathName().replace( '_' + side, '_FK_' + side )
-
-                if SIDE == 'Lft':
-                    hipsJntFK  = self.joint_copy( hipsJnt,  hipsJntFK_jnt_name,  prx_grp     )
-                    save_for_cleanup( hipsJntFK.fullPathName() )
-
-                legUpJntFK = self.joint_copy( legUpJnt, legUpJntFK_jnt_name, hipsJntFK   )
-                legLoJntFK = self.joint_copy( legLoJnt, legLoJntFK_jnt_name, legUpJntFK  )
-                footJntFK  = self.joint_copy( footJnt,  footJntFK_jnt_name,  legLoJntFK  )
-                toesJntFK  = self.joint_copy( toesJnt,  toesJntFK_jnt_name,  footJntFK   )
-
-                mc.parentConstraint( controls['Hips_Ctr_Ctrl'].fullPathName(),          hipsJntFK.fullPathName(),  mo=True )
-                mc.parentConstraint( controls['LegUp_FK_'+SIDE+'_Ctrl'].fullPathName(), legUpJntFK.fullPathName(), mo=True )
-                mc.parentConstraint( controls['LegLo_FK_'+SIDE+'_Ctrl'].fullPathName(), legLoJntFK.fullPathName(), mo=True )
-                mc.parentConstraint( controls['Foot_FK_'+SIDE+'_Ctrl'].fullPathName(),  footJntFK.fullPathName(),  mo=True )
-                mc.parentConstraint( controls['Toes_FK_'+SIDE+'_Ctrl'].fullPathName(),  toesJntFK.fullPathName(),  mo=True )
-
-                # Visibility based on IK/FK mode
-                rev = mc.createNode( 'reverse', name=self.short_name( ik_loc.partialPathName() ) +'_rev', ss=True  )
-                mc.connectAttr( ik_loc.fullPathName() + '.' + ik_attr, rev + '.inputX')
-
-                for ctl in [ 'LegUp_FK_' + SIDE + '_Ctrl', 'LegLo_FK_' + SIDE + '_Ctrl', 'Foot_FK_' + SIDE + '_Ctrl', 'Toes_FK_' + SIDE + '_Ctrl' ]:
-                    mc.connectAttr( rev + '.outputX', controls[ctl].fullPathName() + '.v')
-
-                for ctl in [ 'Foot_IK_' + SIDE + '_Ctrl', 'FootLift_IK_' + SIDE + '_Ctrl', 'Heel_IK_' + SIDE + '_Ctrl', 'Toes_IK_' + SIDE + '_Ctrl', 'ToesTip_IK_' + SIDE + '_Ctrl' ]:
-                    mc.connectAttr( ik_loc.fullPathName() + '.' + ik_attr, controls[ctl].fullPathName() + '.v')
-
-
-                # IK Handle
-                mc.orientConstraint( controls['FootLift_IK_'+SIDE+'_Ctrl'].fullPathName(), footJntIK, mo=True)
-                mc.setAttr( legLoJntIK.fullPathName() + '.preferredAngle',leg_preferred_angle[0], leg_preferred_angle[1], leg_preferred_angle[2] )
-                ik = mc.ikHandle(n=ikName, sj=legUpJntIK.fullPathName(), ee=footJntIK.fullPathName() )
-
-
-                ikHandle = '|'+ik[0]
-                effector = ik[1]
-                mc.poleVectorConstraint( controls['LegPole_IK_'+SIDE+'_Ctrl'].fullPathName(), ikHandle )
-                mc.setAttr(ikHandle + '.v', 0)
-                mc.setAttr(ikHandle + '.snapEnable', False)
-                mc.setAttr(ikHandle + '.stickiness', True)
-
-                mc.parent( ikHandle, controls['FootLift_IK_'+SIDE+'_Ctrl'].fullPathName() )
-
-                # IK
-                ########################################
-
-                hook_up_fk( legUpJnt, legUpJntIK, legUpJntFK, ik_loc,  'LegUp' )
-                hook_up_fk( legLoJnt, legLoJntIK, legLoJntFK, ik_loc,  'LegLo' )
-                hook_up_fk( footJnt,  footJntIK,  footJntFK,  ik_loc,  'Foot'  )
-                hook_up_fk( toesJnt,  toesJntIK,  toesJntFK,  ik_loc,  'Toes'  )
-
-                joint_global_scale( self.find_node( self.charRoot, 'Heel_'+SIDE+'_Jnt'    ))
-                joint_global_scale( self.find_node( self.charRoot, 'ToesTip_'+SIDE+'_Jnt' ))
-                joint_global_scale( self.find_node( self.charRoot, 'Eye_'+SIDE+'_Jnt'     ))
-
-                if SIDE == 'Lft':
-                    joint_global_scale( self.find_node( self.charRoot, 'Head_Jnt_Tip' ))
-                    joint_global_scale( self.find_node( self.charRoot, 'Jaw_Jnt'      ))
-                    joint_global_scale( self.find_node( self.charRoot, 'Jaw_Jnt_Tip'  ))
-
-                mc.setAttr (  ik_loc.fullPathName() + '.FK_IK', 1)
-
-                # Space Switch
-
-                feet_iks = [ controls[ 'Foot_IK_'+SIDE+'_Ctrl' ] ]
-
-                root_path = self.get_path(self.charRoot)
-
-                for node in feet_iks:
-                    self.create_multi_space_switch(
-                        node,
-                        [ controls[ 'Main_Ctr_Ctrl'], controls[ 'Hips_Ctr_Ctrl'], controls[ 'Torso_Ctr_Ctrl'], root_path ],
-                        attrName='space',
-                        attrNameList=['Main', 'Hips', 'Torso', 'World']
-                    )
-
-                # Leg
-                ######################################################################
-
-                ######################################################################
-                # Arm
-
-                clavJnt     = joints[ 'Clavicle_' + SIDE  ]
-                armUpJnt    = joints[ 'ArmUp_' + SIDE  ]
-                armLoJnt    = joints[ 'ArmLo_' + SIDE  ]
-                handJnt     = joints[ 'Hand_'  + SIDE  ]
-                main        = controls['Main_Ctr_Ctrl' ]
-                poleVec     = controls['ArmPole_IK_' + SIDE + '_Ctrl']
-                ikName      = 'ArmIKHandle_' + SIDE
-
-                # Clavicle
-                mc.parentConstraint( controls['Clavicle_'+SIDE+'_Ctrl'].fullPathName(), clavJnt, mo=True  )
-
-                # IK Loc
-                ik_loc = mc.createNode('locator', parent=controls['ArmUp_FK_'+SIDE+'_Ctrl'].fullPathName(), name='Arm_IK_' + SIDE)
-                ik_loc = self.get_path( ik_loc )
-                iks['Arm_IK_' + SIDE] = ik_loc
-                mc.setAttr(ik_loc.fullPathName() + '.localScale', 0, 0, 0)
-                mc.addAttr(ik_loc.fullPathName(), longName=ik_attr, min=0, max=1, at='float', defaultValue=0)
-                mc.setAttr(ik_loc.fullPathName() + '.' + ik_attr, k=True)
-
-                # Hide Attrs
-                for attr in ['localScale', 'localPosition']:
-                    for axis in ['X', 'Y', 'Z']:
-                        mc.setAttr(ik_loc.fullPathName() + '.' + attr + axis, cb=False)
-
-                # Parent IK Shape under Ctrl transforms for easy access
-                for node in [ 'ArmLo_FK_' + SIDE + '_Ctrl',
-                              'Hand_FK_' + SIDE + '_Ctrl',
-                              'ArmPole_IK_' + SIDE + '_Ctrl',
-                              'Hand_IK_' + SIDE + '_Ctrl' ]:
-                    mc.parent(ik_loc.fullPathName(), controls[node].fullPathName(), add=True, shape=True)
-
-                clav = controls['Clavicle_'+SIDE+'_Ctrl']
-
-                # Proxy FK Joints
-                if type == kBiped:
-                    clavJntIK_jnt_name  = clavJnt.partialPathName().replace(  '_' + SIDE, '_FK_' + SIDE )
-                    armUpJntIK_jnt_name = armUpJnt.partialPathName().replace( '_' + SIDE, '_FK_' + SIDE )
-                    armLoJntIK_jnt_name = armLoJnt.partialPathName().replace( '_' + SIDE, '_FK_' + SIDE )
-                    handJntIK_jnt_name  = handJnt.partialPathName().replace(  '_' + SIDE, '_FK_' + SIDE )
-
-                    armUpJntIK_jnt_name = armUpJnt.partialPathName().replace( '_' + SIDE, '_IK_' + SIDE )
-                    armLoJntIK_jnt_name = armLoJnt.partialPathName().replace( '_' + SIDE, '_IK_' + SIDE )
-                    handJntIK_jnt_name  = handJnt.partialPathName().replace(  '_' + SIDE, '_IK_' + SIDE )
-
-                elif type == kBipedUE:
-                    clavJntFK_jnt_name  = clavJnt.partialPathName().replace(  '_' + side, '_FK_' + side )
-                    armUpJntFK_jnt_name = armUpJnt.partialPathName().replace( '_' + side, '_FK_' + side )
-                    armLoJntFK_jnt_name = armLoJnt.partialPathName().replace( '_' + side, '_FK_' + side )
-                    handJntFK_jnt_name  = handJnt.partialPathName().replace(  '_' + side, '_FK_' + side )
-
-                    clavJntIK_jnt_name  = clavJnt.partialPathName().replace(  '_' + side, '_IK_' + side )
-                    armUpJntIK_jnt_name = armUpJnt.partialPathName().replace( '_' + side, '_IK_' + side )
-                    armLoJntIK_jnt_name = armLoJnt.partialPathName().replace( '_' + side, '_IK_' + side )
-                    handJntIK_jnt_name  = handJnt.partialPathName().replace(  '_' + side, '_IK_' + side )
-
-                arm_grp = mc.createNode('transform', name='arms_'+SIDE+'_grp', parent=prx_grp, ss=True)
-                mc.setAttr( arm_grp + '.v', False )
-                save_for_cleanup( arm_grp )
-
-                clavJntFK  = self.joint_copy( clavJnt,  clavJntFK_jnt_name, arm_grp       )
-                armUpJntFK = self.joint_copy( armUpJnt, armUpJntFK_jnt_name, clavJntFK   )
-                armLoJntFK = self.joint_copy( armLoJnt, armLoJntFK_jnt_name, armUpJntFK  )
-                handJntFK  = self.joint_copy( handJnt,  handJntFK_jnt_name,  armLoJntFK   )
-
-                armUpJntIK = self.joint_copy( armUpJnt, armUpJntIK_jnt_name, clavJntFK         )
-                armLoJntIK = self.joint_copy( armLoJnt, armLoJntIK_jnt_name, armUpJntIK   )
-                handJntIK  = self.joint_copy( handJnt,  handJntIK_jnt_name, armLoJntIK    )
-
-                mc.parentConstraint( controls['Clavicle_'+SIDE+'_Ctrl'].fullPathName(), clavJntFK.fullPathName(), mo=True  )
-                mc.parentConstraint( controls['ArmUp_FK_'+SIDE+'_Ctrl'].fullPathName(), armUpJntFK.fullPathName(), mo=True )
-                mc.parentConstraint( controls['ArmLo_FK_'+SIDE+'_Ctrl'].fullPathName(), armLoJntFK.fullPathName(), mo=True )
-                mc.parentConstraint( controls['Hand_FK_'+SIDE+'_Ctrl'].fullPathName(), handJntFK.fullPathName(), mo=True )
-
-                # IK Handle
-                mc.setAttr( armLoJntIK.fullPathName()  + '.preferredAngle', 0, 0, -45)
-                ik = mc.ikHandle(n=ikName, sj=armUpJntIK.fullPathName() , ee=handJntIK.fullPathName() , solver ='ikRPsolver' )
-
-                # It seems that the ikHandle command does not yield a unique DAG path
-                ikHandle = '|'+ik[0]
-                effector = ik[1]
-                mc.poleVectorConstraint(  poleVec.fullPathName(), ikHandle )
-                mc.setAttr(ikHandle + '.v', 0)
-                mc.setAttr(ikHandle + '.stickiness', True)
-                mc.setAttr(ikHandle + '.snapEnable', False)
-                mc.parent(ikHandle, controls['Hand_IK_'+SIDE+'_Ctrl'].fullPathName() )
-                #mc.orientConstraint('FootLift_IK_' + SIDE + '_Ctrl', footJntIK, mo=True)
-
-                hook_up_fk( armUpJnt, armUpJntIK,  armUpJntFK, ik_loc,  'ArmUp' )
-                hook_up_fk( armLoJnt, armLoJntIK,  armLoJntFK, ik_loc,  'ArmLo' )
-
-
-                ########################################################################################################
-                #
-                # Pole vector Position
-
-                pole_matrix = self.get_polevector_position( armUpJntIK, armLoJntIK, handJntIK, arm_preferred_angle )
-
-                parent = mc.listRelatives( controls[ 'ArmPole_IK_' + SIDE + '_Ctrl' ].fullPathName(), p=True, pa=True )[ 0 ]
-                parent = mc.listRelatives( parent, p=True, pa=True )[ 0 ]
-
-                self.set_matrix( parent, pole_matrix, kWorld )
-
-                for attr in [ 'tx', 'ty', 'tz', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz' ]:
-                    mc.setAttr( parent + '.' + attr, l = True )
-
-                # Pole vector Position
-                #
-                ########################################################################################################
-
-
-                # Create Switch to orient the hand to the IK Ctrl
-                hand_ctrl =  self.find_node(self.charRoot, 'Hand_FK_'+SIDE+'_Ctrl')
-                hand_parent = mc.listRelatives( hand_ctrl, p=True, pa=True )[0]
-                hand_parent = mc.listRelatives( hand_parent, p=True, pa=True )[0]
-
-                # Make the Hand follow the arm joint for IK/FK Blending
-                for attr in ['tx', 'ty', 'tz', 'rx', 'ry', 'rz']:
-                    mc.setAttr( hand_parent + '.' + attr, l=False)
-
-
-                cnst = mc.parentConstraint(
-                    armLoJnt,
-                    controls['Hand_IK_'+SIDE+'_Ctrl'].fullPathName(),
-                    hand_parent,
-                    mo=True
-                )
-                # Avoids flipping
-                mc.setAttr( cnst[0] + '.interpType', 2)
-
-                alias = mc.parentConstraint( cnst[0], q=True, wal=True )
-
-                mc.addAttr( ik_loc.fullPathName(), longName='lockHandRot', min=0, max=1, dv=0 )
-                mc.setAttr( ik_loc.fullPathName()+ '.lockHandRot', k=True )
-
-                mc.connectAttr( ik_loc.fullPathName()+ '.lockHandRot', cnst[0] + '.' + alias[1] )
-
-                rev = mc.createNode('reverse', ss=True, name=self.short_name( controls['Hand_IK_'+SIDE+'_Ctrl'].fullPathName() )+'_Lock_Rev')
-                mc.connectAttr( ik_loc.fullPathName() + '.lockHandRot', rev + '.inputX' )
-                mc.connectAttr( rev + '.outputX', cnst[0] + '.' + alias[0] )
-
-                mc.parent( hand_parent, controls['Main_Ctr_Ctrl'] )
-
-                hand_space_ctrls = []
-
-                for node in hand_space_switch_list:
-                    hand_space_ctrls.append( controls[node] )
-
-                root_path = self.get_path(self.charRoot)
-
-                # Space Switch
-                for node in [ controls['Hand_IK_'+SIDE+'_Ctrl'], controls['ArmPole_IK_'+SIDE+'_Ctrl'], root_path ]:
-                    self.create_multi_space_switch(
-                        node,
-                        hand_space_ctrls,
-                        attrName='space',
-                        attrNameList=['Main', 'Head', 'Chest', 'Hips', 'Torso', 'World']
-                    )
-                # Hide the attribute on the pole Vector
-                #ArmPoleVecIK_Ctrl[0] = self.find_node( rootNode, ArmPoleVecIK_Ctrl[0] )
-                mc.setAttr ( controls['ArmPole_IK_'+SIDE+'_Ctrl'].fullPathName() + '.space', k=False )
-
-                # Connect the Hand Ik to the PoleVec space to have matching spaces
-                #HandIK_Ctrl[0] = self.find_node( rootNode, HandIK_Ctrl[0] )
-                mc.connectAttr(
-                    controls['Hand_IK_'+SIDE+'_Ctrl'].fullPathName() + '.space',
-                    controls['ArmPole_IK_'+SIDE+'_Ctrl'].fullPathName() + '.space'
-                )
-
-                # Visibility based on IK/FK mode
-                rev = mc.createNode( 'reverse', name=self.short_name( ik_loc.fullPathName() )+'_rev', ss=True  )
-                mc.connectAttr( ik_loc.fullPathName() + '.' + ik_attr, rev + '.inputX')
-
-                for node in [
-                    controls['ArmUp_FK_' + SIDE + '_Ctrl'],
-                    controls['ArmLo_FK_' + SIDE + '_Ctrl']
-                ]:
-                    node = mc.listRelatives( node.fullPathName(), p=True, pa=True )[0]
-                    mc.setAttr( node + '.v', l=False )
-                    mc.connectAttr( rev + '.outputX', node + '.v')
-
-                for node in [ controls['Hand_IK_'+SIDE+'_Ctrl'], controls['ArmPole_IK_'+SIDE+'_Ctrl']]:
-                    mc.setAttr( node.fullPathName() + '.v', l=False )
-                    mc.connectAttr(  ik_loc.fullPathName() + '.' + ik_attr, node.fullPathName() + '.v' )
-
-                # Arm
-                ######################################################################
-
-            #######################################################################
-            #
-            # World Orient
-            if self.DEBUG:
-                print ('Create Orients')
-
-            for SIDE in ['Lft', 'Rgt']:
-                armUp = self.find_node( rootNode, 'ArmUp_FK_' + SIDE + '_Ctrl' )
-                self.build_world_orient( armUp, controls['Main_Ctr_Ctrl'], 1)
-
-            self.build_world_orient( controls['Head_Ctr_Ctrl'], controls['Main_Ctr_Ctrl'], 1)
-
-            for node in ['Spine1_Ctr_Ctrl', 'Spine2_Ctr_Ctrl', 'Spine3_Ctr_Ctrl', 'Chest_Ctr_Ctrl']:
-                node = self.find_node( rootNode, node )
-                self.build_world_orient( node, controls['Main_Ctr_Ctrl'], 0 )
-
-            # World Orient
-            #
             #######################################################################
             #
             # Meta Data
@@ -11376,7 +10913,6 @@ class Quadruped( Char ):
                 print ('Create Meta Data')
 
             def set_data ( handles, data ):
-
                 for handle in handles:
                     self.set_metaData(handle, data)
 
@@ -11384,49 +10920,65 @@ class Quadruped( Char ):
 
                 data = {}
                 data['Type'] = kHandle
+                data['Mirror'] = kBasic
 
                 if SIDE == 'Rgt':
                     data['Side'] = kRight
                 else:
                     data['Side'] = kLeft
 
-                handles = [ iks['Arm_IK_'+SIDE], iks['Leg_IK_'+SIDE] ]
-
+                handles = [ self.controls['Eye_'+SIDE+'_Ctrl'] ]
                 set_data( handles, data )
 
                 data['Mirror'] = kSymmetricRotation
 
                 handles = []
 
-                for ctl in controls.keys():
-                    if SIDE in ctl:
-                        handles.append( controls[ctl] )
+                for ctl in self.controls.keys():
+                    if SIDE in ctl and 'Foot' in ctl:
+                        handles.append( self.controls[ctl] )
 
                 set_data(  handles, data )
 
                 handles = [
-                    controls['LegPole_IK_'+SIDE+'_Ctrl'],
-                    controls['ShoulderUpVec_'+SIDE+'_Ctrl'],
-                    controls['Hand_IK_'+SIDE+'_Ctrl'],
-                    controls['ArmPole_IK_'+SIDE+'_Ctrl'],
-                    controls['HipsUpVec_'+SIDE+'_Ctrl']
+                    self.controls['ForeLegPole_IK_'+SIDE+'_Ctrl'],
+                    self.controls['HindLegPole_IK_'+SIDE+'_Ctrl']
                 ]
-
                 set_data(  handles, data )
 
+                # ForeLeg
                 data['Mirror'] = kBasic
-                data['Limb'] = 'Leg'
+                data['Limb'] = 'ForeLeg'
                 data['Kinematic'] = 'IK'
-                handles_ik = [controls['Foot_IK_'+SIDE+'_Ctrl'], controls['LegPole_IK_'+SIDE+'_Ctrl'] ]
+                handles_ik = [self.controls['ForeFoot_IK_'+SIDE+'_Ctrl'], self.controls['ForeLegPole_IK_'+SIDE+'_Ctrl'] ]
                 set_data(  handles_ik, data )
 
                 data['Mirror'] = kSymmetricRotation
-                handles_ik = [controls['FootLift_IK_'+SIDE+'_Ctrl'],  controls['Toes_IK_'+SIDE+'_Ctrl'], controls['ToesTip_IK_'+SIDE+'_Ctrl'], controls['Heel_IK_'+SIDE+'_Ctrl'] ]
+                data['Kinematic'] = 'FK'
 
+                handles_fk = [self.controls['Scapula_FK_'+SIDE+'_Ctrl'],
+                              self.controls['Humerus_FK_'+SIDE+'_Ctrl'],
+                              self.controls['Radius_FK_'+SIDE+'_Ctrl'],
+                              self.controls['ForeCannon_FK_'+SIDE+'_Ctrl'],
+                              self.controls['ForePastern_FK_'+SIDE+'_Ctrl'],
+                              self.controls['ForeHoof_FK_'+SIDE+'_Ctrl'] ]
+
+                set_data( handles_fk, data )
+
+                # HindLeg
+                data['Limb'] = 'HindLeg'
+                data['Kinematic'] = 'IK'
+                handles_ik = [self.controls['HindFoot_IK_'+SIDE+'_Ctrl'], self.controls['HindLegPole_IK_'+SIDE+'_Ctrl'] ]
                 set_data(  handles_ik, data )
 
+                data['Mirror'] = kSymmetricRotation
                 data['Kinematic'] = 'FK'
-                handles_fk = [controls['LegUp_FK_'+SIDE+'_Ctrl'], controls['LegLo_FK_'+SIDE+'_Ctrl'], controls['Foot_FK_'+SIDE+'_Ctrl'], controls['Toes_FK_'+SIDE+'_Ctrl'] ]
+
+                handles_fk = [self.controls['Femur_FK_'+SIDE+'_Ctrl'],
+                              self.controls['Fibula_FK_'+SIDE+'_Ctrl'],
+                              self.controls['HindCannon_FK_'+SIDE+'_Ctrl'],
+                              self.controls['HindPastern_FK_'+SIDE+'_Ctrl'],
+                              self.controls['HindHoof_FK_'+SIDE+'_Ctrl']  ]
 
                 set_data( handles_fk, data )
 
@@ -11434,9 +10986,9 @@ class Quadruped( Char ):
             data['Mirror'] = kBasic
 
             handles_Ctr = []
-            for ctl in controls.keys():
+            for ctl in self.controls.keys():
                 if '_Ctr_' in ctl:
-                    handles_Ctr.append( controls[ctl] )
+                    handles_Ctr.append( self.controls[ctl] )
 
             set_data(  handles_Ctr, data )
 
@@ -11445,8 +10997,9 @@ class Quadruped( Char ):
             data['Type'] = kMain
             data['Side'] = kCenter
 
-            self.set_metaData( controls['Main_Ctr_Ctrl'], data)
+            self.set_metaData( self.controls['Main_Ctr_Ctrl'], data)
 
+            return
             # Meta Data
             #
             ##################################################################################################
@@ -11650,12 +11203,15 @@ class Quadruped( Char ):
 
         return aim, autorot_grp, up_obj
 
-
     def build_hoof_groups(self, DIR, SIDE):
         """
         Creates a number of groups need for the hoof to pivot in a various directions
         Returns the groups as a dictionary
         """
+        def mirror_grp( grp ):
+            m = self.get_matrix( grp, kWorld )
+            mirror = self.mirror_matrix(m, space=kWorld )
+            self.set_matrix( grp, mirror )
         grps = {}
         grps['ctr'] = mc.createNode('transform',
                                 name=DIR + 'FootCtr_' + SIDE + '_Grp',
@@ -11663,6 +11219,9 @@ class Quadruped( Char ):
                                 ss=True)
         hoof_tip_guide = self.find_node(self.charRoot, DIR + 'HoofFront_Lft_Guide')
         mc.matchTransform(grps['ctr'] , hoof_tip_guide, pos=True, rot=False)
+
+        if SIDE == 'Rgt':
+            mirror_grp( grps['ctr'],  )
 
         # Move to X=0
         mc.move(0, grps['ctr'] , a=True, y=True)
@@ -11675,6 +11234,9 @@ class Quadruped( Char ):
         back_guide = self.find_node(self.charRoot, DIR + 'HoofBack_Lft_Guide')
         mc.matchTransform(grps['back'], back_guide)
 
+        if SIDE == 'Rgt':
+            mirror_grp(grps['back'])
+
         # In Grp
         grps['in'] = mc.createNode('transform',
                                name=DIR + 'FootIn_' + SIDE + '_Grp',
@@ -11682,6 +11244,9 @@ class Quadruped( Char ):
                                ss=True)
         in_guide = self.find_node(self.charRoot, DIR + 'HoofIn_Lft_Guide')
         mc.matchTransform(grps['in'], in_guide)
+
+        if SIDE == 'Rgt':
+            mirror_grp(grps['in'])
 
         # Out Grp
         grps['out'] = mc.createNode('transform',
@@ -11691,6 +11256,9 @@ class Quadruped( Char ):
         out_guide = self.find_node(self.charRoot, DIR + 'HoofOut_Lft_Guide')
         mc.matchTransform(grps['out'], out_guide)
 
+        if SIDE == 'Rgt':
+            mirror_grp(grps['out'])
+
         # Front Grp
         grps['front'] = mc.createNode('transform',
                                   name=DIR + 'FootFront_' + SIDE + '_Grp',
@@ -11699,6 +11267,9 @@ class Quadruped( Char ):
         front_guide = self.find_node(self.charRoot, DIR + 'HoofFront_Lft_Guide')
         mc.matchTransform(grps['front'], front_guide)
 
+        if SIDE == 'Rgt':
+            mirror_grp(grps['front'])
+
         # Fetlock Grp
         grps['fetlock'] = mc.createNode('transform',
                                     name=DIR + 'Fetlock_' + SIDE + '_Grp',
@@ -11706,6 +11277,22 @@ class Quadruped( Char ):
                                     ss=True)
         hoof_guide = self.find_node(self.charRoot, DIR + 'Hoof_Lft_Guide')
         mc.matchTransform(grps['fetlock'], hoof_guide, pos=True, rot=False)
+
+        # Pastern Grp
+        grps['pastern'] = mc.createNode('transform',
+                                    name=DIR + 'Pastern_' + SIDE + '_Grp',
+                                    parent=grps['fetlock'],
+                                    ss=True)
+        pastern_guide = self.find_node(self.charRoot, DIR + 'Pastern_Lft_Guide')
+        mc.matchTransform(grps['pastern'], pastern_guide, pos=True, rot=True)
+
+        # Fetlock Grp
+        grps['fetlock2'] = mc.createNode('transform',
+                                    name=DIR + 'Fetlock2_' + SIDE + '_Grp',
+                                    parent=grps['pastern'],
+                                    ss=True)
+        hoof_guide = self.find_node(self.charRoot, DIR + 'Hoof_Lft_Guide')
+        mc.matchTransform(grps['fetlock2'], hoof_guide, pos=True, rot=True)
 
         return grps
 
@@ -11727,7 +11314,7 @@ class Quadruped( Char ):
         mc.setAttr(ikHandle + '.v', 0)
         mc.setAttr(ikHandle + '.snapEnable', False)
         mc.setAttr(ikHandle + '.stickiness', True)
-        ikHandle = mc.parent(ikHandle, grps['fetlock'])[0]
+        ikHandle = mc.parent(ikHandle, grps['pastern'])[0]
         mc.orientConstraint(ikHandle, ik_joints[2].fullPathName(), mo=True)
 
         ik_foot_ctl = self.controls[DIR+'Foot_IK_' + SIDE + '_Ctrl'].fullPathName()
@@ -11750,7 +11337,14 @@ class Quadruped( Char ):
         mc.connectAttr(ik_foot_ctl + '.fetlockLean', grps['fetlock'] + '.rz')
         mc.connectAttr(ik_foot_ctl + '.fetlockTwist', grps['fetlock'] + '.ry')
 
-        mc.connectAttr(ik_foot_ctl + '.hoofTwist', grps['ctr'] + '.ry')
+        if SIDE == 'Lft':
+            mc.connectAttr(ik_foot_ctl + '.hoofTwist', grps['ctr'] + '.ry')
+        else:
+            mult = mc.createNode( 'multDL', name=DIR + 'LegIK_twist_mult', ss=True )
+            mc.connectAttr(ik_foot_ctl + '.hoofTwist', mult + '.input1')
+            mc.setAttr(mult + '.input2', -1)
+            mc.connectAttr(mult + '.output', grps['ctr'] + '.ry')
+
         mc.connectAttr(ik_foot_ctl + '.hoofRoll', grps['front'] + '.rx')
         mc.connectAttr(ik_foot_ctl + '.hoofRoll', grps['back'] + '.rx')
         mc.connectAttr(ik_foot_ctl + '.hoofLean', grps['in'] + '.rz')
@@ -11839,6 +11433,11 @@ class Quadruped( Char ):
         ctl_grp2 = self.get_grandparent(self.controls[DIR+'Pastern_FK_' + SIDE + '_Ctrl'])
         mc.connectAttr(comp2 + '.outputMatrix', ctl_grp2 + '.offsetParentMatrix')
 
+        # This helps keeping the hoof oriented when the fetlock roll etc attributes are used
+        mc.orientConstraint( grps['front'], grps['fetlock2'], mo=True )
+        blend_grp = mc.listRelatives( self.controls[DIR+'Hoof_FK_' + SIDE + '_Ctrl'], p=True, pa=True )[0]
+        mc.connectAttr( grps['fetlock2'] + '.r', blend_grp+'.r')
+
     def connect_spine_joints(self, rootNode, outputs2):
         joint_count = len(outputs2)
         jnt = self.find_node(rootNode, 'Pelvis_Jnt')
@@ -11913,6 +11512,7 @@ class Quadruped( Char ):
 
         """
         Creates an advanced spline IK using cMuscle that has stretch/no stretch and can be controlled from both ends.
+        The concept is based on works by Paween Sarachan.
         """
         self.charRoot = rootNode
         main_grp = mc.createNode('transform', name=f'{name}_{no}_Grp', ss=True)
@@ -12093,24 +11693,24 @@ connectAttr -f condition1.outColorR Spine_1_0_blend2.color2R;
         return main_grp, outputs2
 
     def toggle_state(self, rootNode, rigState):
-
+        self.charRoot = rootNode
         # Switch to Guide Mode
         if rigState == kRigStateControl:
-            pass
+            spine_grp = self.find_node(rootNode, 'Spine_1_Grp')
+
+            children = mc.listRelatives( spine_grp, children=True, pa=True) or []
+            # Find the curve info node that does not get deleted automatically
+            for child in children:
+                if 'ProxyCurve' in child:
+                    con = mc.listConnections( child + '.worldSpace[0]', d=True, s=False) or None
+                    if con:
+                        mc.delete(con)
+            if spine_grp:
+                mc.delete( spine_grp )
+            self.connect_guide_controls()
         else:
             pass
 
-
-        spine_grp = self.find_node(rootNode, 'Spine_1_Grp')
-
-        children = mc.listRelatives( spine_grp, children=True, pa=True)
-        # Find the curve info node that does not get deleted automatically
-        for child in children:
-            if 'ProxyCurve' in child:
-                con = mc.listConnections( child + '.worldSpace[0]', d=True, s=False) or None
-                if con:
-                    mc.delete(con)
-        mc.delete( spine_grp )
 
     def switch_fkik(self, **kwargs):
 
@@ -12134,7 +11734,13 @@ connectAttr -f condition1.outColorR Spine_1_0_blend2.color2R;
         if side == 'Rgt':
             side_UE = 'r'
 
-        # TODO: Make sure rig is in control mode
+        data = self.get_metaData(char)
+
+        if 'RigState' in data:
+            state = data['RigState']
+            if state != kRigStateControl:
+                mc.warning('AniMeta: Rig needs to be in control mode to switch between IK and FK')
+                return
 
         if char and limb and side:
 
@@ -12363,6 +11969,737 @@ connectAttr -f condition1.outColorR Spine_1_0_blend2.color2R;
             parent_controller( 'Heel_IK_'     + side + '_Ctrl', 'Foot_IK_'     + side + '_Ctrl' )
             parent_controller( 'LegPole_IK_'  + side + '_Ctrl', 'Foot_IK_'     + side + '_Ctrl' )
 
+    def create_guides(self, charRoot=None):
+        print( 'QUAD build_body_guides')
+        if not charRoot:
+            charRoot = self.get_active_char()
+        self.charRoot = charRoot
+        metaData = {}
+
+        if not self.charRoot:
+            mc.warning('Please select a Biped Root Group.')
+        else:
+            metaData = self.get_metaData(self.charRoot)
+
+            metaData['RigState'] = kRigStateGuide
+
+            # Set Default Rig Display options to be used when the rig is switched to control mode
+            if 'RigDisplay' not in metaData:
+                metaData['RigDisplay'] = {'display_Joint': 1, 'show_Rig': 1, 'show_Joints': 0, 'show_Guides': 0,
+                                          'display_Geo': 2}
+
+            self.set_metaData(self.charRoot, metaData)
+
+            meta_data = {}
+            meta_data['Type'] = kBodyGuide
+
+            guidesGrp = self.find_node(self.charRoot, 'Guides_Grp')
+            guideGrp = self.find_node(self.charRoot, 'Guides_Body_Grp')
+
+            if guideGrp is None:
+                guideGrp = mc.createNode('transform', name='Guides_Body_Grp', ss=True, parent=guidesGrp)
+
+            attrList = ['sx', 'sy', 'sz', 'v']
+
+            guideDict = {}
+
+            guide_data = self.get_guide_data()
+            guide_list = self.get_guide_list()
+            guide_sfx = '_Guide'
+
+            guides = self.build_guide_controls(guide_data=guide_data, guide_list=guide_list)
+
+            # Move Guides that have no direct constraints
+            src = self.find_node(self.charRoot, 'COG_Guide')
+            grp = self.get_parent(src)
+            dst = self.find_node(self.charRoot, 'Spine4_Jnt')
+            mc.matchTransform(grp, dst)
+
+            src = self.find_node(self.charRoot, 'Pelvis_Guide')
+            grp = self.get_parent(src)
+            dst = self.find_node(self.charRoot, 'Pelvis_Jnt')
+            mc.matchTransform(grp, dst)
+
+            src = self.find_node(self.charRoot, 'Chest_Guide')
+            grp = self.get_parent(src)
+            dst = self.find_node(self.charRoot, 'Chest_Jnt')
+            mc.matchTransform(grp, dst)
+
+            print( 'position pole Vecs' )
+
+            # Position IK Poles
+            offset = 40
+            src = self.find_node(self.charRoot, 'ForeLegPole_Lft_Guide')
+            grp = self.get_parent(src)
+            dst = self.find_node(self.charRoot, 'ForeCannon_Lft_Guide')
+            mc.matchTransform(grp, dst, pos=True, rot=False)
+            mc.move(0, 0, offset, grp, r=True, ws=True)
+
+            src = self.find_node(self.charRoot, 'HindLegPole_Lft_Guide')
+            grp = self.get_parent(src)
+            dst = self.find_node(self.charRoot, 'HindCannon_Lft_Guide')
+            mc.matchTransform(grp, dst, pos=True, rot=False)
+            mc.move(0, 0, -offset, grp, r=True, ws=True)
+
+            print( 'position hoof guides ' )
+            # Position hoof guides manually, we don't have a joint for them
+            offset = []
+            offset.append([0, 0, 4])
+            offset.append([0, 0, 12])
+            offset.append([-4, 0, 8])
+            offset.append([4, 0, 8])
+            for i, DIR in enumerate(['Back', 'Front', 'In', 'Out']):
+                for prefix in ['Fore', 'Hind']:
+                    foreHoof_guide = self.find_node(self.charRoot, prefix + 'Hoof' + DIR + '_Lft_Guide')
+                    foot_guide = self.find_node(self.charRoot, prefix + 'Pastern_Lft_Guide')
+
+                    mc.matchTransform(foreHoof_guide, foot_guide, pos=True, rot=False)
+                    pos = mc.xform(foreHoof_guide, q=True, ws=True, t=True)
+                    if mc.upAxis(query=True, axis=True) == 'y':
+                        pos[1] = 0
+                    else:
+                        pos[2] = 0
+                    mc.xform(foreHoof_guide, ws=True, t=pos)
+                    mc.xform(foreHoof_guide, t=offset[i], relative=True, objectSpace=True)
+
+            print( 'Make COG Guide bigger' )
+
+            # Make COG Guide bigger
+            cog_guide = self.find_node(self.charRoot, 'COG_Guide')
+            mc.setAttr(cog_guide + '.controlSize', 12)
+
+            # IK Splines
+            in_rot_offset = (90, 0, 0)
+            out_rot_offset = (-90, 0, 0)
+
+            # Spine
+            src = self.find_node(self.charRoot, 'Pelvis_Guide')
+            dst = self.find_node(self.charRoot, 'Chest_Guide')
+
+            count = 9
+
+            main_grp, outputs = Quadruped().create_advanced_spline_ik(name='Spine_Guide',
+                                                                      no=1,
+                                                                      src=src,
+                                                                      dst=dst,
+                                                                      rootNode=self.charRoot,
+                                                                      joint_count=count,
+                                                                      in_rot_offset=in_rot_offset,
+                                                                      out_rot_offset=out_rot_offset)
+            #Quadruped().connect_spine_joints(self.charRoot, outputs)
+
+            for i in range(count):
+                outputs[i] = mc.rename( outputs[i], 'Spine'+str(i+1)+'_Guide')
+                self.set_metaData(outputs[i] , meta_data)
+            mc.parent(main_grp, guideGrp)
+
+            # Neck
+            src = self.find_node(self.charRoot, 'Neck1_Guide')
+            dst = self.find_node(self.charRoot, 'Neck2_Guide')
+            count = 7
+            node, neck = self.create_spline_simple('neck', [src, dst], count, in_rot_offset, out_rot_offset)
+
+            for i in range(count):
+                neck[i] = mc.rename( neck[i], 'Neck'+str(i+1)+'_Guide')
+                self.set_metaData(neck[i] , meta_data)
+
+            neck_grp = mc.createNode('transform', name='Neck_Guides_Grp', parent=guideGrp, ss=True)
+            mc.parent(node, neck, neck_grp)
+
+            # Position Neck FK
+            # temporarily unparent so we can move the neck FK guides around and align them to the neck`s joints
+            head_grp = mc.listRelatives(self.find_node(self.charRoot, 'Head_Guide'), p=True, pa=True)[0]
+            head_parent = mc.listRelatives(head_grp, p=True, pa=True)[0]
+            head_grp = mc.parent(head_grp, w=True)
+
+            src = self.find_node(self.charRoot, 'NeckFK1_Guide')
+            dst = self.find_node(self.charRoot, 'Chest_Guide')
+            mc.matchTransform(src, dst, pos=True, rot=False)
+
+            src = self.find_node(self.charRoot, 'NeckFK2_Guide')
+            dst = self.find_node(self.charRoot, 'Neck2_Jnt')
+            mc.matchTransform(src, dst, pos=True, rot=False)
+
+            src = self.find_node(self.charRoot, 'NeckFK3_Guide')
+            dst = self.find_node(self.charRoot, 'Neck4_Jnt')
+            mc.matchTransform(src, dst, pos=True, rot=False)
+
+            src = self.find_node(self.charRoot, 'NeckFK4_Guide')
+            dst = self.find_node(self.charRoot, 'Neck6_Jnt')
+            mc.matchTransform(src, dst, pos=True, rot=False)
+
+            for i in range(4):
+                guide = self.find_node(self.charRoot, 'NeckFK' + str(i + 1) + '_Guide')
+                mc.setAttr(guide + '.controlOffset', 0, 12, 0)
+
+            # reparent the head guide`s group
+            mc.parent(head_grp, head_parent)
+
+            # Tweak em
+            attr = 'tz'
+            t_attrs = ['tx', 'ty', 'tz']
+            length_guides = ['ForeCannon_Lft_Guide',
+                             'Radius_Lft_Guide',
+                             'Humerus_Lft_Guide',
+                             'ForePastern_Lft_Guide',
+                             'ForeHoof_Lft_Guide',
+                             'ForeHoofTip_Lft_Guide',
+                             'HeadTip_Guide',
+                             'JawTip_Guide',
+                             'Fibula_Lft_Guide',
+                             'HindCannon_Lft_Guide',
+                             'HindPastern_Lft_Guide',
+                             'HindHoof_Lft_Guide',
+                             'HindHoofTip_Lft_Guide',
+                             'ForeLegPole_Lft_Guide',
+                             'HindLegPole_Lft_Guide',
+                             'Tail2_Guide',
+                             'Tail3_Guide',
+                             'Tail4_Guide',
+                             'Tail5_Guide',
+                             'Tail6_Guide',
+                             'Tail7_Guide']
+
+            for guide in length_guides:
+                if 'Pole' in guide:
+                    attr = 'ty'
+                else:
+                    attr = 'tz'
+                grp = self.get_parent(guide)
+                length = mc.getAttr(grp + '.' + attr)
+                mc.addAttr(guide, ln='offset', k=True, at='float', dv=length)
+                mc.connectAttr(guide + '.offset', grp + '.' + attr)
+                for t_attr in t_attrs:
+                    # Lock and hide translate attributes
+                    mc.setAttr(guide + '.' + t_attr, l=False)
+                    mc.setAttr(guide + '.' + t_attr, 0)
+                    mc.setAttr(guide + '.' + t_attr, l=True, k=False)
+
+            # Make the Hoof guides stay oriented towards the world
+            for DIR in ['Fore', 'Hind']:
+                guide = self.find_node(self.charRoot, DIR + 'HoofTip_Lft_Guide')
+                grp = mc.createNode('transform', name=DIR + 'Hoof_Guide_Grp', parent=guide)
+                mc.orientConstraint(self.charRoot, grp)
+                for SIDE in ['Back', 'Front', 'In', 'Out']:
+                    guide = self.find_node(self.charRoot, DIR + 'Hoof' + SIDE + '_Lft_Guide')
+                    parent = self.get_parent(guide)
+                    mc.parent(parent, grp)
+
+            self.connect_guide_controls()
+
+    def get_guide_data(self):
+
+        if self.charRoot is None:
+                print('Quadruped.get_guide_data: No char root defined.')
+
+        guide_data = {}
+
+        guide_sfx = '_Guide'
+
+        attrList = ['sx', 'sy', 'sz', 'v']
+        justTzRx = ['tx', 'ty', 'ry', 'rz', 'sx', 'sy', 'sz', 'v']
+        justTzTyRx = ['tx', 'ry', 'rz', 'sx', 'sy', 'sz', 'v']
+
+        guide_grp = self.find_node(self.charRoot, 'Guides_Body_Grp')
+
+        # Center of Gravity
+        #guideList.append(['COG_Guide', None, guideGrp, justTzTyRx])
+        guide_data['COG'] = {
+            'name': 'COG'+guide_sfx,
+            'matchTransform': 'Spine4_Jnt',
+            'parent': guide_grp,
+            'attributes': justTzTyRx
+        }
+        # Pelvis
+        #guideList.append(['Pelvis_Guide', None, 'COG_Guide', justTzTyRx])
+        guide_data['Pelvis'] = {
+            'name': 'Pelvis'+guide_sfx,
+            'matchTransform': 'Pelvis_Jnt',
+            'parent': 'COG'+guide_sfx,
+            'attributes': justTzTyRx
+        }
+        # Chest
+        #guideList.append(['Chest_Guide', None, 'COG_Guide', justTzTyRx])
+        guide_data['Chest'] = {
+            'name': 'Chest'+guide_sfx,
+            'matchTransform': 'Chest_Jnt',
+            'parent': 'COG'+guide_sfx,
+            'attributes': justTzTyRx
+        }
+        # Neck FK 1
+        #guideList.append(['NeckFK1_Guide', None, 'Chest_Guide', justTzTyRx])
+        guide_data['NeckFK1'] = {
+            'name': 'NeckFK1'+guide_sfx,
+            'matchTransform': 'Chest_Jnt',
+            'parent': 'Chest'+guide_sfx,
+            'attributes': justTzTyRx
+        }
+        # Neck FK 2
+        #guideList.append(['NeckFK2_Guide', None, 'NeckFK1_Guide', justTzTyRx])
+        guide_data['NeckFK2'] = {
+            'name': 'NeckFK2'+guide_sfx,
+            'matchTransform': 'Neck2_Jnt',
+            'parent': 'NeckFK1'+guide_sfx,
+            'attributes': justTzTyRx
+        }
+        # Neck FK 3
+        #guideList.append(['NeckFK3_Guide', None, 'NeckFK2_Guide', justTzTyRx])
+        guide_data['NeckFK3'] = {
+            'name': 'NeckFK3'+guide_sfx,
+            'matchTransform': 'Neck3_Jnt',
+            'parent': 'NeckFK2'+guide_sfx,
+            'attributes': justTzTyRx
+        }
+        # Neck FK 4
+        #guideList.append(['NeckFK4_Guide', None, 'NeckFK3_Guide', justTzTyRx])
+        guide_data['NeckFK4'] = {
+            'name': 'NeckFK4'+guide_sfx,
+            'matchTransform': 'Neck4_Jnt',
+            'parent': 'NeckFK3'+guide_sfx,
+            'attributes': justTzTyRx
+        }
+        # Head
+        #guideList.append(['Head_Guide', 'Head_Jnt', 'NeckFK4_Guide', justTzTyRx])
+        guide_data['Head'] = {
+            'name': 'Head'+guide_sfx,
+            'matchTransform': 'Head_Jnt',
+            'parent': 'NeckFK4'+guide_sfx,
+            'constraintNode': 'Head_Jnt',
+            'attributes': justTzTyRx
+        }
+        # HeadTip
+        #guideList.append(['HeadTip_Guide', 'HeadTip_Jnt', 'Head_Guide', justTzRx])
+        guide_data['HeadTip'] = {
+            'name': 'HeadTip'+guide_sfx,
+            'matchTransform': 'HeadTip_Jnt',
+            'parent': 'Head'+guide_sfx,
+            'constraintNode': 'HeadTip_Jnt',
+            'attributes': justTzRx
+        }
+        # Neck 1
+        #guideList.append(['Neck1_Guide', 'Neck1_Jnt', 'Chest_Guide', attrList])
+        guide_data['Neck1'] = {
+            'name': 'Neck1'+guide_sfx,
+            'matchTransform': 'Neck1_Jnt',
+            'parent': 'Chest'+guide_sfx,
+            'constraintNode': 'Neck1_Jnt',
+            'attributes': justTzTyRx
+        }
+        # Neck 2
+        #guideList.append(['Neck2_Guide', 'Neck7_Jnt', 'Head_Guide', attrList])
+        guide_data['Neck2'] = {
+            'name': 'Neck2'+guide_sfx,
+            'matchTransform': 'Neck7_Jnt',
+            'parent': 'Head'+guide_sfx,
+            'constraintNode': 'Neck7_Jnt',
+            'attributes': justTzTyRx
+        }
+        # Jaw
+        #guideList.append(['Jaw_Guide', 'Jaw_Jnt', 'Head_Guide', justTzTyRx])
+        guide_data['Jaw'] = {
+            'name': 'Jaw'+guide_sfx,
+            'matchTransform': 'Jaw_Jnt',
+            'parent': 'Head'+guide_sfx,
+            'constraintNode': 'Jaw_Jnt',
+            'attributes': justTzTyRx
+        }
+        # JawTip
+        #guideList.append(['JawTip_Guide', 'JawTip_Jnt', 'Jaw_Guide', attrList])
+        guide_data['JawTip'] = {
+            'name': 'JawTip'+guide_sfx,
+            'matchTransform': 'JawTip_Jnt',
+            'parent': 'Jaw'+guide_sfx,
+            'constraintNode': 'JawTip_Jnt',
+            'attributes': justTzTyRx
+        }
+        # Tail
+        for i in range(1, 8):
+            attr = justTzRx
+            if i == 1:
+                attr = justTzTyRx
+                parent = 'Pelvis'+guide_sfx
+            else:
+                parent =  'Tail'+str(i-1)+guide_sfx
+
+            guide_data['Tail'+str(i)] = {
+                'name': 'Tail'+str(i)+guide_sfx,
+                'matchTransform': 'Tail'+str(i)+'_Jnt',
+                'parent': parent,
+                'constraintNode': 'Tail'+str(i)+'_Jnt',
+                'attributes': attr
+            }
+        # Femur
+        #guideList.append(['Femur_Lft_Guide', 'Femur_Lft_Jnt', 'Pelvis_Guide', ['sx', 'sy', 'sz', 'v']])
+        guide_data['Femur_Lft'] = {
+            'name': 'Femur_Lft'+guide_sfx,
+            'matchTransform': 'Femur_Lft_Jnt',
+            'parent': 'Pelvis'+guide_sfx,
+            'constraintNode': 'Femur_Lft_Jnt',
+            'attributes': ['sx', 'sy', 'sz', 'v']
+        }
+        # Fibula
+        #guideList.append(['Fibula_Lft_Guide', 'Fibula_Lft_Jnt', 'Femur_Lft_Guide', justTzTyRx])
+        guide_data['Fibula_Lft'] = {
+            'name': 'Fibula_Lft'+guide_sfx,
+            'matchTransform': 'Fibula_Lft_Jnt',
+            'constraintNode': 'Fibula_Lft_Jnt',
+            'parent': 'Femur_Lft'+guide_sfx,
+            'attributes': justTzTyRx
+        }
+        # Cannon
+        #guideList.append(['HindCannon_Lft_Guide', 'HindCannon_Lft_Jnt', 'Fibula_Lft_Guide', justTzTyRx])
+        guide_data['HindCannon_Lft'] = {
+            'name': 'HindCannon_Lft'+guide_sfx,
+            'matchTransform': 'HindCannon_Lft_Jnt',
+            'constraintNode': 'HindCannon_Lft_Jnt',
+            'parent': 'Fibula_Lft'+guide_sfx,
+            'attributes': justTzTyRx
+        }
+
+        # Pastern
+        #guideList.append(['HindPastern_Lft_Guide', 'HindPastern_Lft_Jnt', 'HindCannon_Lft_Guide', justTzTyRx])
+        guide_data['HindPastern_Lft'] = {
+            'name': 'HindPastern_Lft'+guide_sfx,
+            'matchTransform': 'HindPastern_Lft_Jnt',
+            'constraintNode': 'HindPastern_Lft_Jnt',
+            'parent': 'HindCannon_Lft'+guide_sfx,
+            'attributes': justTzTyRx
+        }
+        # Hoof
+        #guideList.append(['HindHoof_Lft_Guide', 'HindHoof_Lft_Jnt', 'HindPastern_Lft_Guide', justTzRx])
+        guide_data['HindHoof_Lft'] = {
+            'name': 'HindHoof_Lft'+guide_sfx,
+            'matchTransform': 'HindHoof_Lft_Jnt',
+            'constraintNode': 'HindHoof_Lft_Jnt',
+            'parent': 'HindPastern_Lft'+guide_sfx,
+            'attributes': justTzTyRx
+        }
+        # Hoof Tip
+        # guideList.append(['HindHoofTip_Lft_Guide', 'HindHoofTip_Lft_Jnt', 'HindHoof_Lft_Guide', justTzRx])
+        guide_data['HindHoofTip_Lft'] = {
+            'name': 'HindHoofTip_Lft'+guide_sfx,
+            'matchTransform': 'HindHoofTip_Lft_Jnt',
+            'constraintNode': 'HindHoofTip_Lft_Jnt',
+            'parent': 'HindHoof_Lft'+guide_sfx,
+            'attributes': justTzTyRx
+        }
+        # Hind Hoof Back
+        # guideList.append(['HindHoofBack_Lft_Guide', 'Heel_Lft_Jnt', 'HindHoof_Lft_Guide', attrList])
+        guide_data['HindHoofBack_Lft'] = {
+            'name': 'HindHoofBack_Lft'+guide_sfx,
+            'parent': 'HindHoof_Lft'+guide_sfx,
+            'attributes': attrList
+        }
+        # Hind Hoof Front
+        # guideList.append(['HindHoofFront_Lft_Guide', 'Heel_Lft_Jnt', 'HindHoof_Lft_Guide', attrList])
+        guide_data['HindHoofFront_Lft'] = {
+            'name': 'HindHoofFront_Lft'+guide_sfx,
+            'parent': 'HindHoof_Lft'+guide_sfx,
+            'attributes': attrList
+        }
+        # Hind Hoof In
+        #guideList.append(['HindHoofIn_Lft_Guide', 'Heel_Lft_Jnt', 'HindHoof_Lft_Guide', attrList])
+        guide_data['HindHoofIn_Lft'] = {
+            'name': 'HindHoofIn_Lft'+guide_sfx,
+            'parent': 'HindHoof_Lft'+guide_sfx,
+            'attributes': attrList
+        }
+        # Hind Hoof Out
+        #guideList.append(['HindHoofOut_Lft_Guide', 'Heel_Lft_Jnt', 'HindHoof_Lft_Guide', attrList])
+        guide_data['HindHoofOut_Lft'] = {
+            'name': 'HindHoofOut_Lft'+guide_sfx,
+            'parent': 'HindHoof_Lft'+guide_sfx,
+            'attributes': attrList
+        }
+        # Hind Leg Pole
+        #guideList.append(['HindLegPole_Lft_Guide', None, 'HindCannon_Lft_Guide', attrList])
+        guide_data['HindLegPole_Lft'] = {
+            'name': 'HindLegPole_Lft'+guide_sfx,
+            'parent': 'HindCannon_Lft'+guide_sfx,
+            'attributes': attrList
+        }
+        # Eyes
+        #guideList.append(['Eye_Lft_Guide', 'Eye_Lft_Jnt', 'Head_Guide', ['sx', 'sy', 'sz', 'v']])
+        guide_data['Eye_Lft'] = {
+            'name': 'Eye_Lft'+guide_sfx,
+            'matchTransform': 'Eye_Lft_Jnt',
+            'parent': 'Head'+guide_sfx,
+            'attributes': attrList
+        }
+        # Ear
+        #guideList.append(['Ear_Lft_Guide', 'Ear_Lft_Jnt', 'Head_Guide', ['sx', 'sy', 'sz', 'v']])
+        guide_data['Ear_Lft'] = {
+            'name': 'Ear_Lft'+guide_sfx,
+            'parent': 'Head'+guide_sfx,
+            'matchTransform': 'Ear_Lft_Jnt',
+            'constraintNode': 'Ear_Lft_Jnt',
+            'attributes': attrList
+        }
+        # EarTip
+        #guideList.append(['EarTip_Lft_Guide', 'EarTip_Lft_Jnt', 'Ear_Lft_Guide', attrList])
+        guide_data['EarTip_Lft'] = {
+            'name': 'EarTip_Lft'+guide_sfx,
+            'parent': 'Ear_Lft'+guide_sfx,
+            'matchTransform': 'EarTip_Lft_Jnt',
+            'constraintNode': 'EarTip_Lft_Jnt',
+            'attributes': attrList
+        }
+        # Scapula
+        #guideList.append( ['Scapula_Lft_Guide', 'Scapula_Lft_Jnt', 'Chest_Guide', ['sx', 'sy', 'sz', 'v']])
+        guide_data['Scapula_Lft'] = {
+            'name': 'Scapula_Lft'+guide_sfx,
+            'matchTransform': 'Scapula_Lft_Jnt',
+            'constraintNode': 'Scapula_Lft_Jnt',
+            'parent': 'Chest'+guide_sfx,
+            'attributes': attrList
+        }
+        # Humerus
+        #guideList.append(['Humerus_Lft_Guide', 'Humerus_Lft_Jnt', 'Scapula_Lft_Guide', justTzRx])
+        guide_data['Humerus_Lft'] = {
+            'name': 'Humerus_Lft'+guide_sfx,
+            'matchTransform': 'Humerus_Lft_Jnt',
+            'constraintNode': 'Humerus_Lft_Jnt',
+            'parent': 'Scapula_Lft'+guide_sfx,
+            'attributes': justTzRx
+        }
+        # Radius
+        #guideList.append(['Radius_Lft_Guide', 'Radius_Lft_Jnt', 'Humerus_Lft_Guide', justTzRx])
+        guide_data['Radius_Lft'] = {
+            'name': 'Radius_Lft'+guide_sfx,
+            'matchTransform': 'Radius_Lft_Jnt',
+            'constraintNode': 'Radius_Lft_Jnt',
+            'parent': 'Humerus_Lft'+guide_sfx,
+            'attributes': justTzRx
+        }
+        # ForeCannon
+        #guideList.append(['ForeCannon_Lft_Guide', 'ForeCannon_Lft_Jnt', 'Radius_Lft_Guide', justTzRx])
+        guide_data['ForeCannon_Lft'] = {
+            'name': 'ForeCannon_Lft'+guide_sfx,
+            'matchTransform': 'ForeCannon_Lft_Jnt',
+            'constraintNode': 'ForeCannon_Lft_Jnt',
+            'parent': 'Radius_Lft'+guide_sfx,
+            'attributes': justTzRx
+        }
+        # ForePastern
+        #guideList.append( ['ForePastern_Lft_Guide', 'ForePastern_Lft_Jnt', 'ForeCannon_Lft_Guide', justTzRx])
+        guide_data['ForePastern_Lft'] = {
+            'name': 'ForePastern_Lft'+guide_sfx,
+            'matchTransform': 'ForePastern_Lft_Jnt',
+            'constraintNode': 'ForePastern_Lft_Jnt',
+            'parent': 'ForeCannon_Lft'+guide_sfx,
+            'attributes': justTzRx
+        }
+        # ForeHoof
+        #guideList.append( ['ForeHoof_Lft_Guide', 'ForeHoof_Lft_Jnt', 'ForePastern_Lft_Guide', justTzRx])
+        guide_data['ForeHoof_Lft'] = {
+            'name': 'ForeHoof_Lft'+guide_sfx,
+            'matchTransform': 'ForeHoof_Lft_Jnt',
+            'constraintNode': 'ForeHoof_Lft_Jnt',
+            'parent': 'ForePastern_Lft'+guide_sfx,
+            'attributes': justTzRx
+        }
+        # ForeHoofTip
+        #guideList.append( ['ForeHoofTip_Lft_Guide', 'ForeHoofTip_Lft_Jnt', 'ForeHoof_Lft_Guide', justTzRx])
+        guide_data['ForeHoofTip_Lft'] = {
+            'name': 'ForeHoofTip_Lft'+guide_sfx,
+            'matchTransform': 'ForeHoofTip_Lft_Jnt',
+            'constraintNode': 'ForeHoofTip_Lft_Jnt',
+            'parent': 'ForeHoof_Lft'+guide_sfx,
+            'attributes': justTzRx
+        }
+        # Fore Hoof Front
+        #guideList.append(['ForeHoofBack_Lft_Guide', 'Heel_Lft_Jnt', 'ForeHoofTip_Lft_Guide', attrList])
+        guide_data['ForeHoofBack_Lft'] = {
+            'name': 'ForeHoofBack_Lft'+guide_sfx,
+            'parent': 'ForeHoof_Lft'+guide_sfx,
+            'attributes': attrList
+        }
+        # Fore Hoof Back
+        #guideList.append(['ForeHoofFront_Lft_Guide', 'Heel_Lft_Jnt', 'ForeHoofTip_Lft_Guide', attrList])
+        guide_data['ForeHoofFront_Lft'] = {
+            'name': 'ForeHoofFront_Lft'+guide_sfx,
+            'parent': 'ForeHoof_Lft'+guide_sfx,
+            'attributes': attrList
+        }
+        # Fore Hoof In
+        #guideList.append(['ForeHoofIn_Lft_Guide', 'Heel_Lft_Jnt', 'ForeHoofTip_Lft_Guide', attrList])
+        guide_data['ForeHoofIn_Lft'] = {
+            'name': 'ForeHoofIn_Lft'+guide_sfx,
+            'parent': 'ForeHoof_Lft'+guide_sfx,
+            'attributes': attrList
+        }
+        # Fore Hoof Out
+        #guideList.append(['ForeHoofOut_Lft_Guide', 'Heel_Lft_Jnt', 'ForeHoofTip_Lft_Guide', attrList])
+        guide_data['ForeHoofOut_Lft'] = {
+            'name': 'ForeHoofOut_Lft'+guide_sfx,
+            'parent': 'ForeHoof_Lft'+guide_sfx,
+            'attributes': attrList
+        }
+        # Fore Leg Pole
+        #guideList.append(['ForeLegPole_Lft_Guide', None, 'ForeCannon_Lft_Guide', attrList])
+        guide_data['ForeLegPole_Lft'] = {
+            'name': 'ForeLegPole_Lft'+guide_sfx,
+            'parent': 'ForeCannon_Lft'+guide_sfx,
+            'attributes': attrList
+        }
+
+        return guide_data
+
+    def get_guide_list(self):
+
+        guide_list = []
+
+        guide_list.append('COG')
+        guide_list.append('Pelvis')
+        guide_list.append('Tail1')
+        guide_list.append('Tail2')
+        guide_list.append('Tail3')
+        guide_list.append('Tail4')
+        guide_list.append('Tail5')
+        guide_list.append('Tail6')
+        guide_list.append('Tail7')
+        guide_list.append('Chest')
+        guide_list.append('NeckFK1')
+        guide_list.append('NeckFK2')
+        guide_list.append('NeckFK3')
+        guide_list.append('NeckFK4')
+        guide_list.append('Head')
+        guide_list.append('HeadTip')
+        guide_list.append('Neck1')
+        guide_list.append('Neck2')
+        # Head
+        guide_list.append('Jaw')
+        guide_list.append('JawTip')
+        guide_list.append('Eye_Lft')
+        guide_list.append('Ear_Lft')
+        guide_list.append('EarTip_Lft')
+        # Hind Leg
+        guide_list.append('Femur_Lft')
+        guide_list.append('Fibula_Lft')
+        guide_list.append('HindCannon_Lft')
+        guide_list.append('HindPastern_Lft')
+        guide_list.append('HindHoof_Lft')
+        guide_list.append('HindHoofTip_Lft')
+        guide_list.append('HindHoofBack_Lft')
+        guide_list.append('HindHoofFront_Lft')
+        guide_list.append('HindHoofIn_Lft')
+        guide_list.append('HindHoofOut_Lft')
+        guide_list.append('HindLegPole_Lft')
+        # Fore Leg
+        guide_list.append('Scapula_Lft')
+        guide_list.append('Humerus_Lft')
+        guide_list.append('Radius_Lft')
+        guide_list.append('ForeCannon_Lft')
+        guide_list.append('ForePastern_Lft')
+        guide_list.append('ForeHoof_Lft')
+        guide_list.append('ForeHoofTip_Lft')
+        guide_list.append('ForeHoofBack_Lft')
+        guide_list.append('ForeHoofFront_Lft')
+        guide_list.append('ForeHoofIn_Lft')
+        guide_list.append('ForeHoofOut_Lft')
+        guide_list.append('ForeLegPole_Lft')
+
+        return guide_list
+
+    def build_guide_controls(self, guide_data={}, guide_list=[]):
+
+        guides = {}
+        ctrl_dict = {}
+        ctrl_dict['character'] = self.charRoot
+        ctrl_dict['globalScale'] = True
+        ctrl_dict['shapeType'] = self.kSphere
+        ctrl_dict['color'] = (1, 0.7, 0)
+        ctrl_dict['radius'] = 2
+
+        meta_data = {}
+        meta_data['Type'] = kBodyGuide
+
+        for guide in guide_list:
+            if guide in guide_data:
+                data = guide_data[guide]
+                guide_dict = copy.deepcopy(ctrl_dict)
+                guide_dict['name'] = data['name']
+                guide_dict['parent'] = data['parent']
+                if 'matchTransform' in data:
+                    guide_dict['matchTransform'] = data['matchTransform']
+                guides[guide] = self.create_control(**guide_dict)
+
+                self.set_metaData(guides[guide], meta_data)
+
+                # Lock redundant attributes
+                for attr in data['attributes']:
+                    mc.setAttr( guides[guide].fullPathName() + '.' + attr, l=True, k=False )
+
+                # Check whether we need to build the right side for a left-sided guide
+                if 'Lft' in guide:
+                    # Right side version of the guide´s name
+                    rgt_name = guide.replace('Lft', 'Rgt')+'_Guide'
+
+                    #######################################################################################
+                    # Create right side guide groups and symConstraints
+                    # To make symConstraints work, we need to create them for the guides and their parents
+                    # in this section we create additional transforms above the right side guides
+
+                    # Get the parent
+                    parent_grp_lft = mc.listRelatives(guides[guide].fullPathName(), p=True, pa=True)[0]
+
+                    # Get the short name
+                    parent_grp_lft_short = self.short_name(parent_grp_lft)
+
+                    # Get the right side version of this name
+                    parent_joint_lft_short = parent_grp_lft_short.replace('Lft', 'Joint_Lft')
+                    parent_grp_rgt_short = parent_grp_lft_short.replace('Lft', 'Rgt')
+
+                    # We create a joint to joint symConstraint as there seem to be errors when not using joints
+                    # with symConstraint nodes
+                    parent_joint_grp_lft = mc.createNode('joint', name=parent_joint_lft_short, parent=parent_grp_lft)
+                    mc.setAttr(parent_joint_grp_lft + '.v', False)
+
+                    # Get the parent`s parent of this group so we can parent the new group
+                    grandparent_grp_lft = mc.listRelatives(parent_grp_lft, p=True, pa=True)[0]
+
+                    parent_rgt_node = mc.createNode('joint', name=parent_grp_rgt_short, parent=grandparent_grp_lft, ss=True)
+                    mc.setAttr(parent_rgt_node + '.v', False)
+
+                    # Get the short name of the grandparent
+                    # Add an offset matrix to first nodes off the centre to make the symConstraints work with standard transforms, the offset is 180 on rx
+                    grandparent_grp_lft_short = self.short_name(grandparent_grp_lft)
+                    if not 'Lft' in grandparent_grp_lft_short:
+                        offset_matrix = [1.0, 0.0, 0.0, 0.0, 0.0, -1, 0.0, 0.0, 0.0, 0.0, -1, 0.0, 0.0, 0.0, 0.0, 1.0]
+
+                        mc.setAttr(parent_rgt_node + '.offsetParentMatrix', offset_matrix, typ='matrix')
+
+                    self.create_sym_constraint(parent_joint_grp_lft, parent_rgt_node)
+
+                    # Create right side guide groups and symConstraints
+                    #######################################################################################
+
+                    guide_rgt = mc.createNode('joint', name=rgt_name, parent=parent_rgt_node, ss=True)
+
+                    mc.setAttr(guide_rgt + '.v', False)
+
+                    self.create_sym_constraint(guides[guide], guide_rgt)
+
+            else:
+                print(guide, 'not in', guide_data)
+
+        return guides
+
+    def connect_guide_controls(self ):
+        """
+        Loops through all joints and sees if there is a matching guide object
+        """
+        joint_grp = self.find_node( self.charRoot, 'Joint_Grp' )
+
+        joints = mc.listRelatives( joint_grp, ad=True, children=True, pa=True, typ='joint' )
+
+        for joint in joints:
+            joint_short = self.short_name( joint )
+            if '_Jnt' in joint_short:
+                guide_short = joint_short.replace( '_Jnt', '_Guide')
+                guide = self.find_node( self.charRoot, guide_short )
+                if guide:
+                    mc.parentConstraint( guide, joint, mo=True )
 # Quadruped
 #
 ######################################################################################
@@ -17835,6 +18172,7 @@ class LibTab(QWidget):
         self.pose_column_count = 3
         self.anim_column_count = 3
         self.rig_column_count = 3
+        self.guide_column_count = 3
 
         self.pose_root = self.am.folder_pose
         self.pose_path = self.am.folder_pose
@@ -17845,9 +18183,13 @@ class LibTab(QWidget):
         self.rig_root = self.am.folder_rig
         self.rig_path = self.am.folder_rig
 
+        self.guide_root = self.am.folder_guide
+        self.guide_path = self.am.folder_guide
+
         self.pose_grid = QGridLayout()
         self.anim_grid = QGridLayout()
         self.rig_grid  = QGridLayout()
+        self.guide_grid  = QGridLayout()
 
         self.button_height = 28
         self.button_width = 128
@@ -17859,9 +18201,12 @@ class LibTab(QWidget):
         self.anims()
 
         # Rig Frame Widget
+        self.guides()
+
+        # Rig Frame Widget
         self.rigs()
 
-        for section in [kLibPose, kLibAnim, kLibRig ]:
+        for section in [kLibPose, kLibAnim, kLibRig, kLibGuide ]:
             self.tree_refresh( section )
             self.refresh( section )
 
@@ -17872,6 +18217,7 @@ class LibTab(QWidget):
         self.check_columns( kLibPose )
         self.check_columns( kLibAnim )
         self.check_columns( kLibRig )
+        self.check_columns( kLibGuide )
 
 
     def poses( self ):
@@ -18019,6 +18365,75 @@ class LibTab(QWidget):
     #   Animation
     ########################################
 
+    ########################################
+    #   Guide Settings
+
+    def guides( self ):
+
+        self.guide_frame = FrameWidget( 'Guides', None  )
+        self.l.addWidget( self.guide_frame )
+
+        widget = QWidget( self.guide_frame )
+
+        vLayout = QVBoxLayout( self )
+        self.guide_frame.setLayout( vLayout )
+
+        hLayout = QHBoxLayout( self )
+
+        vLayout.addLayout( hLayout )
+
+        # Buttons
+        button1 = QPushButton( 'Save' )
+        button2 = QPushButton( 'Load' )
+
+        button1.clicked.connect( self.guide_export_dialog )
+
+        for button in [ button1, button2 ]:
+            button.setMinimumWidth( self.button_width )
+            button.setMaximumWidth( self.button_width )
+            button.setMinimumHeight( self.button_height )
+            button.setMaximumHeight( self.button_height )
+
+        hLayout.addWidget( button1 )
+        hLayout.addWidget( button2 )
+        hLayout.addStretch()
+
+        # Split Layout
+        self.guide_split = QSplitter( Qt.Horizontal )
+        self.guide_split.splitterMoved.connect( partial ( self.check_columns, kLibGuide ) )
+
+        # Tree View
+        self.guide_tree_scroll = QScrollArea()
+        self.guide_tree_scroll.setVerticalScrollBarPolicy( QtCore.Qt.ScrollBarAsNeeded )
+        self.guide_tree_scroll.setHorizontalScrollBarPolicy( QtCore.Qt.ScrollBarAlwaysOff )
+        self.guide_tree_scroll.setWidgetResizable( True )
+
+        self.guide_tree_view = aniMetaTreeWidget()
+        self.guide_tree_view.setHeaderLabel( 'Guide Settings Folders' )
+
+        self.guide_tree_view.installEventFilter( self )
+        self.guide_tree_view.setContextMenuPolicy( QtCore.Qt.CustomContextMenu )
+        self.guide_tree_view.customContextMenuRequested.connect( self.guide_tree_ctx_menu   )
+
+        self.guide_tree_scroll.setWidget( self.guide_tree_view )
+
+        self.guide_tree_view.selectionModel().selectionChanged.connect( partial ( self.tree_select, kLibGuide ) )
+
+        self.guide_split.addWidget( self.guide_tree_scroll )
+
+        # Animation Panel
+        self.guide_scroll = QScrollArea()
+        self.guide_scroll.setVerticalScrollBarPolicy( QtCore.Qt.ScrollBarAlwaysOn )
+        self.guide_scroll.setHorizontalScrollBarPolicy( QtCore.Qt.ScrollBarAlwaysOff )
+        self.guide_scroll.setWidgetResizable( True )
+        self.guide_split.addWidget( self.guide_scroll )
+
+        vLayout.addWidget( self.guide_split )
+
+        self.guide_frame.setCollapsed( True )
+
+    #   Guide Settings
+    ########################################
 
     ########################################
     #   Rig Settings
@@ -18104,7 +18519,9 @@ class LibTab(QWidget):
         elif section == kLibRig:
             sizes = self.rig_split.sizes()
             column_count = self.rig_column_count
-
+        elif section == kLibGuide:
+            sizes = self.guide_split.sizes()
+            column_count = self.guide_column_count
 
         # new_count = abs ( (self.width() - 130 ) / 256 )
         new_count = abs( (sizes[ 1 ] - 48) / 256 )
@@ -18120,7 +18537,8 @@ class LibTab(QWidget):
                 self.anim_column_count = new_count
             elif section == kLibRig:
                 self.rig_column_count = new_count
-
+            elif section == kLibGuide:
+                self.guide_column_count = new_count
             self.refresh( section )
 
     def tree_refresh( self, section=kLibPose ):
@@ -18138,6 +18556,8 @@ class LibTab(QWidget):
             tree_view = self.anim_tree_view
         elif section == kLibRig:
             tree_view = self.rig_tree_view
+        elif section == kLibGuide:
+            tree_view = self.guide_tree_view
 
         for i in range( tree_view.topLevelItemCount() ):
             tree_view.takeTopLevelItem( i )
@@ -18184,6 +18604,8 @@ class LibTab(QWidget):
             tree_view = self.anim_tree_view
         if section == kLibRig:
             tree_view = self.rig_tree_view
+        if section == kLibGuide:
+            tree_view = self.guide_tree_view
 
         if indices:
             item = QTreeWidgetItem(  tree_view.itemFromIndex( indices[0] ) )
@@ -18230,6 +18652,8 @@ class LibTab(QWidget):
                 self.anim_path = path
             elif section == kLibRig:
                 self.rig_path = path
+            elif section == kLibGuide:
+                self.guide_path = path
 
             self.refresh( section )
  
@@ -18243,6 +18667,8 @@ class LibTab(QWidget):
             return self.anim_path
         elif section == kLibRig:
             return self.rig_path
+        elif section == kLibGuide:
+            return self.guide_path
 
     def get_root( self, section ):
         if section == kLibPose:
@@ -18251,6 +18677,8 @@ class LibTab(QWidget):
             return self.anim_root
         elif section == kLibRig:
             return self.rig_root
+        elif section == kLibGuide:
+            return self.guide_root
 
     def refresh( self, section=kLibPose ):
 
@@ -18300,6 +18728,11 @@ class LibTab(QWidget):
             self.rig_container = QWidget()
             container = self.rig_container
             column_count = self.rig_column_count
+        elif section == kLibGuide:
+            grid = self.guide_grid
+            self.guide_container = QWidget()
+            container = self.guide_container
+            column_count = self.guide_column_count
         try:
             grid.deleteLater()
         except:
@@ -18314,6 +18747,8 @@ class LibTab(QWidget):
             self.anim_scroll.setWidget( container )
         if section == kLibRig:
             self.rig_scroll.setWidget( container )
+        if section == kLibGuide:
+            self.guide_scroll.setWidget( container )
 
         if section == kLibPose:
             ctx_menu = self.pose_item_ctx_menu
@@ -18321,7 +18756,8 @@ class LibTab(QWidget):
             ctx_menu = self.anim_item_ctx_menu
         if section == kLibRig:
             ctx_menu = self.rig_item_ctx_menu
-
+        if section == kLibGuide:
+            ctx_menu = self.guide_item_ctx_menu
 
         for i in range( len(json_files) ):
 
@@ -18492,6 +18928,9 @@ class LibTab(QWidget):
     def rig_item_ctx_menu( self, *args ):
         self.item_ctx_menu( kLibRig, args[ 0 ], self.sender() )
 
+    def guide_item_ctx_menu( self, *args ):
+        self.item_ctx_menu( kLibGuide, args[ 0 ], self.sender() )
+
     def item_ctx_menu( self, *args ):
 
         section = args[0]
@@ -18515,6 +18954,10 @@ class LibTab(QWidget):
             load_label   = 'Load Rig Settings'
             delete_label = 'Delete Rig Settings'
             rename_label = 'Rename Rig Settings'
+        if section == kLibGuide:
+            load_label   = 'Load Guides File'
+            delete_label = 'Delete Guides File'
+            rename_label = 'Rename Guides File'
 
         item_name = btn.text() + '.json'
 
@@ -18528,7 +18971,6 @@ class LibTab(QWidget):
         import_pose.setText( load_label )
         import_pose.triggered.connect( partial( self.import_item, section, item_name ) )
         self.menu.addAction( import_pose )
-
 
         rename_pose = QAction( self )
         rename_pose.setText( rename_label )
@@ -18580,6 +19022,9 @@ class LibTab(QWidget):
 
             self.import_doit( section, full_path )
 
+        if section == kLibGuide:
+             print ('create_item' )
+
     def pose_tree_ctx_menu(self, *args):
         self.tree_ctx_menu( kLibPose, args[0], self.sender() )
 
@@ -18588,6 +19033,9 @@ class LibTab(QWidget):
 
     def rig_tree_ctx_menu( self, *args ):
         self.tree_ctx_menu( kLibRig, args[0], self.sender() )
+
+    def guide_tree_ctx_menu( self, *args ):
+        self.tree_ctx_menu( kLibGuide, args[0], self.sender() )
 
     def tree_ctx_menu(self, *args):
 
@@ -18700,12 +19148,13 @@ class LibTab(QWidget):
             file = file.split('.')[0]
 
         if section == kLibPose:
-            title_label = 'Delete Pose'
+            title_label = 'Rename Pose'
         elif section == kLibAnim:
-            title_label = 'Delete Animation'
+            title_label = 'Rename Animation'
         elif section == kLibRig:
-            title_label = 'Delete Rig Settings'
-
+            title_label = 'Rename Rig Settings'
+        elif section == kLibGuide:
+            title_label = 'Rename Guides File'
 
         result = mc.promptDialog(
             title = title_label,
@@ -18741,6 +19190,8 @@ class LibTab(QWidget):
             title_label = 'Delete Animation'
         elif section == kLibRig:
             title_label = 'Delete Rig Settings'
+        elif section == kLibGuide:
+            title_label = 'Delete Guides File'
 
         result = mc.confirmDialog(
             title=title_label,
@@ -18816,6 +19267,10 @@ class LibTab(QWidget):
                         elif data_type == 'aniMetaBiped' and section == kLibRig:
 
                             self.rig_import( char, dict )
+
+                        elif section == kLibGuide:
+
+                            self.guide_import( char, dict )
 
                     else:
                         mc.warning( 'aniMeta load pose: please specify a character.' )
@@ -19176,6 +19631,158 @@ class LibTab(QWidget):
             print ('aniMeta: file imported.')
 
     # Anim Import/Export
+    #
+    ####################################################################################################################
+
+    ####################################################################################################################
+    #
+    # Guide Import/Export
+
+    def guide_export_dialog( self, *args, **kwargs ):
+
+        char = self.am.get_active_char()
+
+        if char is not None :
+
+            self.guide_ui = 'aniMetaSaveGuideUI'
+
+            if mc.window( self.guide_ui, exists=True ):
+                mc.deleteUI( self.guide_ui )
+
+            mc.window( self.guide_ui, title='Save Guide Settings', w=200, h=100, rtf=True )
+
+            mc.rowColumnLayout( numberOfColumns = 1, rs=[1,10], ro=[1,'top',10] )
+
+            self.guide_export_name_ctrl = mc.textFieldGrp(  label='Settings Name' )
+
+            row2 = mc.rowColumnLayout( numberOfColumns = 2, cs=[1,10] )
+            mc.rowColumnLayout( row2, e=True,  cs = [ 2, 10 ] )
+
+            mc.button( label = 'Save', width = 120, command = self.guide_export_doit )
+            mc.button( label = 'Cancel', width = 120, command = partial( self.close_export_dialog, self.guide_ui )  )
+
+            mc.showWindow()
+
+        else:
+            mc.warning( 'No Handles to export animation from.' )
+
+
+    def guide_export_doit( self, *args, **kwargs ):
+
+        file_name = mc.textFieldGrp( self.guide_export_name_ctrl, q=True, text=True )
+
+        if mc.window( self.guide_ui, exists = True ):
+            mc.deleteUI( self.guide_ui )
+
+        char = self.am.get_active_char()
+
+        if char is not None:
+
+            metaData = self.am.get_metaData( char )
+
+            rigState = None
+            rig = Rig()
+
+            if 'RigState' in metaData:
+                rigState = metaData[ 'RigState' ]
+            else:
+                mc.warning( 'aniMeta: unable to determine the rig`s status, aborting export process.' )
+                return False
+
+            char_data = { }
+            char_data['guides'] = { }
+ 
+            guides = rig.get_char_handles( char, { 'Type': kBodyGuide } ) or [ ]
+
+            if len( guides ) > 0:
+                joint_grp = self.am.find_node(char, 'Joint_Grp') or []
+                joints = mc.listRelatives(joint_grp, c=True, ad=True, typ='joint', pa=True)
+                attrs = ['controlSize', 'controlSizeX', 'controlSizeY', 'controlSizeZ', 'controlOffset',
+                         'controlOffsetX', 'controlOffsetY', 'controlOffsetZ']
+
+                for guide in guides:
+                    guide_path = self.am.find_node(char, guide)
+
+                    tmp = {}
+
+                    for attr in mc.listAttr( guide_path, k=True ):
+                        value = mc.getAttr(guide_path + '.' + attr)
+                        tmp[attr] = round( value, 5 )
+                    if len(tmp) > 0:
+                        char_data['guides'][self.am.short_name(guide_path)] = tmp
+
+                sceneDict = self.am.get_scene_info()
+
+                sceneDict['rig_type'] = kRigTypeString[metaData['RigType']]
+
+                aniMetaDict = {}
+
+                aniMetaDict['aniMeta'] = [{'info': sceneDict, 'data_type': 'aniMetaGuides'}, {'data': char_data}]
+
+                pretty_json = json.dumps(aniMetaDict, indent=4, sort_keys=True)
+
+                full_file_path = os.path.join(os.path.abspath(self.guide_path), file_name + '.json')
+
+                with open(full_file_path, 'w') as write_file:
+                    write_file.write(pretty_json)
+
+                self.create_icon(kLibGuide, file_name + '.json')
+
+                self.refresh(kLibGuide)
+
+                print('aniMeta: Guide exported to ', full_file_path)
+
+    def guide_import( self, *args ):
+
+        char = args[ 0 ]
+        dict = args[ 1 ]
+
+        info = dict[ 'aniMeta' ][ 0 ][ 'info' ]
+        data = dict[ 'aniMeta' ][ 1 ][ 'data' ]
+
+        type = kBiped
+        if 'rig_type' in info:
+            type = kRigTypeString.index(info['rig_type'])
+
+        _rig_   = Rig()
+        _char_  = Char()
+        _biped_ = Biped()
+
+        metaData = self.am.get_metaData(char)
+        rigState = None
+
+        if 'RigState' in metaData:
+
+            mc.undoInfo( openChunk=True )
+
+            rigState = metaData['RigState']
+
+            if rigState == kRigStateControl:
+
+                _char_.toggle_state()
+
+            if 'guides' in data:
+
+                for key in sorted(data['guides'].keys()):
+                    guide = self.am.find_node(char, key)
+
+                    if guide is not None:
+
+                        for attr in sorted(data['guides'][key].keys()):
+                            # Translates need to be set via the multiply node on the parent
+                            try:
+                                value = data['guides'][key][attr]
+                                mc.setAttr(guide + '.' + attr, value )
+                            except:
+                                mc.warning('aniMeta: There is a problem setting attribute', attr,  'on guide', guide)
+                                pass
+                    else:
+                        mc.warning('aniMeta: Can not find guide', key)
+
+            om.MGlobal.displayInfo('aniMeta: Guides loaded successfully.')
+
+            mc.undoInfo( closeChunk=True )
+    # Guide Import/Export
     #
     ####################################################################################################################
 
@@ -20669,7 +21276,9 @@ class Build( Rig ):
 
             # TEMP!
             try:
-                mc.delete( mc.ls( typ='unknown') )
+                unknown = mc.ls( typ='unknown')
+                if unknown:
+                    mc.delete( unknown )
             except: pass
 
             mc.file( rename=filePath )
