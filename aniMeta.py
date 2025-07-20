@@ -3163,17 +3163,31 @@ class Rig( Transform ):
                 elif self.match_metaData( s, { 'Type': kHandle, 'Side': kCenter } ):
                     if short not in handles_Ctr:
                         handles_Ctr.append( short )
-        mats = { }
+        mats = {}
+        attrs = {}
+
+        def get_custom_attr_data( obj ):
+            attr_data = {}
+            attributes = mc.listAttr(  obj, userDefined=True, k=True ) or []
+            for attribute in attributes:
+                attr_data[attribute] = mc.getAttr( obj+'.'+attribute)
+            return attr_data
+
+        def set_custom_attr_data( obj, attr_data ):
+            for attribute in attr_data.keys():
+                 mc.setAttr( obj+'.'+attribute, attr_data[attribute])
 
         for handle in handles_Lft:
             mat = self.get_matrix( handle, kLocal )
             if mat is not None:
                 mats[ handle ] = mat
+            attrs[handle] = get_custom_attr_data(handle)
 
         for handle in handles_Rgt:
             mat = self.get_matrix( handle, kLocal )
             if mat is not None:
                 mats[ handle ] = mat
+            attrs[handle] = get_custom_attr_data(handle)
 
         for handle in handles_Ctr:
             mat = self.get_matrix( handle, kLocal )
@@ -3202,6 +3216,8 @@ class Rig( Transform ):
                         if 'Mirror' in dataDict:
                             mirror = self.mirror_matrix( mats[ nameLft ], mode = dataDict[ 'Mirror' ], space = kLocal )
                             self.set_matrix( handle, mirror, kLocal )
+                    if nameLft in attrs:
+                        set_custom_attr_data(handle, attrs[nameLft])
 
             for handle in handles_Lft:
                 dataDict = self.get_metaData( handle )
@@ -3211,6 +3227,8 @@ class Rig( Transform ):
                         if 'Mirror' in dataDict:
                             mirror = self.mirror_matrix( mats[ nameRgt ], mode = dataDict[ 'Mirror' ], space = kLocal )
                             self.set_matrix( handle, mirror, kLocal )
+                    if nameRgt in attrs:
+                        set_custom_attr_data(handle, attrs[nameRgt])
 
             # IK
             if len(iks):
@@ -3243,6 +3261,8 @@ class Rig( Transform ):
                             mirror = self.mirror_matrix( mats[ nameLft ], mode = dataDict[ 'Mirror' ], space = kLocal )
                             self.set_matrix( handle, mirror, kLocal )
 
+                            set_custom_attr_data(handle, attrs[nameLft])
+
             elif symDir == 'rightToLeft':
                 for handle in handles_Lft:
                     dataDict = self.get_metaData( handle )
@@ -3251,6 +3271,7 @@ class Rig( Transform ):
                         if nameRgt in mats:
                             mirror = self.mirror_matrix( mats[ nameRgt ], mode = dataDict[ 'Mirror' ], space = kLocal )
                             self.set_matrix( handle, mirror, kLocal )
+                            set_custom_attr_data(handle, attrs[nameRgt])
                         else:
                             mc.warning( nameRgt + ' can not be found in mats_Rgt dict.' )
 
@@ -4186,7 +4207,6 @@ class Char( Rig ):
                         dst = self.find_node(self.charRoot, 'Neck2_Guide')
                         count = 7
                         node, neck = self.create_spline_simple('neck', [src, dst], count, in_rot_offset, out_rot_offset)
-                        print('node, neck', node, neck)
                         for i in range(count):
                             neck[i] = mc.rename( neck[i], 'Neck'+str(i+1)+'_Guide')[0]
 
@@ -4196,6 +4216,7 @@ class Char( Rig ):
                         #    mc.parentConstraint(neck[i], jnt)
 
                         mc.parent(node, neck, guidesGrp)
+                        print('guidesGrp', guidesGrp)
                         # Position Neck FK
                         # temporarily unparent so we can move the neck FK guides around and align them to the neck`s joints
                         head_grp = mc.listRelatives(self.find_node(self.charRoot, 'Head_Guide'), p=True, pa=True)[0]
@@ -5400,6 +5421,9 @@ class Char( Rig ):
         mc.setAttr(rootNode+".show_Guides", True )
         mc.setAttr(rootNode+".show_Joints", True )
 
+        # Scale
+        self.build_scaling( rootNode, type )
+
         '''
         # Constraints
         print ('aniMeta: Build Constraints.')
@@ -5409,9 +5433,6 @@ class Char( Rig ):
         print ('aniMeta: Build Pair Blends.')
         self.build_pair_blends( rootNode, type )
 
-        # Scale
-        print ('aniMeta: Build scaling set-up.')
-        self.build_scaling( rootNode, type )
 
         # Select the new character
         mc.select( rootNode, replace=True)
@@ -10004,7 +10025,6 @@ class Quadruped( Char ):
         # TODO [ ] make rig scalable
         # TODO [ ] add pick-walking
         # TODO [x] add (sym)constraints in guide mode
-        # TODO [ ] change symmetry behaviour for pole vectors
 
         if self.DEBUG:
             print( 'Quadruped.build_control_rig start')
@@ -10153,7 +10173,7 @@ class Quadruped( Char ):
             handleDict[ 'NeckIK1_Ctr_Ctrl' ] = {
                 'name': 'NeckIK1_Ctr_Ctrl',
                 'parent': 'NeckFK1_Ctr_Ctrl',
-                'matchTransform': 'Neck1_Guide',
+                'matchTransform': 'NeckIK1_Guide',
                 'size': [ 30, 4, 4 ]
             }
             handleDict[ 'NeckIK2_Ctr_Ctrl' ] = {
@@ -10165,7 +10185,7 @@ class Quadruped( Char ):
             handleDict[ 'NeckIK3_Ctr_Ctrl' ] = {
                 'name': 'NeckIK3_Ctr_Ctrl',
                 'parent': 'NeckFK4_Ctr_Ctrl',
-                'matchTransform': 'Neck2_Guide',
+                'matchTransform': 'NeckIK2_Guide',
                 'size': [ 30, 4, 4 ]
             }
             handleDict[ 'NeckFK1_Ctr_Ctrl' ] = {
@@ -10558,8 +10578,6 @@ class Quadruped( Char ):
             mc.parentConstraint( outputs[count-1], grp, mo=True)
             grp = self.get_grandparent(self.controls['Scapula_FK_Rgt_Ctrl'])
             mc.parentConstraint( outputs[count-1], grp, mo=True)
-            grp = self.get_grandparent(self.controls['NeckIK1_Ctr_Ctrl'])
-            mc.parentConstraint( outputs[count-1], grp, mo=True)
 
             # Spine
             #
@@ -10905,8 +10923,9 @@ class Quadruped( Char ):
 
             # Eyes
             #
-            ######################################
-            #######################################################################
+            ############################################################################################################
+
+            ############################################################################################################
             #
             # Meta Data
             if self.DEBUG:
@@ -10968,6 +10987,7 @@ class Quadruped( Char ):
                 # HindLeg
                 data['Limb'] = 'HindLeg'
                 data['Kinematic'] = 'IK'
+                data['Mirror'] = kBasic
                 handles_ik = [self.controls['HindFoot_IK_'+SIDE+'_Ctrl'], self.controls['HindLegPole_IK_'+SIDE+'_Ctrl'] ]
                 set_data(  handles_ik, data )
 
@@ -11387,8 +11407,12 @@ class Quadruped( Char ):
         mc.addAttr(distance, ln='distanceFraction2', at='double')
         mc.setAttr(distance + '.distanceFraction2', distance2 / length)
 
+        divide = mc.createNode('divide', name=DIR + 'LegIK_' + SIDE + '_Divide', ss=True)
+        mc.connectAttr(distance + '.distance', divide + '.input1')
+        mc.connectAttr(self.charRoot + '.globalScale', divide + '.input2')
+
         subtract = mc.createNode('subtract', name=DIR + 'LegIK_' + SIDE + '_Subtract', ss=True)
-        mc.connectAttr(distance + '.distance', subtract + '.input1')
+        mc.connectAttr(divide + '.output', subtract + '.input1')
         mc.connectAttr(distance + '.initialDistance', subtract + '.input2')
 
         # Upper Leg
@@ -11463,6 +11487,7 @@ class Quadruped( Char ):
         '''
         rig_grp = self.find_node(rootNode, 'Rig_Grp')
         spine_grp = mc.createNode('transform', name=name+'_Grp', parent=rig_grp)
+        mc.setAttr( spine_grp + '.inheritsTransform', False )
         spine_lvl1_grp = mc.createNode('transform', name=name+'_Lvl1_Grp', parent=spine_grp, ss=True)
         spine_lvl2_grp = mc.createNode('transform', name=name+'_Lvl2_Grp', parent=spine_grp, ss=True)
 
@@ -11518,6 +11543,8 @@ class Quadruped( Char ):
         main_grp = mc.createNode('transform', name=f'{name}_{no}_Grp', ss=True)
         spline_1_grp = mc.createNode('transform', name=f'{name}_{no}_Spline1_Grp', ss=True, parent=main_grp)
         spline_2_grp = mc.createNode('transform', name=f'{name}_{no}_Spline2_Grp', ss=True, parent=main_grp)
+
+        mc.setAttr( main_grp + '.inheritsTransform', False )
 
         if mid:
             inputs = [src, mid, dst]
@@ -11970,7 +11997,7 @@ connectAttr -f condition1.outColorR Spine_1_0_blend2.color2R;
             parent_controller( 'LegPole_IK_'  + side + '_Ctrl', 'Foot_IK_'     + side + '_Ctrl' )
 
     def create_guides(self, charRoot=None):
-        print( 'QUAD build_body_guides')
+
         if not charRoot:
             charRoot = self.get_active_char()
         self.charRoot = charRoot
@@ -12025,8 +12052,6 @@ connectAttr -f condition1.outColorR Spine_1_0_blend2.color2R;
             dst = self.find_node(self.charRoot, 'Chest_Jnt')
             mc.matchTransform(grp, dst)
 
-            print( 'position pole Vecs' )
-
             # Position IK Poles
             offset = 40
             src = self.find_node(self.charRoot, 'ForeLegPole_Lft_Guide')
@@ -12041,7 +12066,6 @@ connectAttr -f condition1.outColorR Spine_1_0_blend2.color2R;
             mc.matchTransform(grp, dst, pos=True, rot=False)
             mc.move(0, 0, -offset, grp, r=True, ws=True)
 
-            print( 'position hoof guides ' )
             # Position hoof guides manually, we don't have a joint for them
             offset = []
             offset.append([0, 0, 4])
@@ -12061,8 +12085,6 @@ connectAttr -f condition1.outColorR Spine_1_0_blend2.color2R;
                         pos[2] = 0
                     mc.xform(foreHoof_guide, ws=True, t=pos)
                     mc.xform(foreHoof_guide, t=offset[i], relative=True, objectSpace=True)
-
-            print( 'Make COG Guide bigger' )
 
             # Make COG Guide bigger
             cog_guide = self.find_node(self.charRoot, 'COG_Guide')
@@ -12094,16 +12116,17 @@ connectAttr -f condition1.outColorR Spine_1_0_blend2.color2R;
             mc.parent(main_grp, guideGrp)
 
             # Neck
-            src = self.find_node(self.charRoot, 'Neck1_Guide')
-            dst = self.find_node(self.charRoot, 'Neck2_Guide')
+            src = self.find_node(self.charRoot, 'NeckIK1_Guide')
+            dst = self.find_node(self.charRoot, 'NeckIK2_Guide')
             count = 7
             node, neck = self.create_spline_simple('neck', [src, dst], count, in_rot_offset, out_rot_offset)
 
             for i in range(count):
                 neck[i] = mc.rename( neck[i], 'Neck'+str(i+1)+'_Guide')
-                self.set_metaData(neck[i] , meta_data)
+                self.set_metaData( neck[i] , meta_data )
 
             neck_grp = mc.createNode('transform', name='Neck_Guides_Grp', parent=guideGrp, ss=True)
+            mc.setAttr( neck_grp + '.inheritsTransform', False )
             mc.parent(node, neck, neck_grp)
 
             # Position Neck FK
@@ -12276,22 +12299,20 @@ connectAttr -f condition1.outColorR Spine_1_0_blend2.color2R;
             'constraintNode': 'HeadTip_Jnt',
             'attributes': justTzRx
         }
-        # Neck 1
+        # Neck IK 1
         #guideList.append(['Neck1_Guide', 'Neck1_Jnt', 'Chest_Guide', attrList])
-        guide_data['Neck1'] = {
-            'name': 'Neck1'+guide_sfx,
+        guide_data['NeckIK1'] = {
+            'name': 'NeckIK1'+guide_sfx,
             'matchTransform': 'Neck1_Jnt',
             'parent': 'Chest'+guide_sfx,
-            'constraintNode': 'Neck1_Jnt',
             'attributes': justTzTyRx
         }
-        # Neck 2
+        # Neck IK 2
         #guideList.append(['Neck2_Guide', 'Neck7_Jnt', 'Head_Guide', attrList])
-        guide_data['Neck2'] = {
-            'name': 'Neck2'+guide_sfx,
+        guide_data['NeckIK2'] = {
+            'name': 'NeckIK2'+guide_sfx,
             'matchTransform': 'Neck7_Jnt',
             'parent': 'Head'+guide_sfx,
-            'constraintNode': 'Neck7_Jnt',
             'attributes': justTzTyRx
         }
         # Jaw
@@ -12565,8 +12586,8 @@ connectAttr -f condition1.outColorR Spine_1_0_blend2.color2R;
         guide_list.append('NeckFK4')
         guide_list.append('Head')
         guide_list.append('HeadTip')
-        guide_list.append('Neck1')
-        guide_list.append('Neck2')
+        guide_list.append('NeckIK1')
+        guide_list.append('NeckIK2')
         # Head
         guide_list.append('Jaw')
         guide_list.append('JawTip')
