@@ -78,7 +78,7 @@ def px(value):
     return real_scale*value
 
 kPluginName    = 'aniMeta'
-kPluginVersion = '01.00.158'
+kPluginVersion = '01.00.159'
 
 kLeft, kRight, kCenter, kAll, kSelection = range( 5 )
 kHandle, kIKHandle, kJoint, kMain, kBodyGuide, kBipedRoot, kQuadrupedRoot, kCustomHandle, kBodyGuideLock, kBipedRootUE = range(10)
@@ -3091,8 +3091,8 @@ class Rig( Transform ):
 
     def swap_pose( self, *args, **kwargs ):
 
+        mc.waitCursor(state=True)
         mc.undoInfo( openChunk=True )
-
         mode = 'all'
         symMode = 'mirror'
         symDir = 'leftToRight'
@@ -3137,7 +3137,7 @@ class Rig( Transform ):
             leg_ik_Lft_name = 'Leg_IK_Lft'
             leg_ik_Rgt_name = 'Leg_IK_Rgt'
 
-            # IK Attributes 
+            # IK Attributes
             iks = [ arm_ik_Lft_name, arm_ik_Rgt_name, leg_ik_Lft_name, leg_ik_Rgt_name ]
             ik_dict = {}
 
@@ -3297,8 +3297,9 @@ class Rig( Transform ):
 
             mc.undoInfo( closeChunk = True )
 
-
         mc.undoInfo( closeChunk=True )
+
+        mc.waitCursor(state=False)
 
     def flip_tangents(self, nodes=[]):
 
@@ -3313,11 +3314,8 @@ class Rig( Transform ):
                   'scaleZ']
         if len( nodes ) > 0:
             angles={}
-
             cmd = ''
-
             for node in nodes:
-
                 attrs = mc.listAttr(node, k=True)
                 for attr in attrs:
                     if attr in mirror:
@@ -3341,7 +3339,7 @@ class Rig( Transform ):
                                 type = meta['Mirror']
 
                                 if type == kBasic:
-                                    if attr in [ 'translateX', 'rotateZ', 'rotateY']:
+                                    if attr in [ 'translateX', 'translateZ', 'rotateZ', 'rotateY']:
                                         inv=True
 
                             in_angle  = mc.keyTangent(node_mirror, attribute=attr, query=True, inAngle=True,  time=(current, current))[0]
@@ -3349,13 +3347,14 @@ class Rig( Transform ):
                             lock      = mc.keyTangent(node_mirror, attribute=attr, query=True, lock=True,     time=(current, current))[0]
 
                             if inv:
-                                in_angle *= -1
-                                out_angle *= -1
+                                if abs( in_angle ) > 0.0001 or abs (out_angle) > 0.0001:
+                                    in_angle *=  -1
+                                    out_angle *=  -1
 
-                            cmd += 'keyTangent -edit -attribute '+attr+' -time "'+str(current)+':'+str(current)+'" -lock 0 '+node+';\n'
-                            cmd += 'keyTangent -edit -attribute '+attr+' -time "'+str(current)+':'+str(current)+'" -ia '+str(in_angle)+' -oa '+str(out_angle)+' '+node+';\n'
-                            cmd += 'keyTangent -edit -attribute '+attr+' -time "'+str(current)+':'+str(current)+'" -lock '+str(int(lock))+' '+node+';\n'
-
+                                    cmd += 'keyTangent -edit -attribute '+attr+' -time "'+str(current)+':'+str(current)+'" -lock 0 '+node+';\n'
+                                    cmd += 'keyTangent -edit -attribute '+attr+' -time "'+str(current)+':'+str(current)+'" -ia '+str(in_angle)+' -oa '+str(out_angle)+' '+node+';\n'
+                                    cmd += 'keyTangent -edit -attribute '+attr+' -time "'+str(current)+':'+str(current)+'" -lock '+str(int(lock))+' '+node+';\n'
+                                    print(cmd)
                         except:
                             pass
 
@@ -3473,10 +3472,55 @@ class Rig( Transform ):
 
 class Char( Rig ):
 
-    def __init__(self):
+    def __init__(self, *args):
         super( Char, self ).__init__()
         self.aux_nodes_attr = 'aux_nodes' # message attribute used for house-cleaning, used by
-        self.charRoot = None
+        if len(args):
+            self.charRoot = args[0]
+
+    def create_guides(self, charRoot=None, rig_obj=None):
+        """
+        New method from quadruped, this part should be common to all rig types, each class should then implement custom stuff
+        @param charRoot: the Maya DAG root ot the character
+        @param rig_obj: instance object of the rig class, ie Biped or Quadruped
+        """
+        if not charRoot:
+            charRoot = self.get_active_char()
+        self.charRoot = charRoot
+        metaData = {}
+
+        if not self.charRoot:
+            mc.warning('Please select a Biped Root Group.')
+        else:
+            metaData = self.get_metaData(self.charRoot)
+
+            metaData['RigState'] = kRigStateGuide
+
+            # Set Default Rig Display options to be used when the rig is switched to control mode
+            if 'RigDisplay' not in metaData:
+                metaData['RigDisplay'] = {'display_Joint': 1, 'show_Rig': 1, 'show_Joints': 0, 'show_Guides': 0,
+                                          'display_Geo': 2}
+
+            self.set_metaData(self.charRoot, metaData)
+
+            meta_data = {}
+            meta_data['Type'] = kBodyGuide
+
+            guidesGrp = self.find_node(self.charRoot, 'Guides_Grp')
+            guideGrp = self.find_node(self.charRoot, 'Guides_Body_Grp')
+
+            if guideGrp is None:
+                guideGrp = mc.createNode('transform', name='Guides_Body_Grp', ss=True, parent=guidesGrp)
+
+            attrList = ['sx', 'sy', 'sz', 'v']
+
+            guideDict = {}
+
+            guide_data = rig_obj.get_guide_data()
+            guide_list = rig_obj.get_guide_list()
+            guide_sfx = '_Guide'
+
+            guides = self.build_guide_controls(guide_data=guide_data, guide_list=guide_list)
 
     def build_guides(self, *args):
 
@@ -4315,6 +4359,95 @@ class Char( Rig ):
                                 mc.parent(parent, grp)
 
                 return True
+
+
+    def build_guide_controls(self, guide_data={}, guide_list=[]):
+        """
+        This is the new method from quadruped to create the Guides and their mirrored siblings
+        """
+
+        guides = {}
+        ctrl_dict = {}
+        ctrl_dict['character'] = self.charRoot
+        ctrl_dict['globalScale'] = True
+        ctrl_dict['shapeType'] = self.kSphere
+        ctrl_dict['color'] = (1, 0.7, 0)
+        ctrl_dict['radius'] = 2
+
+        meta_data = {}
+        meta_data['Type'] = kBodyGuide
+
+        for guide in guide_list:
+            if guide in guide_data:
+                data = guide_data[guide]
+                guide_dict = copy.deepcopy(ctrl_dict)
+                guide_dict['name'] = data['name']
+                guide_dict['parent'] = data['parent']
+                if 'matchTransform' in data:
+                    guide_dict['matchTransform'] = data['matchTransform']
+                guides[guide] = self.create_control(**guide_dict)
+
+                self.set_metaData(guides[guide], meta_data)
+
+                # Lock redundant attributes
+                for attr in data['attributes']:
+                    mc.setAttr( guides[guide].fullPathName() + '.' + attr, l=True, k=False )
+
+                # Check whether we need to build the right side for a left-sided guide
+                if 'Lft' in guide:
+                    # Right side version of the guide´s name
+                    rgt_name = guide.replace('Lft', 'Rgt')+'_Guide'
+
+                    #######################################################################################
+                    # Create right side guide groups and symConstraints
+                    # To make symConstraints work, we need to create them for the guides and their parents
+                    # in this section we create additional transforms above the right side guides
+
+                    # Get the parent
+                    parent_grp_lft = mc.listRelatives(guides[guide].fullPathName(), p=True, pa=True)[0]
+
+                    # Get the short name
+                    parent_grp_lft_short = self.short_name(parent_grp_lft)
+
+                    # Get the right side version of this name
+                    parent_joint_lft_short = parent_grp_lft_short.replace('Lft', 'Joint_Lft')
+                    parent_grp_rgt_short = parent_grp_lft_short.replace('Lft', 'Rgt')
+
+                    # We create a joint to joint symConstraint as there seem to be errors when not using joints
+                    # with symConstraint nodes
+                    parent_joint_grp_lft = mc.createNode('joint', name=parent_joint_lft_short, parent=parent_grp_lft)
+                    mc.setAttr(parent_joint_grp_lft + '.v', False)
+
+                    # Get the parent`s parent of this group so we can parent the new group
+                    grandparent_grp_lft = mc.listRelatives(parent_grp_lft, p=True, pa=True)[0]
+
+                    parent_rgt_node = mc.createNode('joint', name=parent_grp_rgt_short, parent=grandparent_grp_lft, ss=True)
+                    mc.setAttr(parent_rgt_node + '.v', False)
+
+                    # Get the short name of the grandparent
+                    # Add an offset matrix to first nodes off the centre to make the symConstraints work with standard transforms, the offset is 180 on rx
+                    grandparent_grp_lft_short = self.short_name(grandparent_grp_lft)
+                    if not 'Lft' in grandparent_grp_lft_short:
+                        offset_matrix = [1.0, 0.0, 0.0, 0.0, 0.0, -1, 0.0, 0.0, 0.0, 0.0, -1, 0.0, 0.0, 0.0, 0.0, 1.0]
+
+                        mc.setAttr(parent_rgt_node + '.offsetParentMatrix', offset_matrix, typ='matrix')
+
+                    self.create_sym_constraint(parent_joint_grp_lft, parent_rgt_node)
+
+                    # Create right side guide groups and symConstraints
+                    #######################################################################################
+
+                    guide_rgt = mc.createNode('joint', name=rgt_name, parent=parent_rgt_node, ss=True)
+
+                    mc.setAttr(guide_rgt + '.v', False)
+
+                    self.create_sym_constraint(guides[guide], guide_rgt)
+
+            else:
+                print(guide, 'not in', guide_data)
+
+        return guides
+
 
     def build_constraints( self, rootNode, type ):
 
@@ -5441,10 +5574,23 @@ class Char( Rig ):
 
         # Create the body guides
         print ('aniMeta: Create the body guides.')
+
+        rig = None
+
         if type == kBipedUE:
-            self.build_body_guides( rootNode, type )
+            #self.build_body_guides( rootNode, type )
+            print('Biped')
+            #self.create_guides( rootNode )
+            rig = Biped( char )
         elif type == kQuadruped:
-            Quadruped().create_guides( rootNode )
+            rig = Quadruped( char )
+            print('Quadruped')
+            #Quadruped().create_guides( rootNode )
+
+        if rig:
+            guide_data = rig.get_guide_data()
+            self.create_guides(charRoot=char, rig_obj=rig)
+        return
 
         mc.setAttr(rootNode+".show_Guides", True )
         mc.setAttr(rootNode+".show_Joints", True )
@@ -8216,8 +8362,8 @@ class Char( Rig ):
 
 class Biped( Char ):
 
-    def __init__(self):
-        super( Biped, self ).__init__()
+    def __init__(self, *args):
+        super( Biped, self ).__init__( *args)
 
         self.DEBUG = False
 
@@ -10329,8 +10475,8 @@ class Biped( Char ):
 
 class Quadruped( Char ):
 
-    def __init__(self):
-        super( Quadruped, self ).__init__()
+    def __init__(self, *args):
+        super( Quadruped, self ).__init__( *args)
 
         self.DEBUG = True
 
@@ -12322,6 +12468,7 @@ class Quadruped( Char ):
             guide_sfx = '_Guide'
 
             guides = self.build_guide_controls(guide_data=guide_data, guide_list=guide_list)
+########################################################################################################################
 
             # Move Guides that have no direct constraints
             src = self.find_node(self.charRoot, 'COG_Guide')
@@ -16636,6 +16783,16 @@ class MainTab( QWidget ):
 
         self.rig.set_pose( self.pose )
 
+    def paste_swap_pose( self ):
+
+        # Paste Pose
+        self.rig.set_pose( self.pose )
+
+        # Swap Pose
+        self.rig.swap_pose(mode = 'all',
+            symMode = 'swap',
+            symDir = 'leftToRight')
+
     def dummy_create(self, *args, **kwargs):
 
         layout = args[0]
@@ -17011,17 +17168,23 @@ class MainTab( QWidget ):
         self.button_key_sel.clicked.connect( partial ( self.rig.get_handles, mode='key', side=kSelection ) )
         self.set_style( self.button_key_sel )
 
-        self.button_pose_copy = self.button_create( self.pickerLayout, 39, 1,  self.red, 1, 5 )
-        self.button_pose_copy.setFixedWidth( five_units )
+        self.button_pose_copy = self.button_create( self.pickerLayout, 39, 1,  self.red, 1, 3)
+        self.button_pose_copy.setFixedWidth( three_units )
         self.button_pose_copy.setText('Copy Pose')
         self.set_style( self.button_pose_copy )
         self.button_pose_copy.clicked.connect(  self.copy_pose )
 
-        self.button_pose_paste = self.button_create( self.pickerLayout, 39, 9,  self.red, 1, 5 )
-        self.button_pose_paste.setFixedWidth( five_units )
+        self.button_pose_paste = self.button_create( self.pickerLayout, 39, 6,  self.red, 1, 3 )
+        self.button_pose_paste.setFixedWidth( three_units )
         self.button_pose_paste.setText('Paste Pose')
         self.set_style( self.button_pose_paste )
         self.button_pose_paste.clicked.connect(  self.paste_pose )
+
+        self.button_pose_paste_swap = self.button_create( self.pickerLayout, 39, 11,  self.red, 1, 3 )
+        self.button_pose_paste_swap.setFixedWidth( three_units )
+        self.button_pose_paste_swap.setText('Paste + Swap')
+        self.set_style( self.button_pose_paste_swap )
+        self.button_pose_paste_swap.clicked.connect(  self.paste_swap_pose )
 
         ########################################################################################################
         # IK
