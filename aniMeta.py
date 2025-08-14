@@ -132,7 +132,7 @@ class AniMeta( object ):
     defaults = [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1.0,  1.0,  1.0,    0,   0.0,   0.0,   0.0,      0,      0,        1 ]
     kBasic, kSymmetricTranslation, kSymmetricRotation = range( 3 )
     kParent, kOrient, kPoint, kAim = range(4)
-    kCube, kSphere, kPipe = range(3)
+    kCube, kSphere, kPipe, kCross = range(4)
 
     ui = None
 
@@ -1434,10 +1434,7 @@ class Rig( Transform ):
 
             new_joints = { }
             rig_type = self.get_type( char )
-            if rig_type == kBipedUE:
-                rootNode = 'root'
-            elif rig_type == kQuadruped:
-                rootNode = 'Root_Jnt'
+            rootNode = 'root'
 
             # Create Joints
             for joint in joints.keys():
@@ -1500,6 +1497,11 @@ class Rig( Transform ):
 
             if rootNode is not None:
                 root_joint = self.find_node( char, rootNode )
+
+                # Rotate the joint
+                if mc.upAxis(query=True, axis=True) == 'z':
+                    mc.setAttr( root_joint + '.jointOrientX', 90)
+
                 mc.connectAttr( char + '.globalScale', root_joint + '.sx')
                 mc.connectAttr( char + '.globalScale', root_joint + '.sy')
                 mc.connectAttr( char + '.globalScale', root_joint + '.sz')
@@ -1914,6 +1916,20 @@ class Rig( Transform ):
                     shape[1],
                     [ 'radius' ]
                 )
+        elif shapeType == self.kCross:
+            ctrl = Control.cross(name=name, size=scale)
+            ctrl_path = self.get_path( ctrl )
+            mc.addAttr( ctrl_path.fullPathName(), ln='controlSize', dv=scale)
+            shape=mc.listRelatives(ctrl_path.fullPathName(), shapes=True)[0]
+
+            mc.rename( shape, name+'Shape')
+
+            mc.setAttr(ctrl_path.fullPathName() + '.lineWidth', 3.0)
+            mc.setAttr(ctrl_path.fullPathName() + '.alwaysDrawOnTop', True)
+            mc.setAttr(ctrl_path.fullPathName() + '.overrideEnabled', True)
+            mc.setAttr(ctrl_path.fullPathName() + '.overrideRGBColors', True)
+            mc.setAttr(ctrl_path.fullPathName() + '.overrideColorRGB', 1, 0.5, 0)
+
 
         mc.addAttr(ctrl_path.fullPathName(), ln='controlOffset', at='compound', numberOfChildren=3)
         mc.addAttr(ctrl_path.fullPathName(), ln='controlOffsetX', parent='controlOffset', at='float')
@@ -1930,8 +1946,6 @@ class Rig( Transform ):
             shapeComp = ctrl_path.fullPathName() + '.vtx[0:' + str(count - 1) + ']'
             mc.move(offset[0], offset[1], offset[2], shapeComp, r=True, os=True)
 
-        mc.polyColorPerVertex(ctrl_path.fullPathName(), rgb=color, alpha=alpha)
-
         cluster = mc.deformer( ctrl_path.fullPathName(), type='cluster', name='aniMetaCluster')
         compMatrix = mc.createNode('composeMatrix', ss=True, name=name+'HandleOffsetMatrix')
 
@@ -1942,10 +1956,17 @@ class Rig( Transform ):
             if mc.nodeType( node ) == 'polyColorPerVertex':
                 mc.rename( node, name+'_Color')
 
+        if shapeType != self.kCross:
+            mc.polyColorPerVertex(ctrl_path.fullPathName(), rgb=color, alpha=alpha)
+            mc.setAttr(ctrl_path.fullPathName() + '.backfaceCulling', 3)
+            mc.setAttr(ctrl_path.fullPathName() + '.allowTopologyMod', 0)
+            mc.setAttr(ctrl_path.fullPathName() + '.smoothLevel', 0)
+            # Turn off rendering attributes
+            for attr in [ "castsShadows",  "receiveShadows", "motionBlur", "primaryVisibility",
+                          "smoothShading", "visibleInReflections", "visibleInRefractions", "doubleSided" ]:
+                mc.setAttr( ctrl_path.fullPathName() + '.' + attr, False )
+
         mc.setAttr(ctrl_path.fullPathName() + '.displayColors', True)
-        mc.setAttr(ctrl_path.fullPathName() + '.backfaceCulling', 3)
-        mc.setAttr(ctrl_path.fullPathName() + '.allowTopologyMod', 0)
-        mc.setAttr(ctrl_path.fullPathName() + '.smoothLevel', 0)
 
         grp = None
         blend_grp = None
@@ -1975,10 +1996,6 @@ class Rig( Transform ):
 
         mc.setAttr( ctrl_path.fullPathName() + '.rotateOrder', rotateOrder)
 
-        # Turn off rendering attributes
-        for attr in [ "castsShadows",  "receiveShadows", "motionBlur", "primaryVisibility",
-                      "smoothShading", "visibleInReflections", "visibleInRefractions", "doubleSided" ]:
-            mc.setAttr( ctrl_path.fullPathName() + '.' + attr, False )
 
         if parent is not None:
             grp = mc.parent( grp, parent.fullPathName() )[0]
@@ -4706,7 +4723,6 @@ class Char( Rig ):
             type = args[1]
 
         if mc.objExists(char):
-
             count = 1
             newChar = char + str(count)
             while mc.objExists(newChar):
@@ -5579,6 +5595,16 @@ class Char( Rig ):
         if 'type' in kwargs:
             type = kwargs['type']
 
+        rig = None
+
+        if type == kBipedUE:
+            rig = Biped( char )
+        elif type == kQuadruped:
+            rig = Quadruped( char )
+
+        if not rig:
+            mc.warning('AniMeta.Char.create: Invalid character class type', type)
+
         print ('\nCreate Rig')
 
         # Create Main Groups
@@ -5587,7 +5613,7 @@ class Char( Rig ):
         char = mainGrp['Main']
 
         # Get skeleton dictionary
-        skeleton = self.get_joints( type )
+        skeleton = rig.get_joint_data( )
 
         # Build skeleton dictionary
         print ('aniMeta: Build Skeleton.')
@@ -5605,16 +5631,8 @@ class Char( Rig ):
         # Create the body guides
         print ('aniMeta: Create the body guides.')
 
-        rig = None
-
-        if type == kBipedUE:
-            rig = Biped( char )
-        elif type == kQuadruped:
-            rig = Quadruped( char )
-
-        if rig:
-            guide_data = rig.get_guide_data()
-            self.create_guides(charRoot=char, rig_obj=rig)
+        guide_data = rig.get_guide_data()
+        self.create_guides(charRoot=char, rig_obj=rig)
 
         mc.setAttr(char+".show_Guides", True )
         mc.setAttr(char+".show_Joints", True )
@@ -6913,1234 +6931,10 @@ class Char( Rig ):
             }
 
         if type == kBipedUE:
-            return {
-                "Skeleton": {
-                    "Joints": {
-                        "root": {
-                            "jox": -90,
-                            "radius": 3.0,
-                            "parent": "Joint_Grp",
-                            "nodeType": "joint"
-                        },
-                        "pelvis": {
-                            "ty": -2.3795,
-                            "tz": 98.6932,
-                            "rx": -90.0,
-                            "ry": -86.3974,
-                            "rz": 90.0,
-                            "radius": 3.0,
-                            "parent": "root",
-                            "nodeType": "joint"
-                        },
-                        "spine_01": {
-                            "tx": 2.4719,
-                            "rx": 0.0001,
-                            "rz": -17.2467,
-                            "radius": 3.0,
-                            "parent": "pelvis",
-                            "nodeType": "joint"
-                        },
-                        "spine_02": {
-                            "tx": 4.9875,
-                            "rx": -0.0002,
-                            "rz": 6.825,
-                            "radius": 3.0,
-                            "parent": "spine_01",
-                            "nodeType": "joint"
-                        },
-                        "spine_03": {
-                            "tx": 7.6259,
-                            "rx": 0.0002,
-                            "rz": 10.3212,
-                            "radius": 3.0,
-                            "parent": "spine_02",
-                            "nodeType": "joint"
-                        },
-                        "spine_04": {
-                            "tx": 8.8511,
-                            "rx": 0.0002,
-                            "rz": 8.4786,
-                            "radius": 3.0,
-                            "parent": "spine_03",
-                            "nodeType": "joint"
-                        },
-                        "spine_05": {
-                            "tx": 17.4988,
-                            "rx": -0.0002,
-                            "rz": 0.2585,
-                            "radius": 3.0,
-                            "parent": "spine_04",
-                            "nodeType": "joint"
-                        },
-                        "neck_01": {
-                            "tx": 11.915,
-                            "ry": -0.0001,
-                            "rz": -25.1344,
-                            "radius": 3.0,
-                            "parent": "spine_05",
-                            "nodeType": "joint"
-                        },
-                        "neck_02": {
-                            "tx": 5.8488,
-                            "rx": -0.0005,
-                            "rz": 0.604,
-                            "radius": 3.0,
-                            "parent": "neck_01",
-                            "nodeType": "joint"
-                        },
-                        "head": {
-                            "tx": 5.7585,
-                            "rx": 0.0003,
-                            "ry": -0.0001,
-                            "rz": 12.2912,
-                            "radius": 3.0,
-                            "parent": "neck_02",
-                            "nodeType": "joint"
-                        },
-                        "clavicle_l": {
-                            "tx": 5.8309,
-                            "ty": 1.0048,
-                            "tz": -0.9314,
-                            "rx": 168.9537,
-                            "ry": 81.6483,
-                            "rz": 156.7854,
-                            "radius": 3.0,
-                            "parent": "spine_05",
-                            "nodeType": "joint"
-                        },
-                        "upper_arm_l": {
-                            "tx": 15.2861,
-                            "rx": -4.581,
-                            "ry": 44.6755,
-                            "rz": -3.614,
-                            "radius": 3.0,
-                            "parent": "clavicle_l",
-                            "nodeType": "joint"
-                        },
-                        "lower_arm_l": {
-                            "tx": 27.0904,
-                            "rz": -36.7004,
-                            "radius": 3.0,
-                            "parent": "upper_arm_l",
-                            "nodeType": "joint"
-                        },
-                        "lower_arm_twist_02_l": {
-                            "tx": 8.6984,
-                            "rx": 0.1429,
-                            "ry": -0.192,
-                            "rz": 0.0669,
-                            "radius": 3.0,
-                            "parent": "lower_arm_l",
-                            "nodeType": "joint"
-                        },
-                        "lower_arm_twist_01_l": {
-                            "tx": 17.3968,
-                            "rx": 0.1429,
-                            "ry": -0.192,
-                            "rz": 0.0669,
-                            "radius": 3.0,
-                            "parent": "lower_arm_l",
-                            "nodeType": "joint"
-                        },
-                        "hand_l": {
-                            "tx": 26.0952,
-                            "rx": -72.649,
-                            "ry": 10.4382,
-                            "rz": 3.7481,
-                            "radius": 3.0,
-                            "parent": "lower_arm_l",
-                            "nodeType": "joint"
-                        },
-                        "middle_palm_l": {
-                            "tx": 3.1166,
-                            "ty": -0.0677,
-                            "tz": -0.3645,
-                            "rx": 0.1733,
-                            "ry": -2.0096,
-                            "rz": -7.1628,
-                            "radius": 3.0,
-                            "parent": "hand_l",
-                            "nodeType": "joint"
-                        },
-                        "middle_01_l": {
-                            "tx": 5.5605,
-                            "rx": -3.6731,
-                            "ry": -4.2859,
-                            "rz": 24.0416,
-                            "radius": 3.0,
-                            "parent": "middle_palm_l",
-                            "nodeType": "joint"
-                        },
-                        "middle_02_l": {
-                            "tx": 4.9197,
-                            "rx": 0.0919,
-                            "ry": 0.4761,
-                            "rz": 19.1529,
-                            "radius": 3.0,
-                            "parent": "middle_01_l",
-                            "nodeType": "joint"
-                        },
-                        "middle_03_l": {
-                            "tx": 2.9021,
-                            "rx": -0.0109,
-                            "ry": -0.2186,
-                            "rz": 2.8503,
-                            "radius": 3.0,
-                            "parent": "middle_02_l",
-                            "nodeType": "joint"
-                        },
-                        "pinky_palm_l": {
-                            "tx": 2.9831,
-                            "ty": 0.242,
-                            "tz": 1.9275,
-                            "rx": -25.3734,
-                            "ry": -21.6206,
-                            "rz": 9.1694,
-                            "radius": 3.0,
-                            "parent": "hand_l",
-                            "nodeType": "joint"
-                        },
-                        "pinky_01_l": {
-                            "tx": 4.7179,
-                            "rx": 0.2654,
-                            "ry": 1.1126,
-                            "rz": 11.7384,
-                            "radius": 3.0,
-                            "parent": "pinky_palm_l",
-                            "nodeType": "joint"
-                        },
-                        "pinky_02_l": {
-                            "tx": 2.8933,
-                            "rx": -0.1015,
-                            "ry": -0.1857,
-                            "rz": 20.2972,
-                            "radius": 3.0,
-                            "parent": "pinky_01_l",
-                            "nodeType": "joint"
-                        },
-                        "pinky_03_l": {
-                            "tx": 1.7915,
-                            "rx": -0.0053,
-                            "ry": -0.0838,
-                            "rz": 3.2541,
-                            "radius": 3.0,
-                            "parent": "pinky_02_l",
-                            "nodeType": "joint"
-                        },
-                        "ring_palm_l": {
-                            "tx": 3.1086,
-                            "ty": 0.0603,
-                            "tz": 0.8014,
-                            "rx": -10.1363,
-                            "ry": -13.6762,
-                            "rz": -2.8714,
-                            "radius": 3.0,
-                            "parent": "hand_l",
-                            "nodeType": "joint"
-                        },
-                        "ring_01_l": {
-                            "tx": 4.9928,
-                            "rx": -0.6691,
-                            "ry": 0.7738,
-                            "rz": 17.9148,
-                            "radius": 3.0,
-                            "parent": "ring_palm_l",
-                            "nodeType": "joint"
-                        },
-                        "ring_02_l": {
-                            "tx": 4.2514,
-                            "rx": 0.0396,
-                            "ry": 0.4462,
-                            "rz": 26.3775,
-                            "radius": 3.0,
-                            "parent": "ring_01_l",
-                            "nodeType": "joint"
-                        },
-                        "ring_03_l": {
-                            "tx": 3.2348,
-                            "rx": -0.0303,
-                            "ry": -0.3676,
-                            "rz": 4.6278,
-                            "radius": 3.0,
-                            "parent": "ring_02_l",
-                            "nodeType": "joint"
-                        },
-                        "thumb_01_l": {
-                            "tx": 2.31,
-                            "ty": 1.4519,
-                            "tz": -2.5471,
-                            "rx": 81.9997,
-                            "ry": 33.1928,
-                            "rz": 20.2681,
-                            "radius": 3.0,
-                            "parent": "hand_l",
-                            "nodeType": "joint"
-                        },
-                        "thumb_02_l": {
-                            "tx": 4.6318,
-                            "rx": -1.0676,
-                            "ry": -6.2937,
-                            "rz": 20.2302,
-                            "radius": 3.0,
-                            "parent": "thumb_01_l",
-                            "nodeType": "joint"
-                        },
-                        "thumb_03_l": {
-                            "tx": 2.7106,
-                            "rx": 0.0305,
-                            "ry": 0.195,
-                            "rz": 8.4044,
-                            "radius": 3.0,
-                            "parent": "thumb_02_l",
-                            "nodeType": "joint"
-                        },
-                        "index_palm_l": {
-                            "tx": 3.4527,
-                            "ty": 0.1128,
-                            "tz": -2.0519,
-                            "rx": 17.5598,
-                            "ry": 5.6408,
-                            "rz": -3.8649,
-                            "radius": 3.0,
-                            "parent": "hand_l",
-                            "nodeType": "joint"
-                        },
-                        "index_01_l": {
-                            "tx": 5.3769,
-                            "rx": -10.6019,
-                            "ry": -4.4455,
-                            "rz": 19.2285,
-                            "radius": 3.0,
-                            "parent": "index_palm_l",
-                            "nodeType": "joint"
-                        },
-                        "index_02_l": {
-                            "tx": 4.5645,
-                            "rx": 0.0651,
-                            "ry": 0.2475,
-                            "rz": 11.7142,
-                            "radius": 3.0,
-                            "parent": "index_01_l",
-                            "nodeType": "joint"
-                        },
-                        "index_03_l": {
-                            "tx": 2.4865,
-                            "ry": 0.0602,
-                            "rz": -0.0124,
-                            "radius": 3.0,
-                            "parent": "index_02_l",
-                            "nodeType": "joint"
-                        },
-                        "upper_arm_twist_01_l": {
-                            "tx": 9.0301,
-                            "ry": -0.2393,
-                            "rz": 0.0137,
-                            "radius": 3.0,
-                            "parent": "upper_arm_l",
-                            "nodeType": "joint"
-                        },
-                        "upper_arm_twist_02_l": {
-                            "tx": 18.0602,
-                            "radius": 3.0,
-                            "parent": "upper_arm_l",
-                            "nodeType": "joint"
-                        },
-                        "clavicle_r": {
-                            "tx": 5.8304,
-                            "ty": 1.0049,
-                            "tz": 0.9314,
-                            "rx": 168.9521,
-                            "ry": 81.6482,
-                            "rz": -23.2162,
-                            "radius": 3.0,
-                            "parent": "spine_05",
-                            "nodeType": "joint"
-                        },
-                        "upper_arm_r": {
-                            "tx": -15.286,
-                            "tz": -0.0004,
-                            "rx": -4.581,
-                            "ry": 44.6755,
-                            "rz": -3.614,
-                            "radius": 3.0,
-                            "parent": "clavicle_r",
-                            "nodeType": "joint"
-                        },
-                        "lower_arm_r": {
-                            "tx": -27.0899,
-                            "rz": -36.7004,
-                            "radius": 3.0,
-                            "parent": "upper_arm_r",
-                            "nodeType": "joint"
-                        },
-                        "lower_arm_twist_02_r": {
-                            "tx": -8.6985,
-                            "rx": 0.1429,
-                            "ry": -0.192,
-                            "rz": 0.0669,
-                            "radius": 3.0,
-                            "parent": "lower_arm_r",
-                            "nodeType": "joint"
-                        },
-                        "lower_arm_twist_01_r": {
-                            "tx": -17.397,
-                            "rx": 0.1429,
-                            "ry": -0.192,
-                            "rz": 0.0669,
-                            "radius": 3.0,
-                            "parent": "lower_arm_r",
-                            "nodeType": "joint"
-                        },
-                        "hand_r": {
-                            "tx": -26.0955,
-                            "rx": -72.649,
-                            "ry": 10.4382,
-                            "rz": 3.7481,
-                            "radius": 3.0,
-                            "parent": "lower_arm_r",
-                            "nodeType": "joint"
-                        },
-                        "middle_palm_r": {
-                            "tx": -3.1166,
-                            "ty": 0.0677,
-                            "tz": 0.3642,
-                            "rx": 0.1733,
-                            "ry": -2.0096,
-                            "rz": -7.1628,
-                            "radius": 3.0,
-                            "parent": "hand_r",
-                            "nodeType": "joint"
-                        },
-                        "middle_01_r": {
-                            "tx": -5.5606,
-                            "rx": -3.6731,
-                            "ry": -4.2859,
-                            "rz": 24.0416,
-                            "radius": 3.0,
-                            "parent": "middle_palm_r",
-                            "nodeType": "joint"
-                        },
-                        "middle_02_r": {
-                            "tx": -4.9196,
-                            "rx": 0.0919,
-                            "ry": 0.4761,
-                            "rz": 19.1529,
-                            "radius": 3.0,
-                            "parent": "middle_01_r",
-                            "nodeType": "joint"
-                        },
-                        "middle_03_r": {
-                            "tx": -2.9021,
-                            "rx": -0.0109,
-                            "ry": -0.2186,
-                            "rz": 2.8503,
-                            "radius": 3.0,
-                            "parent": "middle_02_r",
-                            "nodeType": "joint"
-                        },
-                        "pinky_palm_r": {
-                            "tx": -2.9831,
-                            "ty": -0.242,
-                            "tz": -1.9278,
-                            "rx": -25.3734,
-                            "ry": -21.6206,
-                            "rz": 9.1694,
-                            "radius": 3.0,
-                            "parent": "hand_r",
-                            "nodeType": "joint"
-                        },
-                        "pinky_01_r": {
-                            "tx": -4.718,
-                            "rx": 0.2654,
-                            "ry": 1.1126,
-                            "rz": 11.7384,
-                            "radius": 3.0,
-                            "parent": "pinky_palm_r",
-                            "nodeType": "joint"
-                        },
-                        "pinky_02_r": {
-                            "tx": -2.8933,
-                            "tz": 0.0001,
-                            "rx": -0.1015,
-                            "ry": -0.1857,
-                            "rz": 20.2972,
-                            "radius": 3.0,
-                            "parent": "pinky_01_r",
-                            "nodeType": "joint"
-                        },
-                        "pinky_03_r": {
-                            "tx": -1.7915,
-                            "rx": -0.0053,
-                            "ry": -0.0838,
-                            "rz": 3.2541,
-                            "radius": 3.0,
-                            "parent": "pinky_02_r",
-                            "nodeType": "joint"
-                        },
-                        "ring_palm_r": {
-                            "tx": -3.1086,
-                            "ty": -0.0604,
-                            "tz": -0.8016,
-                            "rx": -10.1363,
-                            "ry": -13.6762,
-                            "rz": -2.8714,
-                            "radius": 3.0,
-                            "parent": "hand_r",
-                            "nodeType": "joint"
-                        },
-                        "ring_01_r": {
-                            "tx": -4.9928,
-                            "ty": 0.0001,
-                            "rx": -0.6691,
-                            "ry": 0.7738,
-                            "rz": 17.9148,
-                            "radius": 3.0,
-                            "parent": "ring_palm_r",
-                            "nodeType": "joint"
-                        },
-                        "ring_02_r": {
-                            "tx": -4.2514,
-                            "ty": -0.0001,
-                            "rx": 0.0396,
-                            "ry": 0.4462,
-                            "rz": 26.3775,
-                            "radius": 3.0,
-                            "parent": "ring_01_r",
-                            "nodeType": "joint"
-                        },
-                        "ring_03_r": {
-                            "tx": -3.2347,
-                            "ty": 0.0001,
-                            "rx": -0.0303,
-                            "ry": -0.3676,
-                            "rz": 4.6278,
-                            "radius": 3.0,
-                            "parent": "ring_02_r",
-                            "nodeType": "joint"
-                        },
-                        "thumb_01_r": {
-                            "tx": -2.3101,
-                            "ty": -1.4519,
-                            "tz": 2.5468,
-                            "rx": 81.9997,
-                            "ry": 33.1928,
-                            "rz": 20.2681,
-                            "radius": 3.0,
-                            "parent": "hand_r",
-                            "nodeType": "joint"
-                        },
-                        "thumb_02_r": {
-                            "tx": -4.6318,
-                            "rx": -1.0676,
-                            "ry": -6.2937,
-                            "rz": 20.2302,
-                            "radius": 3.0,
-                            "parent": "thumb_01_r",
-                            "nodeType": "joint"
-                        },
-                        "thumb_03_r": {
-                            "tx": -2.7106,
-                            "ty": -0.0001,
-                            "rx": 0.0305,
-                            "ry": 0.195,
-                            "rz": 8.4044,
-                            "radius": 3.0,
-                            "parent": "thumb_02_r",
-                            "nodeType": "joint"
-                        },
-                        "index_palm_r": {
-                            "tx": -3.4527,
-                            "ty": -0.1128,
-                            "tz": 2.0516,
-                            "rx": 17.5598,
-                            "ry": 5.6408,
-                            "rz": -3.8649,
-                            "radius": 3.0,
-                            "parent": "hand_r",
-                            "nodeType": "joint"
-                        },
-                        "index_01_r": {
-                            "tx": -5.3769,
-                            "rx": -10.6019,
-                            "ry": -4.4455,
-                            "rz": 19.2285,
-                            "radius": 3.0,
-                            "parent": "index_palm_r",
-                            "nodeType": "joint"
-                        },
-                        "index_02_r": {
-                            "tx": -4.5646,
-                            "ty": 0.0001,
-                            "rx": 0.0651,
-                            "ry": 0.2475,
-                            "rz": 11.7142,
-                            "radius": 3.0,
-                            "parent": "index_01_r",
-                            "nodeType": "joint"
-                        },
-                        "index_03_r": {
-                            "tx": -2.4864,
-                            "ry": 0.0602,
-                            "rz": -0.0124,
-                            "radius": 3.0,
-                            "parent": "index_02_r",
-                            "nodeType": "joint"
-                        },
-                        "upper_arm_twist_01_r": {
-                            "tx": -9.03,
-                            "tz": -0.0001,
-                            "ry": -0.2393,
-                            "rz": 0.0137,
-                            "radius": 3.0,
-                            "parent": "upper_arm_r",
-                            "nodeType": "joint"
-                        },
-                        "upper_arm_twist_02_r": {
-                            "tx": -18.0599,
-                            "tz": -0.0003,
-                            "radius": 3.0,
-                            "parent": "upper_arm_r",
-                            "nodeType": "joint"
-                        },
-                        "thigh_r": {
-                            "tx": -3.232,
-                            "ty": -0.068,
-                            "tz": 11.1546,
-                            "rx": 8.4755,
-                            "ry": -2.3902,
-                            "rz": 175.2025,
-                            "radius": 3.0,
-                            "parent": "pelvis",
-                            "nodeType": "joint"
-                        },
-                        "calf_r": {
-                            "tx": 45.7519,
-                            "rz": -1.0935,
-                            "radius": 3.0,
-                            "parent": "thigh_r",
-                            "nodeType": "joint"
-                        },
-                        "foot_r": {
-                            "tx": 41.7055,
-                            "rx": 0.0051,
-                            "ry": 2.5398,
-                            "rz": 0.1138,
-                            "radius": 3.0,
-                            "parent": "calf_r",
-                            "nodeType": "joint"
-                        },
-                        "ball_r": {
-                            "tx": 6.5368,
-                            "ty": 13.6292,
-                            "tz": -0.0439,
-                            "rz": -90.0,
-                            "radius": 3.0,
-                            "parent": "foot_r",
-                            "nodeType": "joint"
-                        },
-                        "calf_twist_02_r": {
-                            "tx": 13.9018,
-                            "tz": 0.05,
-                            "rx": 0.005,
-                            "ry": -0.2832,
-                            "rz": 0.1135,
-                            "radius": 3.0,
-                            "parent": "calf_r",
-                            "nodeType": "joint"
-                        },
-                        "calf_twist_01_r": {
-                            "tx": 27.8036,
-                            "tz": 0.1,
-                            "rx": 0.005,
-                            "ry": -0.2832,
-                            "rz": 0.1135,
-                            "radius": 3.0,
-                            "parent": "calf_r",
-                            "nodeType": "joint"
-                        },
-                        "thigh_twist_01_r": {
-                            "tx": 15.2506,
-                            "rx": -0.0001,
-                            "ry": -0.2833,
-                            "rz": 0.0533,
-                            "radius": 3.0,
-                            "parent": "thigh_r",
-                            "nodeType": "joint"
-                        },
-                        "thigh_twist_02_r": {
-                            "tx": 30.5013,
-                            "rx": -0.0001,
-                            "ry": -0.2833,
-                            "rz": 0.0533,
-                            "radius": 3.0,
-                            "parent": "thigh_r",
-                            "nodeType": "joint"
-                        },
-                        "thigh_l": {
-                            "tx": -3.232,
-                            "ty": -0.068,
-                            "tz": -11.1546,
-                            "rx": 8.4755,
-                            "ry": -2.3902,
-                            "rz": -4.7975,
-                            "radius": 3.0,
-                            "parent": "pelvis",
-                            "nodeType": "joint"
-                        },
-                        "calf_l": {
-                            "tx": -45.752,
-                            "rz": -1.0935,
-                            "radius": 3.0,
-                            "parent": "thigh_l",
-                            "nodeType": "joint"
-                        },
-                        "foot_l": {
-                            "tx": -41.7054,
-                            "rx": 0.0051,
-                            "ry": 2.5398,
-                            "rz": 0.1138,
-                            "radius": 3.0,
-                            "parent": "calf_l",
-                            "nodeType": "joint"
-                        },
-                        "ball_l": {
-                            "tx": -6.5368,
-                            "ty": -13.6292,
-                            "tz": 0.0439,
-                            "rz": -90.0,
-                            "radius": 3.0,
-                            "parent": "foot_l",
-                            "nodeType": "joint"
-                        },
-                        "calf_twist_02_l": {
-                            "tx": -13.9018,
-                            "tz": -0.05,
-                            "rx": 0.005,
-                            "ry": -0.2832,
-                            "rz": 0.1135,
-                            "radius": 3.0,
-                            "parent": "calf_l",
-                            "nodeType": "joint"
-                        },
-                        "calf_twist_01_l": {
-                            "tx": -27.8036,
-                            "tz": -0.1,
-                            "rx": 0.005,
-                            "ry": -0.2832,
-                            "rz": 0.1135,
-                            "radius": 3.0,
-                            "parent": "calf_l",
-                            "nodeType": "joint"
-                        },
-                        "thigh_twist_01_l": {
-                            "tx": -15.2507,
-                            "rx": -0.0001,
-                            "ry": -0.2833,
-                            "rz": 0.0533,
-                            "radius": 3.0,
-                            "parent": "thigh_l",
-                            "nodeType": "joint"
-                        },
-                        "thigh_twist_02_l": {
-                            "tx": -30.5014,
-                            "rx": -0.0001,
-                            "ry": -0.2833,
-                            "rz": 0.0533,
-                            "radius": 3.0,
-                            "parent": "thigh_l",
-                            "nodeType": "joint"
-                        },
-                        "ik_foot_root": {
-                            "radius": 3.0,
-                            "parent": "root",
-                            "nodeType": "joint"
-                        },
-                        "ik_foot_l": {
-                            "tx": 14.7118,
-                            "ty": -0.0415,
-                            "tz": 8.1438,
-                            "rx": 65.8119,
-                            "ry": -89.3347,
-                            "rz": -60.6186,
-                            "radius": 3.0,
-                            "parent": "ik_foot_root",
-                            "nodeType": "joint"
-                        },
-                        "ik_foot_r": {
-                            "tx": -14.7118,
-                            "ty": -0.0414,
-                            "tz": 8.1438,
-                            "rx": -114.1877,
-                            "ry": 89.3347,
-                            "rz": 60.619,
-                            "radius": 3.0,
-                            "parent": "ik_foot_root",
-                            "nodeType": "joint"
-                        },
-                        "ik_hand_root": {
-                            "radius": 3.0,
-                            "parent": "root",
-                            "nodeType": "joint"
-                        },
-                        "ik_hand_gun": {
-                            "tx": -45.5549,
-                            "ty": -14.4006,
-                            "tz": 105.6407,
-                            "rx": 71.6563,
-                            "ry": -51.6072,
-                            "rz": 34.7704,
-                            "radius": 3.0,
-                            "parent": "ik_hand_root",
-                            "nodeType": "joint"
-                        },
-                        "ik_hand_l": {
-                            "tx": 46.4804,
-                            "ty": -72.0305,
-                            "tz": 30.8576,
-                            "rx": -145.2021,
-                            "ry": -20.2165,
-                            "rz": -120.7276,
-                            "radius": 3.0,
-                            "parent": "ik_hand_gun",
-                            "nodeType": "joint"
-                        },
-                        "ik_hand_r": {
-                            "radius": 3.0,
-                            "parent": "ik_hand_gun",
-                            "nodeType": "joint"
-                        },
-                        "interaction": {
-                            "radius": 3.0,
-                            "parent": "root",
-                            "nodeType": "joint"
-                        },
-                        "center_of_mass": {
-                            "radius": 3.0,
-                            "parent": "root",
-                            "nodeType": "joint"
-                        }
-                    }
-                }
-            }
+            pass
 
         if type == kQuadruped:
-            return {
-                 "Skeleton": {
-                  "Joints": {
-                   "Root_Jnt": {
-                    "radius": 3,
-                    "nodeType": "joint",
-                    "parent": "Joint_Grp"
-                   },
-                   "Pelvis_Jnt": {
-                    "ty": 112.646,
-                    "tz": -50,
-                    "radius": 3,
-                    "parent": "Root_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Femur_Lft_Jnt": {
-                    "tx": 10.706,
-                    "ty": -7.635,
-                    "tz": -9.737,
-                    "jox": 49.5564,
-                    "radius": 3,
-                    "parent": "Pelvis_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Fibula_Lft_Jnt": {
-                    "tz": 37.827,
-                    "jox": 77.9223,
-                    "radius": 3,
-                    "parent": "Femur_Lft_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "HindCannon_Lft_Jnt": {
-                    "tz": 31.596,
-                    "jox": -37.8725,
-                    "radius": 3,
-                    "parent": "Fibula_Lft_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "HindPastern_Lft_Jnt": {
-                    "tz": 35.052,
-                    "jox": -32.0856,
-                    "radius": 3,
-                    "parent": "HindCannon_Lft_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "HindHoof_Lft_Jnt": {
-                    "tz": 7.5,
-                    "radius": 3,
-                    "parent": "HindPastern_Lft_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "HindHoofTip_Lft_Jnt": {
-                    "tz": 7.5,
-                    "jox": -5.1461,
-                    "radius": 3,
-                    "parent": "HindHoof_Lft_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Femur_Rgt_Jnt": {
-                    "tx": -10.706,
-                    "ty": -7.635,
-                    "tz": -9.737,
-                    "jox": -130.4436,
-                    "radius": 3,
-                    "parent": "Pelvis_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Fibula_Rgt_Jnt": {
-                    "tz": -37.827,
-                    "jox": 77.9223,
-                    "radius": 3,
-                    "parent": "Femur_Rgt_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "HindCannon_Rgt_Jnt": {
-                    "tz": -31.596,
-                    "jox": -37.8725,
-                    "radius": 3,
-                    "parent": "Fibula_Rgt_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "HindPastern_Rgt_Jnt": {
-                    "tz": -35.052,
-                    "jox": -32.0856,
-                    "radius": 3,
-                    "parent": "HindCannon_Rgt_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "HindHoof_Rgt_Jnt": {
-                    "tz": -7.5,
-                    "radius": 3,
-                    "parent": "HindPastern_Rgt_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "HindHoofTip_Rgt_Jnt": {
-                    "tz": -7.5,
-                    "jox": -5.1461,
-                    "radius": 3,
-                    "parent": "HindHoof_Rgt_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Spine1_Jnt": {
-                    "tz": 12,
-                    "radius": 3,
-                    "parent": "Pelvis_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Spine2_Jnt": {
-                    "tz": 12,
-                    "radius": 3,
-                    "parent": "Spine1_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Spine3_Jnt": {
-                    "tz": 12,
-                    "radius": 3,
-                    "parent": "Spine2_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Spine4_Jnt": {
-                    "tz": 12,
-                    "radius": 3,
-                    "parent": "Spine3_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Spine5_Jnt": {
-                    "tz": 12,
-                    "radius": 3,
-                    "parent": "Spine4_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Spine6_Jnt": {
-                    "tz": 12,
-                    "radius": 3,
-                    "parent": "Spine5_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Spine7_Jnt": {
-                    "tz": 12,
-                    "radius": 3,
-                    "parent": "Spine6_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Chest_Jnt": {
-                    "tz": 3.654,
-                    "radius": 3,
-                    "parent": "Spine7_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Neck1_Jnt": {
-                    "tz": 12,
-                    "radius": 3,
-                    "parent": "Chest_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Neck2_Jnt": {
-                    "tz": 12,
-                    "radius": 3,
-                    "parent": "Neck1_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Neck3_Jnt": {
-                    "tz": 12,
-                    "radius": 3,
-                    "parent": "Neck2_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Neck4_Jnt": {
-                    "tz": 12,
-                    "radius": 3,
-                    "parent": "Neck3_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Neck5_Jnt": {
-                    "tz": 12,
-                    "radius": 3,
-                    "parent": "Neck4_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Neck6_Jnt": {
-                    "tz": 12,
-                    "radius": 3,
-                    "parent": "Neck5_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Neck7_Jnt": {
-                    "tz": 12,
-                    "radius": 3,
-                    "parent": "Neck6_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Head_Jnt": {
-                    "tz": 2.096,
-                    "jox": 67.609,
-                    "radius": 3,
-                    "parent": "Neck7_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Ear_Lft_Jnt": {
-                    "tx": 7.128,
-                    "ty": 2.438,
-                    "tz": -4.806,
-                    "jox": -44.7,
-                    "joz": -17.7,
-                    "radius": 3,
-                    "parent": "Head_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "EarTip_Lft_Jnt": {
-                    "ty": 8.5,
-                    "radius": 3,
-                    "parent": "Ear_Lft_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Ear_Rgt_Jnt": {
-                    "tx": -7.128,
-                    "ty": 2.438,
-                    "tz": -4.806,
-                    "jox": 135.3,
-                    "joz": 17.7,
-                    "radius": 3,
-                    "parent": "Head_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "EarTip_Rgt_Jnt": {
-                    "ty": -8.5,
-                    "radius": 3,
-                    "parent": "Ear_Rgt_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Eye_Lft_Jnt": {
-                    "tx": 7.298,
-                    "ty": 4.374,
-                    "tz": 5.87,
-                    "radius": 3,
-                    "parent": "Head_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Eye_Rgt_Jnt": {
-                    "tx": -7.298,
-                    "ty": 4.374,
-                    "tz": 5.87,
-                    "jox": 180.0,
-                    "radius": 3,
-                    "parent": "Head_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "HeadTip_Jnt": {
-                    "ty": -1.811,
-                    "tz": 36.066,
-                    "radius": 3,
-                    "parent": "Head_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Jaw_Jnt": {
-                    "ty": -6.034,
-                    "tz": 6.392,
-                    "jox": 4.3305,
-                    "radius": 3,
-                    "parent": "Head_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "JawTip_Jnt": {
-                    "tz": 22.192,
-                    "radius": 3,
-                    "parent": "Jaw_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Scapula_Lft_Jnt": {
-                    "tx": 10.706,
-                    "ty": 4.564,
-                    "tz": -4.28,
-                    "jox": 49.4669,
-                    "joy": 1.5141,
-                    "joz": -1.2943,
-                    "radius": 3,
-                    "parent": "Chest_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Humerus_Lft_Jnt": {
-                    "tx": 01.987,
-                    "tz": 39.995,
-                    "jox": 87.8821,
-                    "radius": 3,
-                    "parent": "Scapula_Lft_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Radius_Lft_Jnt": {
-                    "tz": 24.26,
-                    "jox": -47.5437,
-                    "radius": 3,
-                    "parent": "Humerus_Lft_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "ForeCannon_Lft_Jnt": {
-                    "tz": 27.78,
-                    "radius": 3,
-                    "parent": "Radius_Lft_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "ForePastern_Lft_Jnt": {
-                    "tz": 28,
-                    "jox": -30.1682,
-                    "radius": 3,
-                    "parent": "ForeCannon_Lft_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "ForeHoof_Lft_Jnt": {
-                    "ty": 0.2,
-                    "tz": 7.5,
-                    "radius": 3,
-                    "parent": "ForePastern_Lft_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "ForeHoofTip_Lft_Jnt": {
-                    "tz": 7.5,
-                    "radius": 3,
-                    "parent": "ForeHoof_Lft_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Scapula_Rgt_Jnt": {
-                    "tx": -10.706,
-                    "ty": 4.564,
-                    "tz": -4.28,
-                    "jox": -130.5331,
-                    "joy": -1.5141,
-                    "joz": 1.2943,
-                    "radius": 3,
-                    "parent": "Chest_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Humerus_Rgt_Jnt": {
-                    "tx": -1.987,
-                    "tz": -39.995,
-                    "jox": 87.8821,
-                    "radius": 3,
-                    "parent": "Scapula_Rgt_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Radius_Rgt_Jnt": {
-                    "tz": -24.26,
-                    "jox": -47.5437,
-                    "radius": 3,
-                    "parent": "Humerus_Rgt_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "ForeCannon_Rgt_Jnt": {
-                    "tz": -27.78,
-                    "radius": 3,
-                    "parent": "Radius_Rgt_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "ForePastern_Rgt_Jnt": {
-                    "tz": -28,
-                    "jox": -30.1682,
-                    "radius": 3,
-                    "parent": "ForeCannon_Rgt_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "ForeHoof_Rgt_Jnt": {
-                    "ty": -0.2,
-                    "tz": -7.5,
-                    "radius": 3,
-                    "parent": "ForePastern_Rgt_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "ForeHoofTip_Rgt_Jnt": {
-                    "tz": -7.5,
-                    "radius": 3,
-                    "parent": "ForeHoof_Rgt_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Tail1_Jnt": {
-                    "tz": -20,
-                    "radius": 3,
-                    "parent": "Pelvis_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Tail2_Jnt": {
-                    "tz": -10,
-                    "radius": 3,
-                    "parent": "Tail1_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Tail3_Jnt": {
-                    "tz": -10,
-                    "radius": 3,
-                    "parent": "Tail2_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Tail4_Jnt": {
-                    "tz": -20,
-                    "radius": 3,
-                    "parent": "Tail3_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Tail5_Jnt": {
-                    "tz": -20,
-                    "radius": 3,
-                    "parent": "Tail4_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Tail6_Jnt": {
-                    "tz": -20,
-                    "radius": 3,
-                    "parent": "Tail5_Jnt",
-                    "nodeType": "joint"
-                   },
-                   "Tail7_Jnt": {
-                    "tz": -20,
-                    "radius": 3,
-                    "parent": "Tail6_Jnt",
-                    "nodeType": "joint"
-                   }
-                  }
-                 }
-                }
+           pass
 
     def save_for_cleanup( self, node ):
         if not self.charRoot:
@@ -10223,6 +9017,818 @@ class Biped( Char ):
 
         return guide_list
 
+    def get_joint_data(self):
+
+        return {
+            "Skeleton": {
+                "Joints": {
+                    "root": {
+                        "jox": -90,
+                        "radius": 3.0,
+                        "parent": "Joint_Grp",
+                        "nodeType": "joint"
+                    },
+                    "pelvis": {
+                        "ty": -2.3795,
+                        "tz": 98.6932,
+                        "rx": -90.0,
+                        "ry": -86.3974,
+                        "rz": 90.0,
+                        "radius": 3.0,
+                        "parent": "root",
+                        "nodeType": "joint"
+                    },
+                    "spine_01": {
+                        "tx": 2.4719,
+                        "rx": 0.0001,
+                        "rz": -17.2467,
+                        "radius": 3.0,
+                        "parent": "pelvis",
+                        "nodeType": "joint"
+                    },
+                    "spine_02": {
+                        "tx": 4.9875,
+                        "rx": -0.0002,
+                        "rz": 6.825,
+                        "radius": 3.0,
+                        "parent": "spine_01",
+                        "nodeType": "joint"
+                    },
+                    "spine_03": {
+                        "tx": 7.6259,
+                        "rx": 0.0002,
+                        "rz": 10.3212,
+                        "radius": 3.0,
+                        "parent": "spine_02",
+                        "nodeType": "joint"
+                    },
+                    "spine_04": {
+                        "tx": 8.8511,
+                        "rx": 0.0002,
+                        "rz": 8.4786,
+                        "radius": 3.0,
+                        "parent": "spine_03",
+                        "nodeType": "joint"
+                    },
+                    "spine_05": {
+                        "tx": 17.4988,
+                        "rx": -0.0002,
+                        "rz": 0.2585,
+                        "radius": 3.0,
+                        "parent": "spine_04",
+                        "nodeType": "joint"
+                    },
+                    "neck_01": {
+                        "tx": 11.915,
+                        "ry": -0.0001,
+                        "rz": -25.1344,
+                        "radius": 3.0,
+                        "parent": "spine_05",
+                        "nodeType": "joint"
+                    },
+                    "neck_02": {
+                        "tx": 5.8488,
+                        "rx": -0.0005,
+                        "rz": 0.604,
+                        "radius": 3.0,
+                        "parent": "neck_01",
+                        "nodeType": "joint"
+                    },
+                    "head": {
+                        "tx": 5.7585,
+                        "rx": 0.0003,
+                        "ry": -0.0001,
+                        "rz": 12.2912,
+                        "radius": 3.0,
+                        "parent": "neck_02",
+                        "nodeType": "joint"
+                    },
+                    "clavicle_l": {
+                        "tx": 5.8309,
+                        "ty": 1.0048,
+                        "tz": -0.9314,
+                        "rx": 168.9537,
+                        "ry": 81.6483,
+                        "rz": 156.7854,
+                        "radius": 3.0,
+                        "parent": "spine_05",
+                        "nodeType": "joint"
+                    },
+                    "upper_arm_l": {
+                        "tx": 15.2861,
+                        "rx": -4.581,
+                        "ry": 44.6755,
+                        "rz": -3.614,
+                        "radius": 3.0,
+                        "parent": "clavicle_l",
+                        "nodeType": "joint"
+                    },
+                    "lower_arm_l": {
+                        "tx": 27.0904,
+                        "rz": -36.7004,
+                        "radius": 3.0,
+                        "parent": "upper_arm_l",
+                        "nodeType": "joint"
+                    },
+                    "lower_arm_twist_02_l": {
+                        "tx": 8.6984,
+                        "rx": 0.1429,
+                        "ry": -0.192,
+                        "rz": 0.0669,
+                        "radius": 3.0,
+                        "parent": "lower_arm_l",
+                        "nodeType": "joint"
+                    },
+                    "lower_arm_twist_01_l": {
+                        "tx": 17.3968,
+                        "rx": 0.1429,
+                        "ry": -0.192,
+                        "rz": 0.0669,
+                        "radius": 3.0,
+                        "parent": "lower_arm_l",
+                        "nodeType": "joint"
+                    },
+                    "hand_l": {
+                        "tx": 26.0952,
+                        "rx": -72.649,
+                        "ry": 10.4382,
+                        "rz": 3.7481,
+                        "radius": 3.0,
+                        "parent": "lower_arm_l",
+                        "nodeType": "joint"
+                    },
+                    "middle_palm_l": {
+                        "tx": 3.1166,
+                        "ty": -0.0677,
+                        "tz": -0.3645,
+                        "rx": 0.1733,
+                        "ry": -2.0096,
+                        "rz": -7.1628,
+                        "radius": 3.0,
+                        "parent": "hand_l",
+                        "nodeType": "joint"
+                    },
+                    "middle_01_l": {
+                        "tx": 5.5605,
+                        "rx": -3.6731,
+                        "ry": -4.2859,
+                        "rz": 24.0416,
+                        "radius": 3.0,
+                        "parent": "middle_palm_l",
+                        "nodeType": "joint"
+                    },
+                    "middle_02_l": {
+                        "tx": 4.9197,
+                        "rx": 0.0919,
+                        "ry": 0.4761,
+                        "rz": 19.1529,
+                        "radius": 3.0,
+                        "parent": "middle_01_l",
+                        "nodeType": "joint"
+                    },
+                    "middle_03_l": {
+                        "tx": 2.9021,
+                        "rx": -0.0109,
+                        "ry": -0.2186,
+                        "rz": 2.8503,
+                        "radius": 3.0,
+                        "parent": "middle_02_l",
+                        "nodeType": "joint"
+                    },
+                    "pinky_palm_l": {
+                        "tx": 2.9831,
+                        "ty": 0.242,
+                        "tz": 1.9275,
+                        "rx": -25.3734,
+                        "ry": -21.6206,
+                        "rz": 9.1694,
+                        "radius": 3.0,
+                        "parent": "hand_l",
+                        "nodeType": "joint"
+                    },
+                    "pinky_01_l": {
+                        "tx": 4.7179,
+                        "rx": 0.2654,
+                        "ry": 1.1126,
+                        "rz": 11.7384,
+                        "radius": 3.0,
+                        "parent": "pinky_palm_l",
+                        "nodeType": "joint"
+                    },
+                    "pinky_02_l": {
+                        "tx": 2.8933,
+                        "rx": -0.1015,
+                        "ry": -0.1857,
+                        "rz": 20.2972,
+                        "radius": 3.0,
+                        "parent": "pinky_01_l",
+                        "nodeType": "joint"
+                    },
+                    "pinky_03_l": {
+                        "tx": 1.7915,
+                        "rx": -0.0053,
+                        "ry": -0.0838,
+                        "rz": 3.2541,
+                        "radius": 3.0,
+                        "parent": "pinky_02_l",
+                        "nodeType": "joint"
+                    },
+                    "ring_palm_l": {
+                        "tx": 3.1086,
+                        "ty": 0.0603,
+                        "tz": 0.8014,
+                        "rx": -10.1363,
+                        "ry": -13.6762,
+                        "rz": -2.8714,
+                        "radius": 3.0,
+                        "parent": "hand_l",
+                        "nodeType": "joint"
+                    },
+                    "ring_01_l": {
+                        "tx": 4.9928,
+                        "rx": -0.6691,
+                        "ry": 0.7738,
+                        "rz": 17.9148,
+                        "radius": 3.0,
+                        "parent": "ring_palm_l",
+                        "nodeType": "joint"
+                    },
+                    "ring_02_l": {
+                        "tx": 4.2514,
+                        "rx": 0.0396,
+                        "ry": 0.4462,
+                        "rz": 26.3775,
+                        "radius": 3.0,
+                        "parent": "ring_01_l",
+                        "nodeType": "joint"
+                    },
+                    "ring_03_l": {
+                        "tx": 3.2348,
+                        "rx": -0.0303,
+                        "ry": -0.3676,
+                        "rz": 4.6278,
+                        "radius": 3.0,
+                        "parent": "ring_02_l",
+                        "nodeType": "joint"
+                    },
+                    "thumb_01_l": {
+                        "tx": 2.31,
+                        "ty": 1.4519,
+                        "tz": -2.5471,
+                        "rx": 81.9997,
+                        "ry": 33.1928,
+                        "rz": 20.2681,
+                        "radius": 3.0,
+                        "parent": "hand_l",
+                        "nodeType": "joint"
+                    },
+                    "thumb_02_l": {
+                        "tx": 4.6318,
+                        "rx": -1.0676,
+                        "ry": -6.2937,
+                        "rz": 20.2302,
+                        "radius": 3.0,
+                        "parent": "thumb_01_l",
+                        "nodeType": "joint"
+                    },
+                    "thumb_03_l": {
+                        "tx": 2.7106,
+                        "rx": 0.0305,
+                        "ry": 0.195,
+                        "rz": 8.4044,
+                        "radius": 3.0,
+                        "parent": "thumb_02_l",
+                        "nodeType": "joint"
+                    },
+                    "index_palm_l": {
+                        "tx": 3.4527,
+                        "ty": 0.1128,
+                        "tz": -2.0519,
+                        "rx": 17.5598,
+                        "ry": 5.6408,
+                        "rz": -3.8649,
+                        "radius": 3.0,
+                        "parent": "hand_l",
+                        "nodeType": "joint"
+                    },
+                    "index_01_l": {
+                        "tx": 5.3769,
+                        "rx": -10.6019,
+                        "ry": -4.4455,
+                        "rz": 19.2285,
+                        "radius": 3.0,
+                        "parent": "index_palm_l",
+                        "nodeType": "joint"
+                    },
+                    "index_02_l": {
+                        "tx": 4.5645,
+                        "rx": 0.0651,
+                        "ry": 0.2475,
+                        "rz": 11.7142,
+                        "radius": 3.0,
+                        "parent": "index_01_l",
+                        "nodeType": "joint"
+                    },
+                    "index_03_l": {
+                        "tx": 2.4865,
+                        "ry": 0.0602,
+                        "rz": -0.0124,
+                        "radius": 3.0,
+                        "parent": "index_02_l",
+                        "nodeType": "joint"
+                    },
+                    "upper_arm_twist_01_l": {
+                        "tx": 9.0301,
+                        "ry": -0.2393,
+                        "rz": 0.0137,
+                        "radius": 3.0,
+                        "parent": "upper_arm_l",
+                        "nodeType": "joint"
+                    },
+                    "upper_arm_twist_02_l": {
+                        "tx": 18.0602,
+                        "radius": 3.0,
+                        "parent": "upper_arm_l",
+                        "nodeType": "joint"
+                    },
+                    "clavicle_r": {
+                        "tx": 5.8304,
+                        "ty": 1.0049,
+                        "tz": 0.9314,
+                        "rx": 168.9521,
+                        "ry": 81.6482,
+                        "rz": -23.2162,
+                        "radius": 3.0,
+                        "parent": "spine_05",
+                        "nodeType": "joint"
+                    },
+                    "upper_arm_r": {
+                        "tx": -15.286,
+                        "tz": -0.0004,
+                        "rx": -4.581,
+                        "ry": 44.6755,
+                        "rz": -3.614,
+                        "radius": 3.0,
+                        "parent": "clavicle_r",
+                        "nodeType": "joint"
+                    },
+                    "lower_arm_r": {
+                        "tx": -27.0899,
+                        "rz": -36.7004,
+                        "radius": 3.0,
+                        "parent": "upper_arm_r",
+                        "nodeType": "joint"
+                    },
+                    "lower_arm_twist_02_r": {
+                        "tx": -8.6985,
+                        "rx": 0.1429,
+                        "ry": -0.192,
+                        "rz": 0.0669,
+                        "radius": 3.0,
+                        "parent": "lower_arm_r",
+                        "nodeType": "joint"
+                    },
+                    "lower_arm_twist_01_r": {
+                        "tx": -17.397,
+                        "rx": 0.1429,
+                        "ry": -0.192,
+                        "rz": 0.0669,
+                        "radius": 3.0,
+                        "parent": "lower_arm_r",
+                        "nodeType": "joint"
+                    },
+                    "hand_r": {
+                        "tx": -26.0955,
+                        "rx": -72.649,
+                        "ry": 10.4382,
+                        "rz": 3.7481,
+                        "radius": 3.0,
+                        "parent": "lower_arm_r",
+                        "nodeType": "joint"
+                    },
+                    "middle_palm_r": {
+                        "tx": -3.1166,
+                        "ty": 0.0677,
+                        "tz": 0.3642,
+                        "rx": 0.1733,
+                        "ry": -2.0096,
+                        "rz": -7.1628,
+                        "radius": 3.0,
+                        "parent": "hand_r",
+                        "nodeType": "joint"
+                    },
+                    "middle_01_r": {
+                        "tx": -5.5606,
+                        "rx": -3.6731,
+                        "ry": -4.2859,
+                        "rz": 24.0416,
+                        "radius": 3.0,
+                        "parent": "middle_palm_r",
+                        "nodeType": "joint"
+                    },
+                    "middle_02_r": {
+                        "tx": -4.9196,
+                        "rx": 0.0919,
+                        "ry": 0.4761,
+                        "rz": 19.1529,
+                        "radius": 3.0,
+                        "parent": "middle_01_r",
+                        "nodeType": "joint"
+                    },
+                    "middle_03_r": {
+                        "tx": -2.9021,
+                        "rx": -0.0109,
+                        "ry": -0.2186,
+                        "rz": 2.8503,
+                        "radius": 3.0,
+                        "parent": "middle_02_r",
+                        "nodeType": "joint"
+                    },
+                    "pinky_palm_r": {
+                        "tx": -2.9831,
+                        "ty": -0.242,
+                        "tz": -1.9278,
+                        "rx": -25.3734,
+                        "ry": -21.6206,
+                        "rz": 9.1694,
+                        "radius": 3.0,
+                        "parent": "hand_r",
+                        "nodeType": "joint"
+                    },
+                    "pinky_01_r": {
+                        "tx": -4.718,
+                        "rx": 0.2654,
+                        "ry": 1.1126,
+                        "rz": 11.7384,
+                        "radius": 3.0,
+                        "parent": "pinky_palm_r",
+                        "nodeType": "joint"
+                    },
+                    "pinky_02_r": {
+                        "tx": -2.8933,
+                        "tz": 0.0001,
+                        "rx": -0.1015,
+                        "ry": -0.1857,
+                        "rz": 20.2972,
+                        "radius": 3.0,
+                        "parent": "pinky_01_r",
+                        "nodeType": "joint"
+                    },
+                    "pinky_03_r": {
+                        "tx": -1.7915,
+                        "rx": -0.0053,
+                        "ry": -0.0838,
+                        "rz": 3.2541,
+                        "radius": 3.0,
+                        "parent": "pinky_02_r",
+                        "nodeType": "joint"
+                    },
+                    "ring_palm_r": {
+                        "tx": -3.1086,
+                        "ty": -0.0604,
+                        "tz": -0.8016,
+                        "rx": -10.1363,
+                        "ry": -13.6762,
+                        "rz": -2.8714,
+                        "radius": 3.0,
+                        "parent": "hand_r",
+                        "nodeType": "joint"
+                    },
+                    "ring_01_r": {
+                        "tx": -4.9928,
+                        "ty": 0.0001,
+                        "rx": -0.6691,
+                        "ry": 0.7738,
+                        "rz": 17.9148,
+                        "radius": 3.0,
+                        "parent": "ring_palm_r",
+                        "nodeType": "joint"
+                    },
+                    "ring_02_r": {
+                        "tx": -4.2514,
+                        "ty": -0.0001,
+                        "rx": 0.0396,
+                        "ry": 0.4462,
+                        "rz": 26.3775,
+                        "radius": 3.0,
+                        "parent": "ring_01_r",
+                        "nodeType": "joint"
+                    },
+                    "ring_03_r": {
+                        "tx": -3.2347,
+                        "ty": 0.0001,
+                        "rx": -0.0303,
+                        "ry": -0.3676,
+                        "rz": 4.6278,
+                        "radius": 3.0,
+                        "parent": "ring_02_r",
+                        "nodeType": "joint"
+                    },
+                    "thumb_01_r": {
+                        "tx": -2.3101,
+                        "ty": -1.4519,
+                        "tz": 2.5468,
+                        "rx": 81.9997,
+                        "ry": 33.1928,
+                        "rz": 20.2681,
+                        "radius": 3.0,
+                        "parent": "hand_r",
+                        "nodeType": "joint"
+                    },
+                    "thumb_02_r": {
+                        "tx": -4.6318,
+                        "rx": -1.0676,
+                        "ry": -6.2937,
+                        "rz": 20.2302,
+                        "radius": 3.0,
+                        "parent": "thumb_01_r",
+                        "nodeType": "joint"
+                    },
+                    "thumb_03_r": {
+                        "tx": -2.7106,
+                        "ty": -0.0001,
+                        "rx": 0.0305,
+                        "ry": 0.195,
+                        "rz": 8.4044,
+                        "radius": 3.0,
+                        "parent": "thumb_02_r",
+                        "nodeType": "joint"
+                    },
+                    "index_palm_r": {
+                        "tx": -3.4527,
+                        "ty": -0.1128,
+                        "tz": 2.0516,
+                        "rx": 17.5598,
+                        "ry": 5.6408,
+                        "rz": -3.8649,
+                        "radius": 3.0,
+                        "parent": "hand_r",
+                        "nodeType": "joint"
+                    },
+                    "index_01_r": {
+                        "tx": -5.3769,
+                        "rx": -10.6019,
+                        "ry": -4.4455,
+                        "rz": 19.2285,
+                        "radius": 3.0,
+                        "parent": "index_palm_r",
+                        "nodeType": "joint"
+                    },
+                    "index_02_r": {
+                        "tx": -4.5646,
+                        "ty": 0.0001,
+                        "rx": 0.0651,
+                        "ry": 0.2475,
+                        "rz": 11.7142,
+                        "radius": 3.0,
+                        "parent": "index_01_r",
+                        "nodeType": "joint"
+                    },
+                    "index_03_r": {
+                        "tx": -2.4864,
+                        "ry": 0.0602,
+                        "rz": -0.0124,
+                        "radius": 3.0,
+                        "parent": "index_02_r",
+                        "nodeType": "joint"
+                    },
+                    "upper_arm_twist_01_r": {
+                        "tx": -9.03,
+                        "tz": -0.0001,
+                        "ry": -0.2393,
+                        "rz": 0.0137,
+                        "radius": 3.0,
+                        "parent": "upper_arm_r",
+                        "nodeType": "joint"
+                    },
+                    "upper_arm_twist_02_r": {
+                        "tx": -18.0599,
+                        "tz": -0.0003,
+                        "radius": 3.0,
+                        "parent": "upper_arm_r",
+                        "nodeType": "joint"
+                    },
+                    "thigh_r": {
+                        "tx": -3.232,
+                        "ty": -0.068,
+                        "tz": 11.1546,
+                        "rx": 8.4755,
+                        "ry": -2.3902,
+                        "rz": 175.2025,
+                        "radius": 3.0,
+                        "parent": "pelvis",
+                        "nodeType": "joint"
+                    },
+                    "calf_r": {
+                        "tx": 45.7519,
+                        "rz": -1.0935,
+                        "radius": 3.0,
+                        "parent": "thigh_r",
+                        "nodeType": "joint"
+                    },
+                    "foot_r": {
+                        "tx": 41.7055,
+                        "rx": 0.0051,
+                        "ry": 2.5398,
+                        "rz": 0.1138,
+                        "radius": 3.0,
+                        "parent": "calf_r",
+                        "nodeType": "joint"
+                    },
+                    "ball_r": {
+                        "tx": 6.5368,
+                        "ty": 13.6292,
+                        "tz": -0.0439,
+                        "rz": -90.0,
+                        "radius": 3.0,
+                        "parent": "foot_r",
+                        "nodeType": "joint"
+                    },
+                    "calf_twist_02_r": {
+                        "tx": 13.9018,
+                        "tz": 0.05,
+                        "rx": 0.005,
+                        "ry": -0.2832,
+                        "rz": 0.1135,
+                        "radius": 3.0,
+                        "parent": "calf_r",
+                        "nodeType": "joint"
+                    },
+                    "calf_twist_01_r": {
+                        "tx": 27.8036,
+                        "tz": 0.1,
+                        "rx": 0.005,
+                        "ry": -0.2832,
+                        "rz": 0.1135,
+                        "radius": 3.0,
+                        "parent": "calf_r",
+                        "nodeType": "joint"
+                    },
+                    "thigh_twist_01_r": {
+                        "tx": 15.2506,
+                        "rx": -0.0001,
+                        "ry": -0.2833,
+                        "rz": 0.0533,
+                        "radius": 3.0,
+                        "parent": "thigh_r",
+                        "nodeType": "joint"
+                    },
+                    "thigh_twist_02_r": {
+                        "tx": 30.5013,
+                        "rx": -0.0001,
+                        "ry": -0.2833,
+                        "rz": 0.0533,
+                        "radius": 3.0,
+                        "parent": "thigh_r",
+                        "nodeType": "joint"
+                    },
+                    "thigh_l": {
+                        "tx": -3.232,
+                        "ty": -0.068,
+                        "tz": -11.1546,
+                        "rx": 8.4755,
+                        "ry": -2.3902,
+                        "rz": -4.7975,
+                        "radius": 3.0,
+                        "parent": "pelvis",
+                        "nodeType": "joint"
+                    },
+                    "calf_l": {
+                        "tx": -45.752,
+                        "rz": -1.0935,
+                        "radius": 3.0,
+                        "parent": "thigh_l",
+                        "nodeType": "joint"
+                    },
+                    "foot_l": {
+                        "tx": -41.7054,
+                        "rx": 0.0051,
+                        "ry": 2.5398,
+                        "rz": 0.1138,
+                        "radius": 3.0,
+                        "parent": "calf_l",
+                        "nodeType": "joint"
+                    },
+                    "ball_l": {
+                        "tx": -6.5368,
+                        "ty": -13.6292,
+                        "tz": 0.0439,
+                        "rz": -90.0,
+                        "radius": 3.0,
+                        "parent": "foot_l",
+                        "nodeType": "joint"
+                    },
+                    "calf_twist_02_l": {
+                        "tx": -13.9018,
+                        "tz": -0.05,
+                        "rx": 0.005,
+                        "ry": -0.2832,
+                        "rz": 0.1135,
+                        "radius": 3.0,
+                        "parent": "calf_l",
+                        "nodeType": "joint"
+                    },
+                    "calf_twist_01_l": {
+                        "tx": -27.8036,
+                        "tz": -0.1,
+                        "rx": 0.005,
+                        "ry": -0.2832,
+                        "rz": 0.1135,
+                        "radius": 3.0,
+                        "parent": "calf_l",
+                        "nodeType": "joint"
+                    },
+                    "thigh_twist_01_l": {
+                        "tx": -15.2507,
+                        "rx": -0.0001,
+                        "ry": -0.2833,
+                        "rz": 0.0533,
+                        "radius": 3.0,
+                        "parent": "thigh_l",
+                        "nodeType": "joint"
+                    },
+                    "thigh_twist_02_l": {
+                        "tx": -30.5014,
+                        "rx": -0.0001,
+                        "ry": -0.2833,
+                        "rz": 0.0533,
+                        "radius": 3.0,
+                        "parent": "thigh_l",
+                        "nodeType": "joint"
+                    },
+                    "ik_foot_root": {
+                        "radius": 3.0,
+                        "parent": "root",
+                        "nodeType": "joint"
+                    },
+                    "ik_foot_l": {
+                        "tx": 14.7118,
+                        "ty": -0.0415,
+                        "tz": 8.1438,
+                        "rx": 65.8119,
+                        "ry": -89.3347,
+                        "rz": -60.6186,
+                        "radius": 3.0,
+                        "parent": "ik_foot_root",
+                        "nodeType": "joint"
+                    },
+                    "ik_foot_r": {
+                        "tx": -14.7118,
+                        "ty": -0.0414,
+                        "tz": 8.1438,
+                        "rx": -114.1877,
+                        "ry": 89.3347,
+                        "rz": 60.619,
+                        "radius": 3.0,
+                        "parent": "ik_foot_root",
+                        "nodeType": "joint"
+                    },
+                    "ik_hand_root": {
+                        "radius": 3.0,
+                        "parent": "root",
+                        "nodeType": "joint"
+                    },
+                    "ik_hand_gun": {
+                        "tx": -45.5549,
+                        "ty": -14.4006,
+                        "tz": 105.6407,
+                        "rx": 71.6563,
+                        "ry": -51.6072,
+                        "rz": 34.7704,
+                        "radius": 3.0,
+                        "parent": "ik_hand_root",
+                        "nodeType": "joint"
+                    },
+                    "ik_hand_l": {
+                        "tx": 46.4804,
+                        "ty": -72.0305,
+                        "tz": 30.8576,
+                        "rx": -145.2021,
+                        "ry": -20.2165,
+                        "rz": -120.7276,
+                        "radius": 3.0,
+                        "parent": "ik_hand_gun",
+                        "nodeType": "joint"
+                    },
+                    "ik_hand_r": {
+                        "radius": 3.0,
+                        "parent": "ik_hand_gun",
+                        "nodeType": "joint"
+                    },
+                    "interaction": {
+                        "radius": 3.0,
+                        "parent": "root",
+                        "nodeType": "joint"
+                    },
+                    "center_of_mass": {
+                        "radius": 3.0,
+                        "parent": "root",
+                        "nodeType": "joint"
+                    }
+                }
+            }
+        }
+
     def tweak_guides(self, guides):
         """Move special guides"""
 
@@ -10551,6 +10157,7 @@ class Quadruped( Char ):
         # TODO [x] add (sym)constraints in guide mode
         # TODO [x] implement biped guide logic as in quadruped class ( get_guide_data etc. )
         # TODO [x] implement tweak_guides in Quadruped to move newly created guides
+        # TODO [x] match quad joint naming convention to Biped`s
         # TODO [ ] implement offset attribute in Biped template like in quadruped
         # TODO [ ] add length attribute to IK legs to tweak leg length
         # TODO [ ] add pick-walking
@@ -10558,7 +10165,12 @@ class Quadruped( Char ):
         # TODO [ ] check IK/FK switching
         # TODO [x] paste/swap poses with intact tangents
         # TODO [ ] copy/paste poses with selected handles
-
+        # TODO [ ] aniMeta2 add center foot guide
+        # TODO [ ] aniMeta2 orient Hind_Hoof_Guide_Grp towards world
+        # TODO [ ] HindCannon_FK_Lft_Ctrl_Grp and HindPastern_FK_Lft_Ctrl_Grp need input from stretch algorithm and guides
+        # TODO [ ] To make it work with auto-stretch, update the values on the distance node HindLegIK_Lft_Distance
+        # TODO [ ] To make autorot work, create a dzummy group and use an aimConstraint from Femur to Hind Pastern to
+        # TODO [ ] get an rotation and then use a composeMatrix matrix and invert it, connect the resulting rotation into the offset of the aim
         if self.DEBUG:
             print( 'Quadruped.build_control_rig start')
 
@@ -10647,38 +10259,41 @@ class Quadruped( Char ):
             leg_preferred_angle = [ 45,0,0 ]
             arm_preferred_angle = [ 0,-45,0 ]
 
-            joints['Root_Ctr']    = self.get_path( self.find_node( self.charRoot, 'Root_Jnt' ))
-            joints['Pelvis_Ctr']  = self.get_path( self.find_node( self.charRoot, 'Pelvis_Jnt' ))
-            joints['Chest_Ctr']   = self.get_path( self.find_node( self.charRoot, 'Chest_Jnt' ))
-            joints['Head_Ctr']    = self.get_path( self.find_node( self.charRoot, 'Head_Jnt' ))
-            joints['Jaw_Ctr']     = self.get_path( self.find_node( self.charRoot, 'Jaw_Jnt' ))
+            joints['root']    = self.get_path( self.find_node( self.charRoot, 'root' ))
+            joints['pelvis']  = self.get_path( self.find_node( self.charRoot, 'pelvis' ))
+            joints['chest']   = self.get_path( self.find_node( self.charRoot, 'chest' ))
+            joints['head']    = self.get_path( self.find_node( self.charRoot, 'head' ))
+            joints['jaw']     = self.get_path( self.find_node( self.charRoot, 'jaw' ))
 
             # Spine
             for i in range(1,8):
-                joints['Spine'+str(i)+'_Ctr']  = self.get_path( self.find_node( self.charRoot, 'Spine'+str(i)+'_Jnt' ))
+                joints['spine_0'+str(i) ]  = self.get_path( self.find_node( self.charRoot, 'spine_0'+str(i)))
 
             # Neck
-            for i in range(1,9):
-                joints['Neck'+str(i)+'_Ctr']  = self.get_path( self.find_node( self.charRoot, 'Neck'+str(i)+'_Jnt' ))
+            for i in range(1,8):
+                joints['neck_0'+str(i) ]  = self.get_path( self.find_node( self.charRoot, 'neck_0'+str(i)))
 
             # Tail
             for i in range(1,13):
-                joints['Tail'+str(i)+'_Ctr']  = self.get_path( self.find_node( self.charRoot, 'Tail'+str(i)+'_Jnt' ))
+                no = str(i)
+                if i < 10:
+                    no = '0'+no
+                joints['tail_'+no ]  = self.get_path( self.find_node( self.charRoot, 'tail_'+no))
 
             for i in range( 2 ):
                 # Front Leg
-                joints[ 'Scapula_'       + SIDES[i] ] = self.get_path( self.find_node( self.charRoot, 'Scapula_'+SIDES[i]+'_Jnt' ))
-                joints[ 'Humerus_'      + SIDES[i] ] = self.get_path( self.find_node( self.charRoot, 'Humerus_'+SIDES[i]+'_Jnt' ))
-                joints[ 'Radius_'      + SIDES[i] ] = self.get_path( self.find_node( self.charRoot, 'Radius_'+SIDES[i]+'_Jnt' ))
-                joints[ 'ForeCannon_'  + SIDES[i] ] = self.get_path( self.find_node( self.charRoot, 'ForeCannon_'+SIDES[i]+'_Jnt' ))
-                joints[ 'ForePastern_' + SIDES[i] ] = self.get_path( self.find_node( self.charRoot, 'ForePastern_'+SIDES[i]+'_Jnt' ))
-                joints[ 'ForeHoof_'    + SIDES[i]] = self.get_path( self.find_node(self.charRoot, 'ForeHoof_' + SIDES[i] + '_Jnt'))
+                joints[ 'scapula_'       + sides[i] ] = self.get_path( self.find_node( self.charRoot, 'scapula_'+sides[i]))
+                joints[ 'humerus_'      + sides[i] ] = self.get_path( self.find_node( self.charRoot, 'humerus_'+sides[i] ))
+                joints[ 'radius_'      + sides[i] ] = self.get_path( self.find_node( self.charRoot, 'radius_'+sides[i] ))
+                joints[ 'fore_cannon_'  + sides[i] ] = self.get_path( self.find_node( self.charRoot, 'fore_cannon_'+sides[i]))
+                joints[ 'fore_pastern_' + sides[i] ] = self.get_path( self.find_node( self.charRoot, 'fore_pastern_'+sides[i]))
+                joints[ 'fore_hoof_'    + sides[i]] = self.get_path( self.find_node(self.charRoot, 'fore_hoof_' + sides[i] ))
                 # Hind Leg
-                joints[ 'Femur_'       + SIDES[i] ] = self.get_path( self.find_node( self.charRoot, 'Femur_'+SIDES[i]+'_Jnt' ))
-                joints[ 'Fibula_'      + SIDES[i] ] = self.get_path( self.find_node( self.charRoot, 'Fibula_'+SIDES[i]+'_Jnt' ))
-                joints[ 'HindCannon_'  + SIDES[i] ] = self.get_path( self.find_node( self.charRoot, 'HindCannon_'+SIDES[i]+'_Jnt' ))
-                joints[ 'HindPastern_' + SIDES[i] ] = self.get_path( self.find_node( self.charRoot, 'HindPastern_'+SIDES[i]+'_Jnt' ))
-                joints[ 'HindHoof_'    + SIDES[i]] = self.get_path( self.find_node(self.charRoot, 'HindHoof_' + SIDES[i] + '_Jnt'))
+                joints[ 'femur_'       + sides[i] ] = self.get_path( self.find_node( self.charRoot, 'femur_'+sides[i] ))
+                joints[ 'fibula_'      + sides[i] ] = self.get_path( self.find_node( self.charRoot, 'fibula_'+sides[i] ))
+                joints[ 'hind_cannon_'  + sides[i] ] = self.get_path( self.find_node( self.charRoot, 'hind_cannon_'+sides[i] ))
+                joints[ 'hind_pastern_' + sides[i] ] = self.get_path( self.find_node( self.charRoot, 'hind_pastern_'+sides[i] ))
+                joints[ 'hind_hoof_'    + sides[i]] = self.get_path( self.find_node(self.charRoot, 'hind_hoof_' + sides[i]))
 
             for key in joints.keys():
                 joint = joints[key]
@@ -10760,58 +10375,58 @@ class Quadruped( Char ):
             handleDict[ 'TailFK1_Ctr_Ctrl' ] = {
                 'name': 'TailFK1_Ctr_Ctrl',
                 'parent': 'Pelvis_Ctr_Ctrl',
-                'matchTransform': 'Tail1_Guide',
+                'matchTransform': 'Tail_01_Guide',
                 'size': [ 30, 4, 4 ],
                 'constraint': self.kParent,
-                'constraintNode': joints['Tail1_Ctr']
+                'constraintNode': joints['tail_01']
             }
             handleDict[ 'TailFK2_Ctr_Ctrl' ] = {
                 'name': 'TailFK2_Ctr_Ctrl',
                 'parent': 'TailFK1_Ctr_Ctrl',
-                'matchTransform': 'Tail2_Guide',
+                'matchTransform': 'Tail_02_Guide',
                 'size': [ 30, 4, 4 ],
                 'constraint': self.kParent,
-                'constraintNode': joints['Tail2_Ctr']
+                'constraintNode': joints['tail_02']
             }
             handleDict[ 'TailFK3_Ctr_Ctrl' ] = {
                 'name': 'TailFK3_Ctr_Ctrl',
                 'parent': 'TailFK2_Ctr_Ctrl',
-                'matchTransform': 'Tail3_Guide',
+                'matchTransform': 'Tail_03_Guide',
                 'size': [ 30, 4, 4 ],
                 'constraint': self.kParent,
-                'constraintNode': joints['Tail3_Ctr']
+                'constraintNode': joints['tail_03']
             }
             handleDict[ 'TailFK4_Ctr_Ctrl' ] = {
                 'name': 'TailFK4_Ctr_Ctrl',
                 'parent': 'TailFK3_Ctr_Ctrl',
-                'matchTransform': 'Tail4_Guide',
+                'matchTransform': 'Tail_04_Guide',
                 'size': [ 30, 4, 4 ],
                 'constraint': self.kParent,
-                'constraintNode': joints['Tail4_Ctr']
+                'constraintNode': joints['tail_04']
             }
             handleDict[ 'TailFK5_Ctr_Ctrl' ] = {
                 'name': 'TailFK5_Ctr_Ctrl',
                 'parent': 'TailFK4_Ctr_Ctrl',
-                'matchTransform': 'Tail5_Guide',
+                'matchTransform': 'Tail_05_Guide',
                 'size': [ 30, 4, 4 ],
                 'constraint': self.kParent,
-                'constraintNode': joints['Tail5_Ctr']
+                'constraintNode': joints['tail_05']
             }
             handleDict[ 'TailFK6_Ctr_Ctrl' ] = {
                 'name': 'TailFK6_Ctr_Ctrl',
                 'parent': 'TailFK5_Ctr_Ctrl',
-                'matchTransform': 'Tail6_Guide',
+                'matchTransform': 'Tail_06_Guide',
                 'size': [ 30, 4, 4 ],
                 'constraint': self.kParent,
-                'constraintNode': joints['Tail6_Ctr']
+                'constraintNode': joints['tail_06']
             }
             handleDict[ 'TailFK7_Ctr_Ctrl' ] = {
                 'name': 'TailFK7_Ctr_Ctrl',
                 'parent': 'TailFK6_Ctr_Ctrl',
-                'matchTransform': 'Tail7_Guide',
+                'matchTransform': 'Tail_07_Guide',
                 'size': [ 30, 4, 4 ],
                 'constraint': self.kParent,
-                'constraintNode': joints['Tail7_Ctr']
+                'constraintNode': joints['tail_08']
             }
             handleDict[ 'Root_Ctr_Ctrl' ] = {
                 'name': 'Root_Ctr_Ctrl',
@@ -10819,7 +10434,7 @@ class Quadruped( Char ):
                 'matchTransform': 'root',
                 'size': [ 5, 5, 5 ],
                 'constraint': self.kParent,
-                'constraintNode': joints['Root_Ctr'],
+                'constraintNode': joints['root'],
                 'maintainOffset': True
             }
             handleDict[ 'Head_Ctr_Ctrl' ] = {
@@ -10828,7 +10443,7 @@ class Quadruped( Char ):
                 'matchTransform': 'Head_Guide',
                 'size': [ 20, 6, 6 ],
                 'constraint': self.kParent,
-                'constraintNode': joints['Head_Ctr'],
+                'constraintNode': joints['head'],
                 'maintainOffset': True
             }
             handleDict[ 'Jaw_Ctr_Ctrl' ] = {
@@ -10837,7 +10452,7 @@ class Quadruped( Char ):
                 'matchTransform': 'Jaw_Guide',
                 'size': [ 20, 6, 6 ],
                 'constraint': self.kParent,
-                'constraintNode': joints['Jaw_Ctr'],
+                'constraintNode': joints['jaw'],
                 'maintainOffset': True
             }
 
@@ -10849,7 +10464,7 @@ class Quadruped( Char ):
                     'size': [ 10, 10, 10 ],
                     'color': colors[ i ],
                     'constraint': self.kParent,
-                    'constraintNode': joints['Scapula_' + SIDES[ i ]  ],
+                    'constraintNode': joints['scapula_' + sides[ i ]  ],
                     'maintainOffset': True
                 }
                 handleDict[ 'Humerus_FK_' + SIDES[ i ] + '_Ctrl' ] = {
@@ -10859,7 +10474,7 @@ class Quadruped( Char ):
                     'size': [ 10, 10, 10 ],
                     'color': colors[ i ],
                     'constraint': self.kParent,
-                    'constraintNode': joints['Humerus_' + SIDES[ i ]  ],
+                    'constraintNode': joints['humerus_' + sides[ i ]  ],
                     'maintainOffset': True
                 }
                 handleDict[ 'Radius_FK_' + SIDES[ i ] + '_Ctrl' ] = {
@@ -10874,7 +10489,7 @@ class Quadruped( Char ):
                 handleDict[ 'ForeCannon_FK_' + SIDES[ i ] + '_Ctrl' ] = {
                     'name': 'ForeCannon_FK_' + SIDES[ i ] + '_Ctrl',
                     'parent': 'Radius_FK_' + SIDES[ i ] + '_Ctrl',
-                    'matchTransform': 'ForeCannon_' + SIDES[ i ] + '_Guide',
+                    'matchTransform': 'Fore_Cannon_' + SIDES[ i ] + '_Guide',
                     'color': colors[ i ],
                     'shapeType': self.kSphere,
                     'radius': 4,
@@ -10883,7 +10498,7 @@ class Quadruped( Char ):
                 handleDict[ 'ForePastern_FK_' + SIDES[ i ] + '_Ctrl' ] = {
                     'name': 'ForePastern_FK_' + SIDES[ i ] + '_Ctrl',
                     'parent': 'ForeCannon_FK_' + SIDES[ i ] + '_Ctrl',
-                    'matchTransform': 'ForePastern_' + SIDES[ i ] + '_Guide',
+                    'matchTransform': 'Fore_Pastern_' + SIDES[ i ] + '_Guide',
                     'color': colors[ i ],
                     'shapeType': self.kSphere,
                     'radius': 4,
@@ -10892,7 +10507,7 @@ class Quadruped( Char ):
                 handleDict[ 'ForeHoof_FK_' + SIDES[ i ] + '_Ctrl' ] = {
                     'name': 'ForeHoof_FK_' + SIDES[ i ] + '_Ctrl',
                     'parent': 'ForePastern_FK_' + SIDES[ i ] + '_Ctrl',
-                    'matchTransform': 'ForeHoof_' + SIDES[ i ] + '_Guide',
+                    'matchTransform': 'Fore_Hoof_' + SIDES[ i ] + '_Guide',
                     'color': colors[ i ],
                     'shapeType': self.kSphere,
                     'radius': 4,
@@ -10902,7 +10517,6 @@ class Quadruped( Char ):
                 handleDict[ 'ForeFoot_IK_' + SIDES[ i ] + '_Ctrl' ] = {
                     'name': 'ForeFoot_IK_' + SIDES[ i ] + '_Ctrl',
                     'parent': 'Main_Ctr_Ctrl',
-                    #'matchTransform': 'ForeHoof_' + SIDES[ i ] + '_Guide',
                     'color': colors[ i ],
                     'shapeType': self.kCube,
                     'size': size,
@@ -10912,7 +10526,7 @@ class Quadruped( Char ):
                 handleDict[ 'ForeLegPole_IK_' + SIDES[ i ] + '_Ctrl' ] = {
                     'name': 'ForeLegPole_IK_' + SIDES[ i ] + '_Ctrl',
                     'parent': 'ForeFoot_IK_' + SIDES[ i ] + '_Ctrl',
-                    'matchTransform': 'ForeLegPole_' + SIDES[ i ] + '_Guide',
+                    'matchTransform': 'Fore_Leg_Pole_' + SIDES[ i ] + '_Guide',
                     'color': colors[ i ],
                     'shapeType': self.kCube,
                     'size': [ 4, 4, 4 ]
@@ -10925,7 +10539,7 @@ class Quadruped( Char ):
                     'size': [ 10, 10, 10 ],
                     'color': colors[ i ],
                     'constraint': self.kParent,
-                    'constraintNode': joints['Femur_' + SIDES[ i ]  ],
+                    'constraintNode': joints['femur_' + sides[ i ]  ],
                     'maintainOffset': True
                 }
                 handleDict[ 'Fibula_FK_' + SIDES[ i ] + '_Ctrl' ] = {
@@ -10940,7 +10554,7 @@ class Quadruped( Char ):
                 handleDict[ 'HindCannon_FK_' + SIDES[ i ] + '_Ctrl' ] = {
                     'name': 'HindCannon_FK_' + SIDES[ i ] + '_Ctrl',
                     'parent': 'Fibula_FK_' + SIDES[ i ] + '_Ctrl',
-                    'matchTransform': 'HindCannon_' + SIDES[ i ] + '_Guide',
+                    'matchTransform': 'Hind_Cannon_' + SIDES[ i ] + '_Guide',
                     'color': colors[ i ],
                     'shapeType': self.kSphere,
                     'radius': 4,
@@ -10949,7 +10563,7 @@ class Quadruped( Char ):
                 handleDict[ 'HindPastern_FK_' + SIDES[ i ] + '_Ctrl' ] = {
                     'name': 'HindPastern_FK_' + SIDES[ i ] + '_Ctrl',
                     'parent': 'HindCannon_FK_' + SIDES[ i ] + '_Ctrl',
-                    'matchTransform': 'HindPastern_' + SIDES[ i ] + '_Guide',
+                    'matchTransform': 'Hind_Pastern_' + SIDES[ i ] + '_Guide',
                     'color': colors[ i ],
                     'shapeType': self.kSphere,
                     'radius': 4,
@@ -10958,7 +10572,7 @@ class Quadruped( Char ):
                 handleDict[ 'HindHoof_FK_' + SIDES[ i ] + '_Ctrl' ] = {
                     'name': 'HindHoof_FK_' + SIDES[ i ] + '_Ctrl',
                     'parent': 'HindPastern_FK_' + SIDES[ i ] + '_Ctrl',
-                    'matchTransform': 'HindHoof_' + SIDES[ i ] + '_Guide',
+                    'matchTransform': 'Hind_Hoof_' + SIDES[ i ] + '_Guide',
                     'color': colors[ i ],
                     'shapeType': self.kSphere,
                     'radius': 4,
@@ -10968,7 +10582,6 @@ class Quadruped( Char ):
                 handleDict[ 'HindFoot_IK_' + SIDES[ i ] + '_Ctrl' ] = {
                     'name': 'HindFoot_IK_' + SIDES[ i ] + '_Ctrl',
                     'parent': 'Main_Ctr_Ctrl',
-                    #'matchTransform': 'ForeHoof_' + SIDES[ i ] + '_Guide',
                     'color': colors[ i ],
                     'shapeType': self.kCube,
                     'size': size,
@@ -10978,7 +10591,7 @@ class Quadruped( Char ):
                 handleDict[ 'HindLegPole_IK_' + SIDES[ i ] + '_Ctrl' ] = {
                     'name': 'HindLegPole_IK_' + SIDES[ i ] + '_Ctrl',
                     'parent': 'HindFoot_IK_' + SIDES[ i ] + '_Ctrl',
-                    'matchTransform': 'HindLegPole_' + SIDES[ i ] + '_Guide',
+                    'matchTransform': 'Hind_Leg_Pole_' + SIDES[ i ] + '_Guide',
                     'color': colors[ i ],
                     'shapeType': self.kCube,
                     'size': [ 4, 4, 4 ]
@@ -11121,7 +10734,7 @@ class Quadruped( Char ):
 
             # Connect things to Pelvis
             pelvis = self.controls['Pelvis_Ctr_Ctrl'].fullPathName()
-            pelvis_proxy = mc.createNode('transform', name='Chest_Ctr_Prx', parent=pelvis, ss=True)
+            pelvis_proxy = mc.createNode('transform', name='Pelvis_Ctr_Prx', parent=pelvis, ss=True)
             mc.parentConstraint( outputs[0], pelvis_proxy, mo=True)
 
             grp_l = self.get_grandparent(self.controls['Scapula_FK_Lft_Ctrl'])
@@ -11130,12 +10743,12 @@ class Quadruped( Char ):
 
             # Connect things to Chest
             chest = self.controls['Chest_Ctr_Ctrl'].fullPathName()
-            spine_proxy = mc.createNode('transform', name='Chest_Ctr_Prx', parent=chest, ss=True)
-            mc.parentConstraint( outputs[count-1], spine_proxy, mo=True)
+            chest_proxy = mc.createNode('transform', name='Chest_Ctr_Prx', parent=chest, ss=True)
+            mc.parentConstraint( outputs[count-1], chest_proxy, mo=True)
 
             grp_l = self.get_grandparent(self.controls['Scapula_FK_Lft_Ctrl'])
             grp_r = self.get_grandparent(self.controls['Scapula_FK_Rgt_Ctrl'])
-            mc.parent( grp_l, grp_r, spine_proxy )
+            mc.parent( grp_l, grp_r, chest_proxy )
 
             # Spine
             #
@@ -11153,7 +10766,8 @@ class Quadruped( Char ):
             self.build_world_orient( self.controls['NeckFK1_Ctr_Ctrl'], self.controls['Main_Ctr_Ctrl'], 1)
 
             grp =  self.get_grandparent( self.controls['NeckFK1_Ctr_Ctrl'].fullPathName() )
-            mc.parentConstraint( joints['Chest_Ctr' ], grp, mo=True)
+
+            mc.parent( grp, chest_proxy)
 
             grp =  self.get_grandparent( self.controls['NeckIK2_Ctr_Ctrl'].fullPathName() )
             mc.scaleConstraint( self.controls['Main_Ctr_Ctrl'].fullPathName(), grp )
@@ -11180,7 +10794,7 @@ class Quadruped( Char ):
             # Tail
 
             grp =  self.get_grandparent( self.controls['TailFK1_Ctr_Ctrl'].fullPathName() )
-            mc.parentConstraint( joints['Pelvis_Ctr' ], grp, mo=True)
+            mc.parent( grp, pelvis_proxy)
 
             self.build_world_orient( self.controls['TailFK1_Ctr_Ctrl'], self.controls['Main_Ctr_Ctrl'], 1)
 
@@ -11189,6 +10803,9 @@ class Quadruped( Char ):
             ########################################################################################################
 
             for SIDE in SIDES:
+                side = 'l'
+                if SIDE == 'Rgt':
+                    side = 'r'
 
                 ########################################################################################################
                 #
@@ -11201,18 +10818,18 @@ class Quadruped( Char ):
 
                 foreleg_grp = mc.createNode( 'transform', name='ForeLegIK_'+SIDE+'_Grp', parent=rig_grp)
 
-                humerusJnt = joints[ 'Humerus_' + SIDE  ]
-                radiusJnt = joints[ 'Radius_' + SIDE  ]
-                cannonJnt = joints[ 'ForeCannon_' + SIDE  ]
-                pasternJnt = joints[ 'ForePastern_' + SIDE  ]
-                hoofJnt = joints[ 'ForeHoof_' + SIDE  ]
+                humerusJnt = joints[ 'humerus_' + side  ]
+                radiusJnt = joints[ 'radius_' + side  ]
+                cannonJnt = joints[ 'fore_cannon_' + side  ]
+                pasternJnt = joints[ 'fore_pastern_' + side  ]
+                hoofJnt = joints[ 'fore_hoof_' + side  ]
 
                 # FK
-                humerusJntFK_jnt_name = humerusJnt.partialPathName().replace('_' + SIDE, '_FK_' + SIDE)
-                radiusJntFK_jnt_name = radiusJnt.partialPathName().replace('_' + SIDE, '_FK_' + SIDE)
-                cannonJntFK_jnt_name = cannonJnt.partialPathName().replace('_' + SIDE, '_FK_' + SIDE)
-                pasternJntFK_jnt_name = pasternJnt.partialPathName().replace('_' + SIDE, '_FK_' + SIDE)
-                hoofJntFK_jnt_name = hoofJnt.partialPathName().replace('_' + SIDE, '_FK_' + SIDE)
+                humerusJntFK_jnt_name = humerusJnt.partialPathName().replace('_' + side, '_FK_' + side)
+                radiusJntFK_jnt_name = radiusJnt.partialPathName().replace('_' + side, '_FK_' + side)
+                cannonJntFK_jnt_name = cannonJnt.partialPathName().replace('_' + side, '_FK_' + side)
+                pasternJntFK_jnt_name = pasternJnt.partialPathName().replace('_' + side, '_FK_' + side)
+                hoofJntFK_jnt_name = hoofJnt.partialPathName().replace('_' + side, '_FK_' + side)
 
                 humerusJntFK = self.joint_copy( humerusJnt, humerusJntFK_jnt_name, foreleg_grp   )
                 radiusJntFK = self.joint_copy( radiusJnt, radiusJntFK_jnt_name, humerusJntFK   )
@@ -11229,10 +10846,10 @@ class Quadruped( Char ):
                 mc.parentConstraint( self.controls['ForeHoof_FK_'+SIDE+'_Ctrl'].fullPathName(), hoofJntFK.fullPathName(), mo=True  )
 
                 # IK
-                radiusJntIK_jnt_name = radiusJnt.partialPathName().replace('_' + SIDE, '_IK_' + SIDE)
-                cannonJntIK_jnt_name = cannonJnt.partialPathName().replace('_' + SIDE, '_IK_' + SIDE)
-                pasternJntIK_jnt_name = pasternJnt.partialPathName().replace('_' + SIDE, '_IK_' + SIDE)
-                hoofJntIK_jnt_name = hoofJnt.partialPathName().replace('_' + SIDE, '_IK_' + SIDE)
+                radiusJntIK_jnt_name = radiusJnt.partialPathName().replace('_' + side, '_IK_' + side)
+                cannonJntIK_jnt_name = cannonJnt.partialPathName().replace('_' + side, '_IK_' + side)
+                pasternJntIK_jnt_name = pasternJnt.partialPathName().replace('_' + side, '_IK_' + side)
+                hoofJntIK_jnt_name = hoofJnt.partialPathName().replace('_' + side, '_IK_' + side)
 
                 radiusJntIK = self.joint_copy( radiusJnt, radiusJntIK_jnt_name, humerusJntFK   )
                 cannonJntIK = self.joint_copy( cannonJnt, cannonJntIK_jnt_name, radiusJntIK  )
@@ -11247,7 +10864,7 @@ class Quadruped( Char ):
                                    pos=True )
                 # Now we have to align the pole vector again to match the guide
                 grandparent = self.get_grandparent(self.controls[DIR+'LegPole_IK_'+SIDE+'_Ctrl'].fullPathName())
-                guide = self.find_node(self.charRoot, DIR+'LegPole_' + SIDE + '_Guide')
+                guide = self.find_node(self.charRoot, DIR+'_Leg_Pole_' + SIDE + '_Guide')
 
                 mc.matchTransform( grandparent,
                                    guide,
@@ -11313,17 +10930,22 @@ class Quadruped( Char ):
                 DIR = 'Hind'
                 hindleg_grp = mc.createNode( 'transform', name=DIR+'legIK_'+SIDE+'_Grp', parent=rig_grp)
 
-                femurJnt = joints[ 'Femur_' + SIDE  ]
-                fibulaJnt = joints[ 'Fibula_' + SIDE  ]
-                cannonJnt = joints[ DIR+'Cannon_' + SIDE  ]
-                pasternJnt = joints[ DIR+'Pastern_' + SIDE  ]
-                hoofJnt = joints[ DIR+'Hoof_' + SIDE  ]
+                # Parent FK Controls to pelvis proxy
+                grp = self.find_node(self.charRoot, 'Femur_FK_'+SIDE+'_Ctrl_Grp')
+                mc.parent( grp, pelvis_proxy)
+
+                femurJnt = joints[ 'femur_' + side  ]
+                fibulaJnt = joints[ 'fibula_' + side  ]
+                cannonJnt = joints[ DIR.lower()+'_cannon_' + side  ]
+                pasternJnt = joints[ DIR.lower()+'_pastern_' + side  ]
+                hoofJnt = joints[ DIR.lower()+'_hoof_' + side  ]
+
                 # FK
-                femurJntFK_jnt_name = femurJnt.partialPathName().replace('_' + SIDE, '_FK_' + SIDE)
-                fibulaJntFK_jnt_name = fibulaJnt.partialPathName().replace('_' + SIDE, '_FK_' + SIDE)
-                cannonJntFK_jnt_name = cannonJnt.partialPathName().replace('_' + SIDE, '_FK_' + SIDE)
-                pasternJntFK_jnt_name = pasternJnt.partialPathName().replace('_' + SIDE, '_FK_' + SIDE)
-                hoofJntFK_jnt_name = hoofJnt.partialPathName().replace('_' + SIDE, '_FK_' + SIDE)
+                femurJntFK_jnt_name = femurJnt.partialPathName().replace('_' + side, '_FK_' + side)
+                fibulaJntFK_jnt_name = fibulaJnt.partialPathName().replace('_' + side, '_FK_' + side)
+                cannonJntFK_jnt_name = cannonJnt.partialPathName().replace('_' + side, '_FK_' + side)
+                pasternJntFK_jnt_name = pasternJnt.partialPathName().replace('_' + side, '_FK_' + side)
+                hoofJntFK_jnt_name = hoofJnt.partialPathName().replace('_' + side, '_FK_' + side)
 
                 femurJntFK = self.joint_copy( femurJnt, femurJntFK_jnt_name, hindleg_grp   )
                 fibulaJntFK = self.joint_copy( fibulaJnt, fibulaJntFK_jnt_name, femurJntFK   )
@@ -11341,11 +10963,11 @@ class Quadruped( Char ):
                 mc.parentConstraint( self.controls[DIR+'Hoof_FK_'+SIDE+'_Ctrl'].fullPathName(), hoofJntFK.fullPathName(), mo=True  )
 
                 # IK
-                femurJntIK_jnt_name = femurJnt.partialPathName().replace('_' + SIDE, '_IK_' + SIDE)
-                fibulaJntIK_jnt_name = fibulaJnt.partialPathName().replace('_' + SIDE, '_IK_' + SIDE)
-                cannonJntIK_jnt_name = cannonJnt.partialPathName().replace('_' + SIDE, '_IK_' + SIDE)
-                pasternJntIK_jnt_name = pasternJnt.partialPathName().replace('_' + SIDE, '_IK_' + SIDE)
-                hoofJntIK_jnt_name = hoofJnt.partialPathName().replace('_' + SIDE, '_IK_' + SIDE)
+                femurJntIK_jnt_name = femurJnt.partialPathName().replace('_' + side, '_IK_' + side)
+                fibulaJntIK_jnt_name = fibulaJnt.partialPathName().replace('_' + side, '_IK_' + side)
+                cannonJntIK_jnt_name = cannonJnt.partialPathName().replace('_' + side, '_IK_' + side)
+                pasternJntIK_jnt_name = pasternJnt.partialPathName().replace('_' + side, '_IK_' + side)
+                hoofJntIK_jnt_name = hoofJnt.partialPathName().replace('_' + side, '_IK_' + side)
 
                 femurJntIK = self.joint_copy( femurJnt, femurJntIK_jnt_name, femurJntFK   )
                 fibulaJntIK = self.joint_copy( fibulaJnt, fibulaJntIK_jnt_name, femurJntIK  )
@@ -11361,7 +10983,7 @@ class Quadruped( Char ):
                                    pos=True )
                 # Now we have to align the pole vector again to match the guide
                 grandparent = self.get_grandparent(self.controls[DIR+'LegPole_IK_'+SIDE+'_Ctrl'].fullPathName())
-                guide = self.find_node(self.charRoot, DIR+'LegPole_' + SIDE + '_Guide')
+                guide = self.find_node(self.charRoot, DIR+'_Leg_Pole_' + SIDE + '_Guide')
 
                 mc.matchTransform( grandparent,
                                    guide,
@@ -11411,7 +11033,7 @@ class Quadruped( Char ):
             eyes_grp = mc.createNode( 'transform', name='Eyes_Grp', parent= self.controls['Main_Ctr_Ctrl']  , ss=True )
 
             self.controls['Eyes_Ctr_Ctrl'] = self.create_control(name='Eyes_Ctr_Ctrl',
-                                                                 matchTransform=self.find_node(self.charRoot, 'Eye_Lft_Jnt'),
+                                                                 matchTransform=self.find_node(self.charRoot, 'eye_l'),
                                                                  parent = eyes_grp,
                                                                  shapeType=self.kCube,
                                                                  green=1, red=1,
@@ -11431,7 +11053,7 @@ class Quadruped( Char ):
             mc.setAttr( eye_ctrl_grp + '.rz',  0 )
 
             self.controls['Eye_Lft_Ctrl'] = self.create_control(name='Eye_Lft_Ctrl',
-                                                                matchTransform=self.find_node(self.charRoot, 'Eye_Lft_Jnt'),
+                                                                matchTransform=self.find_node(self.charRoot, 'eye_l'),
                                                                 parent =  self.controls['Eyes_Ctr_Ctrl'].fullPathName(),
                                                                 shapeType=self.kCube,
                                                                 color=colors[0],
@@ -11444,7 +11066,7 @@ class Quadruped( Char ):
                                                                 )
 
             self.controls['Eye_Rgt_Ctrl'] = self.create_control(name='Eye_Rgt_Ctrl',
-                                                                matchTransform=self.find_node(self.charRoot, 'Eye_Rgt_Jnt'),
+                                                                matchTransform=self.find_node(self.charRoot, 'eye_r'),
                                                                 parent = self.controls['Eyes_Ctr_Ctrl'].fullPathName(),
                                                                 shapeType=self.kCube,
                                                                 color=colors[1],
@@ -11584,7 +11206,6 @@ class Quadruped( Char ):
 
             self.set_metaData( self.controls['Main_Ctr_Ctrl'], data)
 
-            return
             # Meta Data
             #
             ##################################################################################################
@@ -11598,26 +11219,26 @@ class Quadruped( Char ):
 
             data = {}
             data['Type'] = kHandle
-            handles = self.get_nodes( main, data)
+            handles = self.get_nodes( self.charRoot, data)
             handles = sorted(handles)
 
             attrs = ['visibility']
 
             for handle in handles:
-                handle = self.find_node( rootNode, handle )
+                handle = self.find_node( self.charRoot, handle )
                 for attr in attrs:
                     mc.setAttr(handle + '.' + attr, l=True, k=False, cb=False)
 
             #charName = 'Adam'
             data = {}
             data['Type'] = kMain
-            nodes = self.get_nodes(main, data)
+            nodes = self.get_nodes(self.charRoot, data)
 
             if 'ControlShapeData' in rootData:
 
                 ctrlData = rootData['ControlShapeData']
                 for node in ctrlData.keys():
-                    actual_node = self.find_node( rootNode, node )
+                    actual_node = self.find_node( self.charRoot, node )
                     if len ( ctrlData[node]) > 0:
                         for attr in ctrlData[node].keys():
                             try:
@@ -11630,21 +11251,25 @@ class Quadruped( Char ):
             mc.select(cl=True)
 
             dict = {}
-            dict['Arms'] = ['Clavicle_Lft_Ctrl', 'ArmUp_FK_Lft_Ctrl', 'ArmLo_FK_Lft_Ctrl', 'Hand_FK_Lft_Ctrl' ]
-            dict['Finger'] = ['Index1_Lft_Ctrl', 'Index2_Lft_Ctrl', 'Index3_Lft_Ctrl', 'Index4_Lft_Ctrl',
-                                'Middle1_Lft_Ctrl', 'Middle2_Lft_Ctrl', 'Middle3_Lft_Ctrl', 'Middle4_Lft_Ctrl',
-                                'Ring1_Lft_Ctrl', 'Ring2_Lft_Ctrl', 'Ring3_Lft_Ctrl', 'Ring4_Lft_Ctrl',
-                                'Pinky1_Lft_Ctrl', 'Pinky2_Lft_Ctrl', 'Pinky3_Lft_Ctrl', 'Pinky4_Lft_Ctrl',
-                                'Thumb1_Lft_Ctrl', 'Thumb2_Lft_Ctrl', 'Thumb3_Lft_Ctrl' ]
 
-            dict['Legs'] = ['Foot_IK_Lft_Ctrl_Grp', 'LegUp_FK_Lft_Ctrl_Grp' ]
-            dict['Head'] = ['Head_Ctr_Ctrl', 'Neck_Ctr_Ctrl']
-            dict['Torso'] = ['Torso_Ctr_Ctrl', 'Hips_Ctr_Ctrl', 'Spine1_Ctr_Ctrl', 'Spine2_Ctr_Ctrl', 'Spine3_Ctr_Ctrl',
-                               'Chest_Ctr_Ctrl']
-            dict['UpVectors'] = [ 'ShoulderUpVec_Lft_Ctrl', 'HipsUpVec_Lft_Ctrl' ]
+            dict['Legs'] = ['ForeFoot_IK_Lft_Ctrl_Grp',
+                            'HindFoot_IK_Lft_Ctrl_Grp',
+                            'Scapula_FK_Lft_Ctrl_Grp',
+                            'Femur_FK_Lft_Ctrl_Grp' ]
+
+            dict['Head'] = ['Head_Ctr_Ctrl',
+                            'NeckFK1_Ctr_Ctrl',
+                            'NeckIK2_Ctr_Ctrl',
+                            'Eyes_Grp']
+
+            dict['Torso'] = ['Chest_Ctr_CtrlShape',
+                             'Pelvis_Ctr_CtrlShape',
+                             'COG_Ctr_CtrlShape' ]
+
+            dict['Tail'] = ['TailFK1_Ctr_Ctrl' ]
 
             # Connect the visibility
-            visNode = rootNode
+            visNode = self.charRoot
             for key in dict.keys():
                 attrName = 'show_'+key
                 if not mc.attributeQuery( 'show_'+key, node=visNode, exists=True):
@@ -11652,47 +11277,30 @@ class Quadruped( Char ):
                     mc.setAttr(visNode+'.' + attrName, k=True)
                 for node in dict[key]:
                     try:
-                        node = self.find_node( rootNode, node )
+                        node = self.find_node( self.charRoot, node )
                         mc.setAttr( node + '.v', lock=False )
                         mc.connectAttr( visNode + '.' + attrName, node + '.v', force=True )
 
                         if 'Lft' in node:
                             rgtNode = node.replace('Lft', 'Rgt')
-                            rgtNode = self.find_node( rootNode, rgtNode )
+                            rgtNode = self.find_node( self.charRoot, rgtNode )
                             if mc.objExists(rgtNode):
                                 mc.setAttr( rgtNode + '.v', lock=False )
                                 mc.connectAttr( visNode + '.' + attrName, rgtNode + '.v', force=True )
                     except:
                         pass
 
-            # Hide Up Vectors per default
-            mc.setAttr( visNode + '.show_UpVectors', False )
-
             if self.DEBUG:
                 print( 'Lock attributes')
-            # Lock Attrs
-            nodes = ['ToesTip_IK_Lft_Ctrl',
-                     'Heel_IK_Lft_Ctrl',
-                     'Toes_IK_Lft_Ctrl',
-                     'FootLift_IK_Lft_Ctrl',
-                     'Hips_Ctr_Ctrl',
-                     'Spine1_Ctr_Ctrl',
-                     'Spine2_Ctr_Ctrl',
-                     'Spine3_Ctr_Ctrl',
-                      'Chest_Ctr_Ctrl'
-                     ]
-            nodes.extend( dict['Arms'] )
-            nodes.extend( dict['Finger'] )
-            nodes.extend( dict['Head'] )
 
-            nodes = ['LegPole_IK_Lft_Ctrl', 'ShoulderUpVec_Lft_Ctrl', 'HipsUpVec_Lft_Ctrl',
-                     'ArmPole_IK_Lft_Ctrl']
+            # Lock Attrs
+            nodes = ['ForeLegPole_IK_Lft_Ctrl']
 
             if self.DEBUG:
                 print( 'Lock attributes IKs and UpVecs')
 
             for node in nodes:
-                node = controls[node].fullPathName()
+                node = self.controls[node].fullPathName()
 
                 if node is not None:
                     for attr in ['rx','ry','rz','sx','sy','sz']:
@@ -11702,7 +11310,7 @@ class Quadruped( Char ):
                             except:
                                 pass
                         rgtNode = node.replace('Lft', 'Rgt')
-                        rgtNode = self.find_node( rootNode, rgtNode )
+                        rgtNode = self.find_node( self.charRoot, rgtNode )
                         if mc.objExists(rgtNode):
                             try:
                                 mc.setAttr( rgtNode + '.' + attr, l=True, k=False)
@@ -11711,10 +11319,9 @@ class Quadruped( Char ):
                 else:
                     mc.warning( 'aniMeta: Can not find node ' + str( node ) )
 
-            #handles_Lft = self.get_nodes(rootNode, {'Side': kLeft, 'Type': kHandle }, hierarchy=True)
             handles_Lft = []
 
-            for node in controls.keys():
+            for node in self.controls.keys():
                 if 'Lft' in node:
                     handles_Lft.append( node )
 
@@ -11723,9 +11330,9 @@ class Quadruped( Char ):
 
             for i in range(len(handles_Lft)):
 
-                lft = controls[ handles_Lft[i] ].fullPathName()
+                lft = self.controls[ handles_Lft[i] ].fullPathName()
                 rgt = handles_Lft[i].replace('Lft', 'Rgt')
-                rgt = controls[ rgt ].fullPathName()
+                rgt = self.controls[ rgt ].fullPathName()
 
                 if mc.objExists(rgt):
 
@@ -11762,7 +11369,7 @@ class Quadruped( Char ):
                 else:
                     mc.warning('aniMeta: invalid right handle', rgt)
 
-            #self.build_pickwalking( rootNode )
+            self.build_pickwalking( self.charRoot )
 
     def build_autorotation(self, name='Scapula',
                            control=None, # Where the control attr will be put
@@ -11802,7 +11409,7 @@ class Quadruped( Char ):
                                 name=DIR + 'FootCtr_' + SIDE + '_Grp',
                                 parent=self.controls[DIR + 'Foot_IK_' + SIDE + '_Ctrl'],
                                 ss=True)
-        hoof_tip_guide = self.find_node(self.charRoot, DIR + 'HoofFront_Lft_Guide')
+        hoof_tip_guide = self.find_node(self.charRoot, DIR + '_Hoof_Front_Lft_Guide')
         mc.matchTransform(grps['ctr'] , hoof_tip_guide, pos=True, rot=False)
 
         if SIDE == 'Rgt':
@@ -11818,7 +11425,7 @@ class Quadruped( Char ):
                                  name=DIR + 'FootBack_' + SIDE + '_Grp',
                                  parent=grps['ctr'],
                                  ss=True)
-        back_guide = self.find_node(self.charRoot, DIR + 'HoofBack_Lft_Guide')
+        back_guide = self.find_node(self.charRoot, DIR + '_Hoof_Back_Lft_Guide')
         mc.matchTransform(grps['back'], back_guide, pos=True, rot=False)
 
         if SIDE == 'Rgt':
@@ -11829,7 +11436,7 @@ class Quadruped( Char ):
                                name=DIR + 'FootIn_' + SIDE + '_Grp',
                                parent=grps['back'],
                                ss=True)
-        in_guide = self.find_node(self.charRoot, DIR + 'HoofIn_Lft_Guide')
+        in_guide = self.find_node(self.charRoot, DIR + '_Hoof_In_Lft_Guide')
         mc.matchTransform(grps['in'], in_guide, pos=True, rot=False)
 
         if SIDE == 'Rgt':
@@ -11840,7 +11447,7 @@ class Quadruped( Char ):
                                 name=DIR + 'FootOut_' + SIDE + '_Grp',
                                 parent=grps['in'],
                                 ss=True)
-        out_guide = self.find_node(self.charRoot, DIR + 'HoofOut_Lft_Guide')
+        out_guide = self.find_node(self.charRoot, DIR + '_Hoof_Out_Lft_Guide')
         mc.matchTransform(grps['out'], out_guide, pos=True, rot=False)
 
         if SIDE == 'Rgt':
@@ -11851,7 +11458,7 @@ class Quadruped( Char ):
                                   name=DIR + 'FootFront_' + SIDE + '_Grp',
                                   parent=grps['out'],
                                   ss=True)
-        front_guide = self.find_node(self.charRoot, DIR + 'HoofFront_Lft_Guide')
+        front_guide = self.find_node(self.charRoot, DIR + '_Hoof_Front_Lft_Guide')
         mc.matchTransform(grps['front'], front_guide, pos=True, rot=False)
 
         if SIDE == 'Rgt':
@@ -11862,7 +11469,7 @@ class Quadruped( Char ):
                                     name=DIR + 'Fetlock_' + SIDE + '_Grp',
                                     parent=grps['front'],
                                     ss=True)
-        hoof_guide = self.find_node(self.charRoot, DIR + 'Hoof_Lft_Guide')
+        hoof_guide = self.find_node(self.charRoot, DIR + '_Hoof_Lft_Guide')
         mc.matchTransform(grps['fetlock'], hoof_guide, pos=True, rot=False)
 
         # Pastern Grp
@@ -11870,7 +11477,7 @@ class Quadruped( Char ):
                                     name=DIR + 'Pastern_' + SIDE + '_Grp',
                                     parent=grps['fetlock'],
                                     ss=True)
-        pastern_guide = self.find_node(self.charRoot, DIR + 'Pastern_Lft_Guide')
+        pastern_guide = self.find_node(self.charRoot, DIR + '_Pastern_Lft_Guide')
         mc.matchTransform(grps['pastern'], pastern_guide, pos=True, rot=True)
 
         # Fetlock Grp
@@ -11878,7 +11485,7 @@ class Quadruped( Char ):
                                     name=DIR + 'Fetlock2_' + SIDE + '_Grp',
                                     parent=grps['pastern'],
                                     ss=True)
-        hoof_guide = self.find_node(self.charRoot, DIR + 'Hoof_Lft_Guide')
+        hoof_guide = self.find_node(self.charRoot, DIR + '_Hoof_Lft_Guide')
         mc.matchTransform(grps['fetlock2'], hoof_guide, pos=True, rot=True)
 
         return grps
@@ -12030,14 +11637,14 @@ class Quadruped( Char ):
 
     def connect_spine_joints(self, rootNode, outputs2):
         joint_count = len(outputs2)
-        jnt = self.find_node(rootNode, 'Pelvis_Jnt')
+        jnt = self.find_node(rootNode, 'pelvis')
         mc.parentConstraint(outputs2[0], jnt)
 
         for i in range(joint_count - 2):
-            jnt = self.find_node(rootNode, 'Spine' + str(i + 1) + '_Jnt')
+            jnt = self.find_node(rootNode, 'spine_0' + str(i + 1))
             mc.parentConstraint(outputs2[i + 1], jnt)
 
-        jnt = self.find_node(rootNode, 'Chest_Jnt')
+        jnt = self.find_node(rootNode, 'chest')
         mc.parentConstraint(outputs2[joint_count - 1], jnt)
 
     def create_spline_ik(self,
@@ -12083,11 +11690,12 @@ class Quadruped( Char ):
         mc.setAttr(grandparent + '.r', 0, 0, 0)
 
         for i in range(joint_count):
-            joint = self.find_node(rootNode, name + str(i + 1) + '_Jnt')
+            joint = self.find_node(rootNode, name.lower() + '_0'+ str(i + 1))
             if not joint:
-                mc.warning( 'Can not find '+name + str(i + 1) + '_Jnt')
+                mc.warning( 'Can not find '+name.lower() + '_0'+ str(i + 1))
                 continue
-            mc.parentConstraint(outputs_lvl2[i], joint, mo=True)
+            else:
+                mc.parentConstraint(outputs_lvl2[i], joint, mo=True)
 
     def create_advanced_spline_ik(self,
                         name='Spine',
@@ -12726,32 +12334,32 @@ class Quadruped( Char ):
         # Move Guides that have no direct constraints
         src = self.find_node(self.charRoot, 'COG_Guide')
         grp = self.get_parent(src)
-        dst = self.find_node(self.charRoot, 'Spine4_Jnt')
+        dst = self.find_node(self.charRoot, 'spine_04')
         mc.matchTransform(grp, dst)
 
         src = self.find_node(self.charRoot, 'Pelvis_Guide')
         grp = self.get_parent(src)
-        dst = self.find_node(self.charRoot, 'Pelvis_Jnt')
+        dst = self.find_node(self.charRoot, 'pelvis')
         mc.matchTransform(grp, dst)
 
         src = self.find_node(self.charRoot, 'Chest_Guide')
         grp = self.get_parent(src)
-        dst = self.find_node(self.charRoot, 'Chest_Jnt')
+        dst = self.find_node(self.charRoot, 'chest')
         mc.matchTransform(grp, dst)
 
         # Position IK Poles
 
         offset = 40
-        src = self.find_node(self.charRoot, 'ForeLegPole_Lft_Guide')
+        src = self.find_node(self.charRoot, 'Fore_Leg_Pole_Lft_Guide')
         grp = self.get_parent(src)
-        dst = self.find_node(self.charRoot, 'ForeCannon_Lft_Guide')
+        dst = self.find_node(self.charRoot, 'Fore_Cannon_Lft_Guide')
 
         mc.matchTransform(grp, dst, pos=True, rot=False)
         mc.move(0, 0, offset, grp, r=True, ws=True)
 
-        src = self.find_node(self.charRoot, 'HindLegPole_Lft_Guide')
+        src = self.find_node(self.charRoot, 'Hind_Leg_Pole_Lft_Guide')
         grp = self.get_parent(src)
-        dst = self.find_node(self.charRoot, 'HindCannon_Lft_Guide')
+        dst = self.find_node(self.charRoot, 'Hind_Cannon_Lft_Guide')
         mc.matchTransform(grp, dst, pos=True, rot=False)
         mc.move(0, 0, -offset, grp, r=True, ws=True)
 
@@ -12763,20 +12371,20 @@ class Quadruped( Char ):
         offset.append([4, 0, 8])
 
         for DIR in ['Fore', 'Hind']:
-            guide = self.find_node(self.charRoot, DIR + 'HoofTip_Lft_Guide')
-            grp = mc.createNode('transform', name=DIR + 'Hoof_Guide_Grp', parent=guide)
+            guide = self.find_node(self.charRoot, DIR + '_Hoof_Tip_Lft_Guide')
+            grp = mc.createNode('transform', name=DIR + '_Hoof_Guide_Grp', parent=guide)
             mc.orientConstraint(self.charRoot, grp, mo=True)
 
             for SIDE in ['Back', 'Front', 'In', 'Out']:
-                guide = self.find_node(self.charRoot, DIR + 'Hoof' + SIDE + '_Lft_Guide')
+                guide = self.find_node(self.charRoot, DIR + '_Hoof_' + SIDE + '_Lft_Guide')
                 parent = self.get_parent(guide)
                 mc.parent(parent, grp)
 
         for i, DIR in enumerate(['Back', 'Front', 'In', 'Out']):
             for prefix in ['Fore', 'Hind']:
-                foreHoof_guide = self.find_node(self.charRoot, prefix + 'Hoof' + DIR + '_Lft_Guide')
+                foreHoof_guide = self.find_node(self.charRoot, prefix + '_Hoof_' + DIR + '_Lft_Guide')
                 parent = self.get_parent(foreHoof_guide)
-                foot_guide = self.find_node(self.charRoot, prefix + 'Pastern_Lft_Guide')
+                foot_guide = self.find_node(self.charRoot, prefix + '_Pastern_Lft_Guide')
 
                 mc.matchTransform(parent, foot_guide, pos=True, rot=False)
                 #mc.matchTransform(parent, temp_loc, pos=False, rot=True)
@@ -12839,15 +12447,15 @@ class Quadruped( Char ):
         mc.matchTransform(src, dst, pos=True, rot=False)
 
         src = self.find_node(self.charRoot, 'NeckFK2_Guide')
-        dst = self.find_node(self.charRoot, 'Neck2_Jnt')
+        dst = self.find_node(self.charRoot, 'neck_02')
         mc.matchTransform(src, dst, pos=True, rot=False)
 
         src = self.find_node(self.charRoot, 'NeckFK3_Guide')
-        dst = self.find_node(self.charRoot, 'Neck4_Jnt')
+        dst = self.find_node(self.charRoot, 'neck_04')
         mc.matchTransform(src, dst, pos=True, rot=False)
 
         src = self.find_node(self.charRoot, 'NeckFK4_Guide')
-        dst = self.find_node(self.charRoot, 'Neck6_Jnt')
+        dst = self.find_node(self.charRoot, 'neck_06')
         mc.matchTransform(src, dst, pos=True, rot=False)
 
         for i in range(4):
@@ -12860,27 +12468,27 @@ class Quadruped( Char ):
         # Tweak em
         attr = 'tz'
         t_attrs = ['tx', 'ty', 'tz']
-        length_guides = ['ForeCannon_Lft_Guide',
+        length_guides = ['Fore_Cannon_Lft_Guide',
                          'Radius_Lft_Guide',
                          'Humerus_Lft_Guide',
-                         'ForePastern_Lft_Guide',
-                         'ForeHoof_Lft_Guide',
-                         'ForeHoofTip_Lft_Guide',
-                         'HeadTip_Guide',
-                         'JawTip_Guide',
+                         'Fore_Pastern_Lft_Guide',
+                         'Fore_Hoof_Lft_Guide',
+                         'Fore_Hoof_Tip_Lft_Guide',
+                         'Head_Tip_Guide',
+                         'Jaw_Tip_Guide',
                          'Fibula_Lft_Guide',
-                         'HindCannon_Lft_Guide',
-                         'HindPastern_Lft_Guide',
-                         'HindHoof_Lft_Guide',
-                         'HindHoofTip_Lft_Guide',
-                         'ForeLegPole_Lft_Guide',
-                         'HindLegPole_Lft_Guide',
-                         'Tail2_Guide',
-                         'Tail3_Guide',
-                         'Tail4_Guide',
-                         'Tail5_Guide',
-                         'Tail6_Guide',
-                         'Tail7_Guide']
+                         'Hind_Cannon_Lft_Guide',
+                         'Hind_Pastern_Lft_Guide',
+                         'Hind_Hoof_Lft_Guide',
+                         'Hind_Hoof_Tip_Lft_Guide',
+                         'Fore_Leg_Pole_Lft_Guide',
+                         'Hind_Leg_Pole_Lft_Guide',
+                         'Tail_02_Guide',
+                         'Tail_03_Guide',
+                         'Tail_04_Guide',
+                         'Tail_05_Guide',
+                         'Tail_06_Guide',
+                         'Tail_07_Guide']
 
         for guide in length_guides:
             if 'Pole' in guide:
@@ -12917,7 +12525,7 @@ class Quadruped( Char ):
         #guideList.append(['COG_Guide', None, guideGrp, justTzTyRx])
         guide_data['COG'] = {
             'name': 'COG'+guide_sfx,
-            'matchTransform': 'Spine4_Jnt',
+            'matchTransform': 'spine_04',
             'parent': guide_grp,
             'attributes': justTzTyRx
         }
@@ -12925,7 +12533,7 @@ class Quadruped( Char ):
         #guideList.append(['Pelvis_Guide', None, 'COG_Guide', justTzTyRx])
         guide_data['Pelvis'] = {
             'name': 'Pelvis'+guide_sfx,
-            'matchTransform': 'Pelvis_Jnt',
+            'matchTransform': 'pelvis',
             'parent': 'COG'+guide_sfx,
             'attributes': justTzTyRx
         }
@@ -12933,7 +12541,7 @@ class Quadruped( Char ):
         #guideList.append(['Chest_Guide', None, 'COG_Guide', justTzTyRx])
         guide_data['Chest'] = {
             'name': 'Chest'+guide_sfx,
-            'matchTransform': 'Chest_Jnt',
+            'matchTransform': 'chest',
             'parent': 'COG'+guide_sfx,
             'attributes': justTzTyRx
         }
@@ -12941,7 +12549,7 @@ class Quadruped( Char ):
         #guideList.append(['NeckFK1_Guide', None, 'Chest_Guide', justTzTyRx])
         guide_data['NeckFK1'] = {
             'name': 'NeckFK1'+guide_sfx,
-            'matchTransform': 'Chest_Jnt',
+            'matchTransform': 'chest',
             'parent': 'Chest'+guide_sfx,
             'attributes': justTzTyRx
         }
@@ -12949,7 +12557,7 @@ class Quadruped( Char ):
         #guideList.append(['NeckFK2_Guide', None, 'NeckFK1_Guide', justTzTyRx])
         guide_data['NeckFK2'] = {
             'name': 'NeckFK2'+guide_sfx,
-            'matchTransform': 'Neck2_Jnt',
+            'matchTransform': 'neck_02',
             'parent': 'NeckFK1'+guide_sfx,
             'attributes': justTzTyRx
         }
@@ -12957,7 +12565,7 @@ class Quadruped( Char ):
         #guideList.append(['NeckFK3_Guide', None, 'NeckFK2_Guide', justTzTyRx])
         guide_data['NeckFK3'] = {
             'name': 'NeckFK3'+guide_sfx,
-            'matchTransform': 'Neck3_Jnt',
+            'matchTransform': 'neck_03',
             'parent': 'NeckFK2'+guide_sfx,
             'attributes': justTzTyRx
         }
@@ -12965,60 +12573,60 @@ class Quadruped( Char ):
         #guideList.append(['NeckFK4_Guide', None, 'NeckFK3_Guide', justTzTyRx])
         guide_data['NeckFK4'] = {
             'name': 'NeckFK4'+guide_sfx,
-            'matchTransform': 'Neck4_Jnt',
+            'matchTransform': 'neck_04',
             'parent': 'NeckFK3'+guide_sfx,
             'attributes': justTzTyRx
         }
         # Head
-        #guideList.append(['Head_Guide', 'Head_Jnt', 'NeckFK4_Guide', justTzTyRx])
+        #guideList.append(['Head_Guide', 'Head', 'NeckFK4_Guide', justTzTyRx])
         guide_data['Head'] = {
             'name': 'Head'+guide_sfx,
-            'matchTransform': 'Head_Jnt',
+            'matchTransform': 'head',
             'parent': 'NeckFK4'+guide_sfx,
-            'constraintNode': 'Head_Jnt',
+            'constraintNode': 'head',
             'attributes': justTzTyRx
         }
         # HeadTip
-        #guideList.append(['HeadTip_Guide', 'HeadTip_Jnt', 'Head_Guide', justTzRx])
-        guide_data['HeadTip'] = {
-            'name': 'HeadTip'+guide_sfx,
-            'matchTransform': 'HeadTip_Jnt',
+        #guideList.append(['HeadTip_Guide', 'HeadTip', 'Head_Guide', justTzRx])
+        guide_data['Head_Tip'] = {
+            'name': 'Head_Tip'+guide_sfx,
+            'matchTransform': 'head_tip',
             'parent': 'Head'+guide_sfx,
-            'constraintNode': 'HeadTip_Jnt',
+            'constraintNode': 'head_tip',
             'attributes': justTzRx
         }
         # Neck IK 1
-        #guideList.append(['Neck1_Guide', 'Neck1_Jnt', 'Chest_Guide', attrList])
+        #guideList.append(['Neck1_Guide', 'Neck1', 'Chest_Guide', attrList])
         guide_data['NeckIK1'] = {
             'name': 'NeckIK1'+guide_sfx,
-            'matchTransform': 'Neck1_Jnt',
+            'matchTransform': 'neck_01',
             'parent': 'Chest'+guide_sfx,
             'attributes': justTzTyRx
         }
         # Neck IK 2
-        #guideList.append(['Neck2_Guide', 'Neck7_Jnt', 'Head_Guide', attrList])
+        #guideList.append(['Neck2_Guide', 'Neck7', 'Head_Guide', attrList])
         guide_data['NeckIK2'] = {
             'name': 'NeckIK2'+guide_sfx,
-            'matchTransform': 'Neck7_Jnt',
+            'matchTransform': 'neck_07',
             'parent': 'Head'+guide_sfx,
             'attributes': justTzTyRx
         }
         # Jaw
-        #guideList.append(['Jaw_Guide', 'Jaw_Jnt', 'Head_Guide', justTzTyRx])
+        #guideList.append(['Jaw_Guide', 'Jaw', 'Head_Guide', justTzTyRx])
         guide_data['Jaw'] = {
             'name': 'Jaw'+guide_sfx,
-            'matchTransform': 'Jaw_Jnt',
+            'matchTransform': 'jaw',
             'parent': 'Head'+guide_sfx,
-            'constraintNode': 'Jaw_Jnt',
+            'constraintNode': 'jaw',
             'attributes': justTzTyRx
         }
         # JawTip
-        #guideList.append(['JawTip_Guide', 'JawTip_Jnt', 'Jaw_Guide', attrList])
-        guide_data['JawTip'] = {
-            'name': 'JawTip'+guide_sfx,
-            'matchTransform': 'JawTip_Jnt',
+        #guideList.append(['JawTip_Guide', 'JawTip', 'Jaw_Guide', attrList])
+        guide_data['Jaw_Tip'] = {
+            'name': 'Jaw_Tip'+guide_sfx,
+            'matchTransform': 'jaw_tip',
             'parent': 'Jaw'+guide_sfx,
-            'constraintNode': 'JawTip_Jnt',
+            'constraintNode': 'jaw_tip',
             'attributes': justTzTyRx
         }
         # Tail
@@ -13028,227 +12636,227 @@ class Quadruped( Char ):
                 attr = justTzTyRx
                 parent = 'Pelvis'+guide_sfx
             else:
-                parent =  'Tail'+str(i-1)+guide_sfx
+                parent = 'Tail_0'+str(i-1)+guide_sfx
 
-            guide_data['Tail'+str(i)] = {
-                'name': 'Tail'+str(i)+guide_sfx,
-                'matchTransform': 'Tail'+str(i)+'_Jnt',
+            guide_data['Tail_0'+str(i)] = {
+                'name': 'Tail_0'+str(i)+guide_sfx,
+                'matchTransform': 'tail_0'+str(i)+'',
                 'parent': parent,
-                'constraintNode': 'Tail'+str(i)+'_Jnt',
+                'constraintNode': 'tail_0'+str(i)+'',
                 'attributes': attr
             }
         # Femur
-        #guideList.append(['Femur_Lft_Guide', 'Femur_Lft_Jnt', 'Pelvis_Guide', ['sx', 'sy', 'sz', 'v']])
+        #guideList.append(['Femur_Lft_Guide', 'Femur_Lft', 'Pelvis_Guide', ['sx', 'sy', 'sz', 'v']])
         guide_data['Femur_Lft'] = {
             'name': 'Femur_Lft'+guide_sfx,
-            'matchTransform': 'Femur_Lft_Jnt',
+            'matchTransform': 'femur_l',
             'parent': 'Pelvis'+guide_sfx,
-            'constraintNode': 'Femur_Lft_Jnt',
+            'constraintNode': 'femur_l',
             'attributes': ['sx', 'sy', 'sz', 'v']
         }
         # Fibula
-        #guideList.append(['Fibula_Lft_Guide', 'Fibula_Lft_Jnt', 'Femur_Lft_Guide', justTzTyRx])
+        #guideList.append(['Fibula_Lft_Guide', 'Fibula_Lft', 'Femur_Lft_Guide', justTzTyRx])
         guide_data['Fibula_Lft'] = {
             'name': 'Fibula_Lft'+guide_sfx,
-            'matchTransform': 'Fibula_Lft_Jnt',
-            'constraintNode': 'Fibula_Lft_Jnt',
+            'matchTransform': 'fibula_l',
+            'constraintNode': 'fibula_l',
             'parent': 'Femur_Lft'+guide_sfx,
             'attributes': justTzTyRx
         }
         # Cannon
-        #guideList.append(['HindCannon_Lft_Guide', 'HindCannon_Lft_Jnt', 'Fibula_Lft_Guide', justTzTyRx])
-        guide_data['HindCannon_Lft'] = {
-            'name': 'HindCannon_Lft'+guide_sfx,
-            'matchTransform': 'HindCannon_Lft_Jnt',
-            'constraintNode': 'HindCannon_Lft_Jnt',
+        #guideList.append(['HindCannon_Lft_Guide', 'HindCannon_Lft', 'Fibula_Lft_Guide', justTzTyRx])
+        guide_data['Hind_Cannon_Lft'] = {
+            'name': 'Hind_Cannon_Lft'+guide_sfx,
+            'matchTransform': 'hind_cannon_l',
+            'constraintNode': 'hind_cannon_l',
             'parent': 'Fibula_Lft'+guide_sfx,
             'attributes': justTzTyRx
         }
 
         # Pastern
-        #guideList.append(['HindPastern_Lft_Guide', 'HindPastern_Lft_Jnt', 'HindCannon_Lft_Guide', justTzTyRx])
-        guide_data['HindPastern_Lft'] = {
-            'name': 'HindPastern_Lft'+guide_sfx,
-            'matchTransform': 'HindPastern_Lft_Jnt',
-            'constraintNode': 'HindPastern_Lft_Jnt',
-            'parent': 'HindCannon_Lft'+guide_sfx,
+        #guideList.append(['HindPastern_Lft_Guide', 'HindPastern_Lft', 'HindCannon_Lft_Guide', justTzTyRx])
+        guide_data['Hind_Pastern_Lft'] = {
+            'name': 'Hind_Pastern_Lft'+guide_sfx,
+            'matchTransform': 'hind_pastern_l',
+            'constraintNode': 'hind_pastern_l',
+            'parent': 'Hind_Cannon_Lft'+guide_sfx,
             'attributes': justTzTyRx
         }
         # Hoof
-        #guideList.append(['HindHoof_Lft_Guide', 'HindHoof_Lft_Jnt', 'HindPastern_Lft_Guide', justTzRx])
-        guide_data['HindHoof_Lft'] = {
-            'name': 'HindHoof_Lft'+guide_sfx,
-            'matchTransform': 'HindHoof_Lft_Jnt',
-            'constraintNode': 'HindHoof_Lft_Jnt',
-            'parent': 'HindPastern_Lft'+guide_sfx,
+        #guideList.append(['HindHoof_Lft_Guide', 'HindHoof_Lft', 'HindPastern_Lft_Guide', justTzRx])
+        guide_data['Hind_Hoof_Lft'] = {
+            'name': 'Hind_Hoof_Lft'+guide_sfx,
+            'matchTransform': 'hind_hoof_l',
+            'constraintNode': 'hind_hoof_l',
+            'parent': 'Hind_Pastern_Lft'+guide_sfx,
             'attributes': justTzTyRx
         }
         # Hoof Tip
-        # guideList.append(['HindHoofTip_Lft_Guide', 'HindHoofTip_Lft_Jnt', 'HindHoof_Lft_Guide', justTzRx])
-        guide_data['HindHoofTip_Lft'] = {
-            'name': 'HindHoofTip_Lft'+guide_sfx,
-            'matchTransform': 'HindHoofTip_Lft_Jnt',
-            'constraintNode': 'HindHoofTip_Lft_Jnt',
-            'parent': 'HindHoof_Lft'+guide_sfx,
+        # guideList.append(['HindHoofTip_Lft_Guide', 'HindHoofTip_Lft', 'HindHoof_Lft_Guide', justTzRx])
+        guide_data['Hind_Hoof_Tip_Lft'] = {
+            'name': 'Hind_Hoof_Tip_Lft'+guide_sfx,
+            'matchTransform': 'hind_hoof_tip_l',
+            'constraintNode': 'hind_hoof_tip_l',
+            'parent': 'Hind_Hoof_Lft'+guide_sfx,
             'attributes': justTzTyRx
         }
         # Hind Hoof Back
         # guideList.append(['HindHoofBack_Lft_Guide', 'Heel_Lft_Jnt', 'HindHoof_Lft_Guide', attrList])
-        guide_data['HindHoofBack_Lft'] = {
-            'name': 'HindHoofBack_Lft'+guide_sfx,
-            'parent': 'HindHoof_Lft'+guide_sfx,
+        guide_data['Hind_Hoof_Back_Lft'] = {
+            'name': 'Hind_Hoof_Back_Lft'+guide_sfx,
+            'parent': 'Hind_Hoof_Lft'+guide_sfx,
             'attributes': attrList
         }
         # Hind Hoof Front
         # guideList.append(['HindHoofFront_Lft_Guide', 'Heel_Lft_Jnt', 'HindHoof_Lft_Guide', attrList])
-        guide_data['HindHoofFront_Lft'] = {
-            'name': 'HindHoofFront_Lft'+guide_sfx,
-            'parent': 'HindHoof_Lft'+guide_sfx,
+        guide_data['Hind_Hoof_Front_Lft'] = {
+            'name': 'Hind_Hoof_Front_Lft'+guide_sfx,
+            'parent': 'Hind_Hoof_Lft'+guide_sfx,
             'attributes': attrList
         }
         # Hind Hoof In
         #guideList.append(['HindHoofIn_Lft_Guide', 'Heel_Lft_Jnt', 'HindHoof_Lft_Guide', attrList])
-        guide_data['HindHoofIn_Lft'] = {
-            'name': 'HindHoofIn_Lft'+guide_sfx,
-            'parent': 'HindHoof_Lft'+guide_sfx,
+        guide_data['Hind_Hoof_In_Lft'] = {
+            'name': 'Hind_Hoof_In_Lft'+guide_sfx,
+            'parent': 'Hind_Hoof_Lft'+guide_sfx,
             'attributes': attrList
         }
         # Hind Hoof Out
         #guideList.append(['HindHoofOut_Lft_Guide', 'Heel_Lft_Jnt', 'HindHoof_Lft_Guide', attrList])
-        guide_data['HindHoofOut_Lft'] = {
-            'name': 'HindHoofOut_Lft'+guide_sfx,
-            'parent': 'HindHoof_Lft'+guide_sfx,
+        guide_data['Hind_Hoof_Out_Lft'] = {
+            'name': 'Hind_Hoof_Out_Lft'+guide_sfx,
+            'parent': 'Hind_Hoof_Lft'+guide_sfx,
             'attributes': attrList
         }
         # Hind Leg Pole
         #guideList.append(['HindLegPole_Lft_Guide', None, 'HindCannon_Lft_Guide', attrList])
-        guide_data['HindLegPole_Lft'] = {
-            'name': 'HindLegPole_Lft'+guide_sfx,
-            'parent': 'HindCannon_Lft'+guide_sfx,
+        guide_data['Hind_Leg_Pole_Lft'] = {
+            'name': 'Hind_Leg_Pole_Lft'+guide_sfx,
+            'parent': 'Hind_Cannon_Lft'+guide_sfx,
             'attributes': attrList
         }
         # Eyes
         #guideList.append(['Eye_Lft_Guide', 'Eye_Lft_Jnt', 'Head_Guide', ['sx', 'sy', 'sz', 'v']])
         guide_data['Eye_Lft'] = {
             'name': 'Eye_Lft'+guide_sfx,
-            'matchTransform': 'Eye_Lft_Jnt',
+            'matchTransform': 'eye_l',
             'parent': 'Head'+guide_sfx,
             'attributes': attrList
         }
         # Ear
-        #guideList.append(['Ear_Lft_Guide', 'Ear_Lft_Jnt', 'Head_Guide', ['sx', 'sy', 'sz', 'v']])
+        #guideList.append(['Ear_Lft_Guide', 'Ear_Lft', 'Head_Guide', ['sx', 'sy', 'sz', 'v']])
         guide_data['Ear_Lft'] = {
             'name': 'Ear_Lft'+guide_sfx,
             'parent': 'Head'+guide_sfx,
-            'matchTransform': 'Ear_Lft_Jnt',
-            'constraintNode': 'Ear_Lft_Jnt',
+            'matchTransform': 'ear_l',
+            'constraintNode': 'ear_l',
             'attributes': attrList
         }
         # EarTip
-        #guideList.append(['EarTip_Lft_Guide', 'EarTip_Lft_Jnt', 'Ear_Lft_Guide', attrList])
-        guide_data['EarTip_Lft'] = {
-            'name': 'EarTip_Lft'+guide_sfx,
+        #guideList.append(['EarTip_Lft_Guide', 'EarTip_Lft', 'Ear_Lft_Guide', attrList])
+        guide_data['Ear_Tip_Lft'] = {
+            'name': 'Ear_Tip_Lft'+guide_sfx,
             'parent': 'Ear_Lft'+guide_sfx,
-            'matchTransform': 'EarTip_Lft_Jnt',
-            'constraintNode': 'EarTip_Lft_Jnt',
+            'matchTransform': 'ear_tip_l',
+            'constraintNode': 'ear_tip_l',
             'attributes': attrList
         }
         # Scapula
-        #guideList.append( ['Scapula_Lft_Guide', 'Scapula_Lft_Jnt', 'Chest_Guide', ['sx', 'sy', 'sz', 'v']])
+        #guideList.append( ['Scapula_Lft_Guide', 'Scapula_Lft', 'Chest_Guide', ['sx', 'sy', 'sz', 'v']])
         guide_data['Scapula_Lft'] = {
             'name': 'Scapula_Lft'+guide_sfx,
-            'matchTransform': 'Scapula_Lft_Jnt',
-            'constraintNode': 'Scapula_Lft_Jnt',
+            'matchTransform': 'scapula_l',
+            'constraintNode': 'scapula_l',
             'parent': 'Chest'+guide_sfx,
             'attributes': attrList
         }
         # Humerus
-        #guideList.append(['Humerus_Lft_Guide', 'Humerus_Lft_Jnt', 'Scapula_Lft_Guide', justTzRx])
+        #guideList.append(['Humerus_Lft_Guide', 'Humerus_Lft', 'Scapula_Lft_Guide', justTzRx])
         guide_data['Humerus_Lft'] = {
             'name': 'Humerus_Lft'+guide_sfx,
-            'matchTransform': 'Humerus_Lft_Jnt',
-            'constraintNode': 'Humerus_Lft_Jnt',
+            'matchTransform': 'humerus_l',
+            'constraintNode': 'humerus_l',
             'parent': 'Scapula_Lft'+guide_sfx,
             'attributes': justTzRx
         }
         # Radius
-        #guideList.append(['Radius_Lft_Guide', 'Radius_Lft_Jnt', 'Humerus_Lft_Guide', justTzRx])
+        #guideList.append(['Radius_Lft_Guide', 'Radius_Lft', 'Humerus_Lft_Guide', justTzRx])
         guide_data['Radius_Lft'] = {
             'name': 'Radius_Lft'+guide_sfx,
-            'matchTransform': 'Radius_Lft_Jnt',
-            'constraintNode': 'Radius_Lft_Jnt',
+            'matchTransform': 'radius_l',
+            'constraintNode': 'radius_l',
             'parent': 'Humerus_Lft'+guide_sfx,
             'attributes': justTzRx
         }
         # ForeCannon
-        #guideList.append(['ForeCannon_Lft_Guide', 'ForeCannon_Lft_Jnt', 'Radius_Lft_Guide', justTzRx])
-        guide_data['ForeCannon_Lft'] = {
-            'name': 'ForeCannon_Lft'+guide_sfx,
-            'matchTransform': 'ForeCannon_Lft_Jnt',
-            'constraintNode': 'ForeCannon_Lft_Jnt',
+        #guideList.append(['ForeCannon_Lft_Guide', 'ForeCannon_Lft', 'Radius_Lft_Guide', justTzRx])
+        guide_data['Fore_Cannon_Lft'] = {
+            'name': 'Fore_Cannon_Lft'+guide_sfx,
+            'matchTransform': 'fore_cannon_l',
+            'constraintNode': 'fore_cannon_l',
             'parent': 'Radius_Lft'+guide_sfx,
             'attributes': justTzRx
         }
         # ForePastern
-        #guideList.append( ['ForePastern_Lft_Guide', 'ForePastern_Lft_Jnt', 'ForeCannon_Lft_Guide', justTzRx])
-        guide_data['ForePastern_Lft'] = {
-            'name': 'ForePastern_Lft'+guide_sfx,
-            'matchTransform': 'ForePastern_Lft_Jnt',
-            'constraintNode': 'ForePastern_Lft_Jnt',
-            'parent': 'ForeCannon_Lft'+guide_sfx,
+        #guideList.append( ['ForePastern_Lft_Guide', 'ForePastern_Lft', 'ForeCannon_Lft_Guide', justTzRx])
+        guide_data['Fore_Pastern_Lft'] = {
+            'name': 'Fore_Pastern_Lft'+guide_sfx,
+            'matchTransform': 'fore_pastern_l',
+            'constraintNode': 'fore_pastern_l',
+            'parent': 'Fore_Cannon_Lft'+guide_sfx,
             'attributes': justTzRx
         }
         # ForeHoof
-        #guideList.append( ['ForeHoof_Lft_Guide', 'ForeHoof_Lft_Jnt', 'ForePastern_Lft_Guide', justTzRx])
-        guide_data['ForeHoof_Lft'] = {
-            'name': 'ForeHoof_Lft'+guide_sfx,
-            'matchTransform': 'ForeHoof_Lft_Jnt',
-            'constraintNode': 'ForeHoof_Lft_Jnt',
-            'parent': 'ForePastern_Lft'+guide_sfx,
+        #guideList.append( ['ForeHoof_Lft_Guide', 'ForeHoof_Lft', 'ForePastern_Lft_Guide', justTzRx])
+        guide_data['Fore_Hoof_Lft'] = {
+            'name': 'Fore_Hoof_Lft'+guide_sfx,
+            'matchTransform': 'fore_hoof_l',
+            'constraintNode': 'fore_hoof_l',
+            'parent': 'Fore_Pastern_Lft'+guide_sfx,
             'attributes': justTzRx
         }
         # ForeHoofTip
-        #guideList.append( ['ForeHoofTip_Lft_Guide', 'ForeHoofTip_Lft_Jnt', 'ForeHoof_Lft_Guide', justTzRx])
-        guide_data['ForeHoofTip_Lft'] = {
-            'name': 'ForeHoofTip_Lft'+guide_sfx,
-            'matchTransform': 'ForeHoofTip_Lft_Jnt',
-            'constraintNode': 'ForeHoofTip_Lft_Jnt',
-            'parent': 'ForeHoof_Lft'+guide_sfx,
+        #guideList.append( ['ForeHoofTip_Lft_Guide', 'ForeHoofTip_Lft', 'ForeHoof_Lft_Guide', justTzRx])
+        guide_data['Fore_Hoof_Tip_Lft'] = {
+            'name': 'Fore_Hoof_Tip_Lft'+guide_sfx,
+            'matchTransform': 'fore_hoof_tip_l',
+            'constraintNode': 'fore_hoof_tip_l',
+            'parent': 'Fore_Hoof_Lft'+guide_sfx,
             'attributes': justTzRx
         }
         # Fore Hoof Front
-        #guideList.append(['ForeHoofBack_Lft_Guide', 'Heel_Lft_Jnt', 'ForeHoofTip_Lft_Guide', attrList])
-        guide_data['ForeHoofBack_Lft'] = {
-            'name': 'ForeHoofBack_Lft'+guide_sfx,
-            'parent': 'ForeHoof_Lft'+guide_sfx,
+        #guideList.append(['ForeHoofBack_Lft_Guide', 'Heel_Lft', 'ForeHoofTip_Lft_Guide', attrList])
+        guide_data['Fore_Hoof_Back_Lft'] = {
+            'name': 'Fore_Hoof_Back_Lft'+guide_sfx,
+            'parent': 'Fore_Hoof_Lft'+guide_sfx,
             'attributes': attrList
         }
         # Fore Hoof Back
-        #guideList.append(['ForeHoofFront_Lft_Guide', 'Heel_Lft_Jnt', 'ForeHoofTip_Lft_Guide', attrList])
-        guide_data['ForeHoofFront_Lft'] = {
-            'name': 'ForeHoofFront_Lft'+guide_sfx,
-            'parent': 'ForeHoof_Lft'+guide_sfx,
+        #guideList.append(['ForeHoofFront_Lft_Guide', 'Heel_Lft', 'ForeHoofTip_Lft_Guide', attrList])
+        guide_data['Fore_Hoof_Front_Lft'] = {
+            'name': 'Fore_Hoof_Front_Lft'+guide_sfx,
+            'parent': 'Fore_Hoof_Lft'+guide_sfx,
             'attributes': attrList
         }
         # Fore Hoof In
-        #guideList.append(['ForeHoofIn_Lft_Guide', 'Heel_Lft_Jnt', 'ForeHoofTip_Lft_Guide', attrList])
-        guide_data['ForeHoofIn_Lft'] = {
-            'name': 'ForeHoofIn_Lft'+guide_sfx,
-            'parent': 'ForeHoof_Lft'+guide_sfx,
+        #guideList.append(['ForeHoofIn_Lft_Guide', 'Heel_Lft', 'ForeHoofTip_Lft_Guide', attrList])
+        guide_data['Fore_Hoof_In_Lft'] = {
+            'name': 'Fore_Hoof_In_Lft'+guide_sfx,
+            'parent': 'Fore_Hoof_Lft'+guide_sfx,
             'attributes': attrList
         }
         # Fore Hoof Out
         #guideList.append(['ForeHoofOut_Lft_Guide', 'Heel_Lft_Jnt', 'ForeHoofTip_Lft_Guide', attrList])
-        guide_data['ForeHoofOut_Lft'] = {
-            'name': 'ForeHoofOut_Lft'+guide_sfx,
-            'parent': 'ForeHoof_Lft'+guide_sfx,
+        guide_data['Fore_Hoof_Out_Lft'] = {
+            'name': 'Fore_Hoof_Out_Lft'+guide_sfx,
+            'parent': 'Fore_Hoof_Lft'+guide_sfx,
             'attributes': attrList
         }
         # Fore Leg Pole
         #guideList.append(['ForeLegPole_Lft_Guide', None, 'ForeCannon_Lft_Guide', attrList])
-        guide_data['ForeLegPole_Lft'] = {
-            'name': 'ForeLegPole_Lft'+guide_sfx,
-            'parent': 'ForeCannon_Lft'+guide_sfx,
+        guide_data['Fore_Leg_Pole_Lft'] = {
+            'name': 'Fore_Leg_Pole_Lft'+guide_sfx,
+            'parent': 'Fore_Cannon_Lft'+guide_sfx,
             'attributes': attrList
         }
 
@@ -13260,55 +12868,474 @@ class Quadruped( Char ):
 
         guide_list.append('COG')
         guide_list.append('Pelvis')
-        guide_list.append('Tail1')
-        guide_list.append('Tail2')
-        guide_list.append('Tail3')
-        guide_list.append('Tail4')
-        guide_list.append('Tail5')
-        guide_list.append('Tail6')
-        guide_list.append('Tail7')
+        guide_list.append('Tail_01')
+        guide_list.append('Tail_02')
+        guide_list.append('Tail_03')
+        guide_list.append('Tail_04')
+        guide_list.append('Tail_05')
+        guide_list.append('Tail_06')
+        guide_list.append('Tail_07')
         guide_list.append('Chest')
         guide_list.append('NeckFK1')
         guide_list.append('NeckFK2')
         guide_list.append('NeckFK3')
         guide_list.append('NeckFK4')
         guide_list.append('Head')
-        guide_list.append('HeadTip')
+        guide_list.append('Head_Tip')
         guide_list.append('NeckIK1')
         guide_list.append('NeckIK2')
         # Head
         guide_list.append('Jaw')
-        guide_list.append('JawTip')
+        guide_list.append('Jaw_Tip')
         guide_list.append('Eye_Lft')
         guide_list.append('Ear_Lft')
-        guide_list.append('EarTip_Lft')
+        guide_list.append('Ear_Tip_Lft')
         # Hind Leg
         guide_list.append('Femur_Lft')
         guide_list.append('Fibula_Lft')
-        guide_list.append('HindCannon_Lft')
-        guide_list.append('HindPastern_Lft')
-        guide_list.append('HindHoof_Lft')
-        guide_list.append('HindHoofTip_Lft')
-        guide_list.append('HindHoofBack_Lft')
-        guide_list.append('HindHoofFront_Lft')
-        guide_list.append('HindHoofIn_Lft')
-        guide_list.append('HindHoofOut_Lft')
-        guide_list.append('HindLegPole_Lft')
+        guide_list.append('Hind_Cannon_Lft')
+        guide_list.append('Hind_Pastern_Lft')
+        guide_list.append('Hind_Hoof_Lft')
+        guide_list.append('Hind_Hoof_Tip_Lft')
+        guide_list.append('Hind_Hoof_Back_Lft')
+        guide_list.append('Hind_Hoof_Front_Lft')
+        guide_list.append('Hind_Hoof_In_Lft')
+        guide_list.append('Hind_Hoof_Out_Lft')
+        guide_list.append('Hind_Leg_Pole_Lft')
         # Fore Leg
         guide_list.append('Scapula_Lft')
         guide_list.append('Humerus_Lft')
         guide_list.append('Radius_Lft')
-        guide_list.append('ForeCannon_Lft')
-        guide_list.append('ForePastern_Lft')
-        guide_list.append('ForeHoof_Lft')
-        guide_list.append('ForeHoofTip_Lft')
-        guide_list.append('ForeHoofBack_Lft')
-        guide_list.append('ForeHoofFront_Lft')
-        guide_list.append('ForeHoofIn_Lft')
-        guide_list.append('ForeHoofOut_Lft')
-        guide_list.append('ForeLegPole_Lft')
+        guide_list.append('Fore_Cannon_Lft')
+        guide_list.append('Fore_Pastern_Lft')
+        guide_list.append('Fore_Hoof_Lft')
+        guide_list.append('Fore_Hoof_Tip_Lft')
+        guide_list.append('Fore_Hoof_Back_Lft')
+        guide_list.append('Fore_Hoof_Front_Lft')
+        guide_list.append('Fore_Hoof_In_Lft')
+        guide_list.append('Fore_Hoof_Out_Lft')
+        guide_list.append('Fore_Leg_Pole_Lft')
 
         return guide_list
+
+    def get_joint_data(self):
+        return {
+            "Skeleton": {
+                "Joints": {
+                    "root": {
+                        "radius": 3,
+                        "nodeType": "joint",
+                        "parent": "Joint_Grp"
+                    },
+                    "pelvis": {
+                        "ty": 112.646,
+                        "tz": -50,
+                        "radius": 3,
+                        "parent": "root",
+                        "nodeType": "joint"
+                    },
+                    "femur_l": {
+                        "tx": 10.706,
+                        "ty": -7.635,
+                        "tz": -9.737,
+                        "jox": 49.5564,
+                        "radius": 3,
+                        "parent": "pelvis",
+                        "nodeType": "joint"
+                    },
+                    "fibula_l": {
+                        "tz": 37.827,
+                        "jox": 77.9223,
+                        "radius": 3,
+                        "parent": "femur_l",
+                        "nodeType": "joint"
+                    },
+                    "hind_cannon_l": {
+                        "tz": 31.596,
+                        "jox": -37.8725,
+                        "radius": 3,
+                        "parent": "fibula_l",
+                        "nodeType": "joint"
+                    },
+                    "hind_pastern_l": {
+                        "tz": 35.052,
+                        "jox": -32.0856,
+                        "radius": 3,
+                        "parent": "hind_cannon_l",
+                        "nodeType": "joint"
+                    },
+                    "hind_hoof_l": {
+                        "tz": 7.5,
+                        "radius": 3,
+                        "parent": "hind_pastern_l",
+                        "nodeType": "joint"
+                    },
+                    "hind_hoof_tip_l": {
+                        "tz": 7.5,
+                        "jox": -5.1461,
+                        "radius": 3,
+                        "parent": "hind_hoof_l",
+                        "nodeType": "joint"
+                    },
+                    "femur_r": {
+                        "tx": -10.706,
+                        "ty": -7.635,
+                        "tz": -9.737,
+                        "jox": -130.4436,
+                        "radius": 3,
+                        "parent": "pelvis",
+                        "nodeType": "joint"
+                    },
+                    "fibula_r": {
+                        "tz": -37.827,
+                        "jox": 77.9223,
+                        "radius": 3,
+                        "parent": "femur_r",
+                        "nodeType": "joint"
+                    },
+                    "hind_cannon_r": {
+                        "tz": -31.596,
+                        "jox": -37.8725,
+                        "radius": 3,
+                        "parent": "fibula_r",
+                        "nodeType": "joint"
+                    },
+                    "hind_pastern_r": {
+                        "tz": -35.052,
+                        "jox": -32.0856,
+                        "radius": 3,
+                        "parent": "hind_cannon_r",
+                        "nodeType": "joint"
+                    },
+                    "hind_hoof_r": {
+                        "tz": -7.5,
+                        "radius": 3,
+                        "parent": "hind_pastern_r",
+                        "nodeType": "joint"
+                    },
+                    "hind_hoof_tip_r": {
+                        "tz": -7.5,
+                        "jox": -5.1461,
+                        "radius": 3,
+                        "parent": "hind_hoof_r",
+                        "nodeType": "joint"
+                    },
+                    "spine_01": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "pelvis",
+                        "nodeType": "joint"
+                    },
+                    "spine_02": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "spine_01",
+                        "nodeType": "joint"
+                    },
+                    "spine_03": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "spine_02",
+                        "nodeType": "joint"
+                    },
+                    "spine_04": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "spine_03",
+                        "nodeType": "joint"
+                    },
+                    "spine_05": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "spine_04",
+                        "nodeType": "joint"
+                    },
+                    "spine_06": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "Spine5",
+                        "nodeType": "joint"
+                    },
+                    "spine_07": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "spine_06",
+                        "nodeType": "joint"
+                    },
+                    "chest": {
+                        "tz": 3.654,
+                        "radius": 3,
+                        "parent": "spine_07",
+                        "nodeType": "joint"
+                    },
+                    "neck_01": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "chest",
+                        "nodeType": "joint"
+                    },
+                    "neck_02": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "neck_01",
+                        "nodeType": "joint"
+                    },
+                    "neck_03": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "neck_02",
+                        "nodeType": "joint"
+                    },
+                    "neck_04": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "neck_03",
+                        "nodeType": "joint"
+                    },
+                    "neck_05": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "neck_04",
+                        "nodeType": "joint"
+                    },
+                    "neck_06": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "neck_05",
+                        "nodeType": "joint"
+                    },
+                    "neck_07": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "neck_06",
+                        "nodeType": "joint"
+                    },
+                    "head": {
+                        "tz": 2.096,
+                        "jox": 67.609,
+                        "radius": 3,
+                        "parent": "neck_07",
+                        "nodeType": "joint"
+                    },
+                    "ear_l": {
+                        "tx": 7.128,
+                        "ty": 2.438,
+                        "tz": -4.806,
+                        "jox": -44.7,
+                        "joz": -17.7,
+                        "radius": 3,
+                        "parent": "head",
+                        "nodeType": "joint"
+                    },
+                    "ear_tip_l": {
+                        "ty": 8.5,
+                        "radius": 3,
+                        "parent": "ear_l",
+                        "nodeType": "joint"
+                    },
+                    "ear_r": {
+                        "tx": -7.128,
+                        "ty": 2.438,
+                        "tz": -4.806,
+                        "jox": 135.3,
+                        "joz": 17.7,
+                        "radius": 3,
+                        "parent": "head",
+                        "nodeType": "joint"
+                    },
+                    "ear_tip_r": {
+                        "ty": -8.5,
+                        "radius": 3,
+                        "parent": "ear_r",
+                        "nodeType": "joint"
+                    },
+                    "eye_l": {
+                        "tx": 7.298,
+                        "ty": 4.374,
+                        "tz": 5.87,
+                        "radius": 3,
+                        "parent": "head",
+                        "nodeType": "joint"
+                    },
+                    "eye_r": {
+                        "tx": -7.298,
+                        "ty": 4.374,
+                        "tz": 5.87,
+                        "jox": 180.0,
+                        "radius": 3,
+                        "parent": "head",
+                        "nodeType": "joint"
+                    },
+                    "head_tip": {
+                        "ty": -1.811,
+                        "tz": 36.066,
+                        "radius": 3,
+                        "parent": "head",
+                        "nodeType": "joint"
+                    },
+                    "jaw": {
+                        "ty": -6.034,
+                        "tz": 6.392,
+                        "jox": 4.3305,
+                        "radius": 3,
+                        "parent": "head",
+                        "nodeType": "joint"
+                    },
+                    "jaw_tip": {
+                        "tz": 22.192,
+                        "radius": 3,
+                        "parent": "jaw",
+                        "nodeType": "joint"
+                    },
+                    "scapula_l": {
+                        "tx": 10.706,
+                        "ty": 4.564,
+                        "tz": -4.28,
+                        "jox": 49.4669,
+                        "joy": 1.5141,
+                        "joz": -1.2943,
+                        "radius": 3,
+                        "parent": "chest",
+                        "nodeType": "joint"
+                    },
+                    "humerus_l": {
+                        "tx": 01.987,
+                        "tz": 39.995,
+                        "jox": 87.8821,
+                        "radius": 3,
+                        "parent": "scapula_l",
+                        "nodeType": "joint"
+                    },
+                    "radius_l": {
+                        "tz": 24.26,
+                        "jox": -47.5437,
+                        "radius": 3,
+                        "parent": "humerus_l",
+                        "nodeType": "joint"
+                    },
+                    "fore_cannon_l": {
+                        "tz": 27.78,
+                        "radius": 3,
+                        "parent": "radius_l",
+                        "nodeType": "joint"
+                    },
+                    "fore_pastern_l": {
+                        "tz": 28,
+                        "jox": -30.1682,
+                        "radius": 3,
+                        "parent": "fore_cannon_l",
+                        "nodeType": "joint"
+                    },
+                    "fore_hoof_l": {
+                        "ty": 0.2,
+                        "tz": 7.5,
+                        "radius": 3,
+                        "parent": "fore_pastern_l",
+                        "nodeType": "joint"
+                    },
+                    "fore_hoof_tip_l": {
+                        "tz": 7.5,
+                        "radius": 3,
+                        "parent": "fore_hoof_l",
+                        "nodeType": "joint"
+                    },
+                    "scapula_r": {
+                        "tx": -10.706,
+                        "ty": 4.564,
+                        "tz": -4.28,
+                        "jox": -130.5331,
+                        "joy": -1.5141,
+                        "joz": 1.2943,
+                        "radius": 3,
+                        "parent": "chest",
+                        "nodeType": "joint"
+                    },
+                    "humerus_r": {
+                        "tx": -1.987,
+                        "tz": -39.995,
+                        "jox": 87.8821,
+                        "radius": 3,
+                        "parent": "scapula_r",
+                        "nodeType": "joint"
+                    },
+                    "radius_r": {
+                        "tz": -24.26,
+                        "jox": -47.5437,
+                        "radius": 3,
+                        "parent": "humerus_r",
+                        "nodeType": "joint"
+                    },
+                    "fore_cannon_r": {
+                        "tz": -27.78,
+                        "radius": 3,
+                        "parent": "radius_r",
+                        "nodeType": "joint"
+                    },
+                    "fore_pastern_r": {
+                        "tz": -28,
+                        "jox": -30.1682,
+                        "radius": 3,
+                        "parent": "fore_cannon_r",
+                        "nodeType": "joint"
+                    },
+                    "fore_hoof_r": {
+                        "ty": -0.2,
+                        "tz": -7.5,
+                        "radius": 3,
+                        "parent": "fore_pastern_r",
+                        "nodeType": "joint"
+                    },
+                    "fore_hoof_tip_r": {
+                        "tz": -7.5,
+                        "radius": 3,
+                        "parent": "fore_hoof_r",
+                        "nodeType": "joint"
+                    },
+                    "tail_01": {
+                        "tz": -20,
+                        "radius": 3,
+                        "parent": "pelvis",
+                        "nodeType": "joint"
+                    },
+                    "tail_02": {
+                        "tz": -10,
+                        "radius": 3,
+                        "parent": "tail_01",
+                        "nodeType": "joint"
+                    },
+                    "tail_03": {
+                        "tz": -10,
+                        "radius": 3,
+                        "parent": "tail_02",
+                        "nodeType": "joint"
+                    },
+                    "tail_04": {
+                        "tz": -20,
+                        "radius": 3,
+                        "parent": "tail_03",
+                        "nodeType": "joint"
+                    },
+                    "tail_05": {
+                        "tz": -20,
+                        "radius": 3,
+                        "parent": "tail_04",
+                        "nodeType": "joint"
+                    },
+                    "tail_06": {
+                        "tz": -20,
+                        "radius": 3,
+                        "parent": "tail_05",
+                        "nodeType": "joint"
+                    },
+                    "tail_07": {
+                        "tz": -20,
+                        "radius": 3,
+                        "parent": "tail_06",
+                        "nodeType": "joint"
+                    }
+                }
+            }
+        }
 
     def build_guide_controls(self, guide_data={}, guide_list=[]):
 
@@ -13398,7 +13425,1045 @@ class Quadruped( Char ):
 #
 ######################################################################################
 
+######################################################################################
+#
+# Quadruped
 
+class Quadruped2( Char ):
+
+    def __init__(self, *args):
+        super( Quadruped2, self ).__init__( *args)
+        self.DEBUG = True
+
+    def build_rig( self, name='Horse', rig_type=kQuadruped ):
+
+        ################################################################################################################
+        # Build Main Groups
+
+        mainGrp = self.build_main_groups( name=name, rig_type=rig_type )
+
+        self.charRoot = mainGrp['Main']
+
+        # Build Main Groups
+        ################################################################################################################
+
+        ################################################################################################################
+        # Joints
+
+        joint_data = self.get_joint_data()
+        self.build_skeleton( joint_data, self.charRoot )
+
+        # Joints
+        ################################################################################################################
+
+        ################################################################################################################
+        # Guides
+
+        self.build_guides()
+
+        # Guides
+        ################################################################################################################
+
+        return
+
+
+    def build_main_groups( self, name='Adam', rig_type=kQuadruped ):
+
+        if mc.objExists(name):
+            count = 1
+            newName = name + str(count)
+            while mc.objExists(newName):
+                newName = name + str(count)
+                count += 1
+            name = newName
+
+        rootGrp = mc.createNode('transform', name=name, ss=True)
+
+        geoGrp = mc.createNode('transform', name='Geo_Grp', ss=True, parent=rootGrp)
+        mc.setAttr(geoGrp + '.inheritsTransform', 0)
+
+        jointGrp = mc.createNode('transform', name='Joint_Grp', ss=True, parent=rootGrp)
+        rigGrp = mc.createNode('transform', name='Rig_Grp', ss=True, parent=rootGrp)
+        mc.setAttr(rigGrp + '.hideOnPlayback', 1)
+        mocapGrp = mc.createNode('transform', name='Mocap_Grp', ss=True, parent=rootGrp)
+        guideGrp = mc.createNode('transform', name='Guide_Grp', ss=True, parent=rootGrp)
+        bodyGrp = mc.createNode('transform', name='Body_Guide_Grp', ss=True, parent=guideGrp)
+        prx_grp = mc.createNode( 'transform', name='Proxy_Grp', ss=True, parent = rootGrp )
+
+        root_type = kBipedRoot
+        if rig_type == kQuadruped:
+            root_type = kQuadrupedRoot
+
+        data = {'Type': root_type, 'RigType': rig_type}
+
+        self.set_metaData(rootGrp, data)
+
+        self.build_main_attrs( rootGrp )
+
+        # Lock attributes
+        self.lock_attrs(rootGrp, ['tx', 'ty', 'tz', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz'])
+
+        return {'Main': rootGrp, 'Geo': geoGrp, 'Joint': jointGrp, 'Rig': rigGrp, 'Guide': guideGrp, 'Mocap': mocapGrp}
+
+    def build_guides(self):
+
+        meta_data = {}
+        meta_data['Type'] = kBodyGuide
+
+        guide_Grp = self.find_node(self.charRoot, 'Guide_Grp')
+        body_guide_Grp = self.find_node(self.charRoot, 'Body_Guide_Grp')
+
+        attrList = ['sx', 'sy', 'sz', 'v']
+
+        guideDict = {}
+
+        guide_data = self.get_guide_data()
+        guide_list = self.get_guide_list()
+
+        guide_sfx = '_Guide'
+
+        #guides = self.build_guide_controls(guide_data=guide_data, guide_list=guide_list)
+
+        """
+        This is the new method from quadruped to create the Guides and their mirrored siblings
+        """
+        guides = {}
+        ctrl_dict = {}
+        ctrl_dict['character'] = self.charRoot
+        ctrl_dict['globalScale'] = True
+        ctrl_dict['shapeType'] = self.kCross
+        ctrl_dict['color'] = (1, 0.7, 0)
+        ctrl_dict['scale'] = 3
+
+        meta_data = {}
+        meta_data['Type'] = kBodyGuide
+
+        for guide in guide_list:
+            if guide in guide_data:
+                data = guide_data[guide]
+                guide_dict = copy.deepcopy(ctrl_dict)
+                guide_dict['name'] = data['name']
+                guide_dict['parent'] = data['parent']
+                if 'matchTransform' in data:
+                    guide_dict['matchTransform'] = data['matchTransform']
+
+                guides[guide] = self.create_control(**guide_dict)
+
+                self.set_metaData(guides[guide], meta_data)
+
+                # Lock redundant attributes
+                for attr in data['attributes']:
+                    mc.setAttr(guides[guide].fullPathName() + '.' + attr, l=True, k=False)
+
+                # Check whether we need to build the right side for a left-sided guide
+                if 'Lft' in guide:
+                    # Right side version of the guide´s name
+                    rgt_name = guide.replace('Lft', 'Rgt') + '_Guide'
+
+                    #######################################################################################
+                    # Create right side guide groups and symConstraints
+                    # To make symConstraints work, we need to create them for the guides and their parents
+                    # in this section we create additional transforms above the right side guides
+
+                    # Get the parent
+                    parent_grp_lft = mc.listRelatives(guides[guide].fullPathName(), p=True, pa=True)[0]
+
+                    # Get the short name
+                    parent_grp_lft_short = self.short_name(parent_grp_lft)
+
+                    # Get the right side version of this name
+                    parent_joint_lft_short = parent_grp_lft_short.replace('Lft', 'Joint_Lft')
+                    parent_grp_rgt_short = parent_grp_lft_short.replace('Lft', 'Rgt')
+
+                    # We create a joint to joint symConstraint as there seem to be errors when not using joints
+                    # with symConstraint nodes
+                    parent_joint_grp_lft = mc.createNode('joint', name=parent_joint_lft_short,
+                                                         parent=parent_grp_lft)
+                    mc.setAttr(parent_joint_grp_lft + '.v', False)
+
+                    # Get the parent`s parent of this group so we can parent the new group
+                    grandparent_grp_lft = mc.listRelatives(parent_grp_lft, p=True, pa=True)[0]
+
+                    parent_rgt_node = mc.createNode('joint', name=parent_grp_rgt_short, parent=grandparent_grp_lft,
+                                                    ss=True)
+                    mc.setAttr(parent_rgt_node + '.v', False)
+
+                    # Get the short name of the grandparent
+                    # Add an offset matrix to first nodes off the centre to make the symConstraints work with standard transforms, the offset is 180 on rx
+                    grandparent_grp_lft_short = self.short_name(grandparent_grp_lft)
+                    if not 'Lft' in grandparent_grp_lft_short:
+                        offset_matrix = [1.0, 0.0, 0.0, 0.0, 0.0, -1, 0.0, 0.0, 0.0, 0.0, -1, 0.0, 0.0, 0.0, 0.0,
+                                         1.0]
+
+                        mc.setAttr(parent_rgt_node + '.offsetParentMatrix', offset_matrix, typ='matrix')
+
+                    self.create_sym_constraint(parent_joint_grp_lft, parent_rgt_node)
+
+                    # Create right side guide groups and symConstraints
+                    #######################################################################################
+
+                    guide_rgt = mc.createNode('joint', name=rgt_name, parent=parent_rgt_node, ss=True)
+                    mc.setAttr(guide_rgt + '.v', False)
+
+                    self.create_sym_constraint(guides[guide], guide_rgt)
+
+            else:
+                print(guide, 'not in', guide_data)
+
+        # Move special guides
+        #self.tweak_guides( guides)
+
+        #self.connect_guide_controls()
+        return guides
+
+    def get_joint_data(self):
+        return {
+            "Skeleton": {
+                "Joints": {
+                    "root": {
+                        "radius": 3,
+                        "nodeType": "joint",
+                        "parent": "Joint_Grp"
+                    },
+                    "pelvis": {
+                        "ty": 112.646,
+                        "tz": -50,
+                        "radius": 3,
+                        "parent": "root",
+                        "nodeType": "joint"
+                    },
+                    "femur_l": {
+                        "tx": 10.706,
+                        "ty": -7.635,
+                        "tz": -9.737,
+                        "jox": 49.5564,
+                        "radius": 3,
+                        "parent": "pelvis",
+                        "nodeType": "joint"
+                    },
+                    "fibula_l": {
+                        "tz": 37.827,
+                        "jox": 77.9223,
+                        "radius": 3,
+                        "parent": "femur_l",
+                        "nodeType": "joint"
+                    },
+                    "hind_cannon_l": {
+                        "tz": 31.596,
+                        "jox": -37.8725,
+                        "radius": 3,
+                        "parent": "fibula_l",
+                        "nodeType": "joint"
+                    },
+                    "hind_pastern_l": {
+                        "tz": 35.052,
+                        "jox": -32.0856,
+                        "radius": 3,
+                        "parent": "hind_cannon_l",
+                        "nodeType": "joint"
+                    },
+                    "hind_hoof_l": {
+                        "tz": 7.5,
+                        "radius": 3,
+                        "parent": "hind_pastern_l",
+                        "nodeType": "joint"
+                    },
+                    "hind_hoof_tip_l": {
+                        "tz": 7.5,
+                        "jox": -5.1461,
+                        "radius": 3,
+                        "parent": "hind_hoof_l",
+                        "nodeType": "joint"
+                    },
+                    "femur_r": {
+                        "tx": -10.706,
+                        "ty": -7.635,
+                        "tz": -9.737,
+                        "jox": -130.4436,
+                        "radius": 3,
+                        "parent": "pelvis",
+                        "nodeType": "joint"
+                    },
+                    "fibula_r": {
+                        "tz": -37.827,
+                        "jox": 77.9223,
+                        "radius": 3,
+                        "parent": "femur_r",
+                        "nodeType": "joint"
+                    },
+                    "hind_cannon_r": {
+                        "tz": -31.596,
+                        "jox": -37.8725,
+                        "radius": 3,
+                        "parent": "fibula_r",
+                        "nodeType": "joint"
+                    },
+                    "hind_pastern_r": {
+                        "tz": -35.052,
+                        "jox": -32.0856,
+                        "radius": 3,
+                        "parent": "hind_cannon_r",
+                        "nodeType": "joint"
+                    },
+                    "hind_hoof_r": {
+                        "tz": -7.5,
+                        "radius": 3,
+                        "parent": "hind_pastern_r",
+                        "nodeType": "joint"
+                    },
+                    "hind_hoof_tip_r": {
+                        "tz": -7.5,
+                        "jox": -5.1461,
+                        "radius": 3,
+                        "parent": "hind_hoof_r",
+                        "nodeType": "joint"
+                    },
+                    "spine_01": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "pelvis",
+                        "nodeType": "joint"
+                    },
+                    "spine_02": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "spine_01",
+                        "nodeType": "joint"
+                    },
+                    "spine_03": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "spine_02",
+                        "nodeType": "joint"
+                    },
+                    "spine_04": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "spine_03",
+                        "nodeType": "joint"
+                    },
+                    "spine_05": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "spine_04",
+                        "nodeType": "joint"
+                    },
+                    "spine_06": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "Spine5",
+                        "nodeType": "joint"
+                    },
+                    "spine_07": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "spine_06",
+                        "nodeType": "joint"
+                    },
+                    "chest": {
+                        "tz": 3.654,
+                        "radius": 3,
+                        "parent": "spine_07",
+                        "nodeType": "joint"
+                    },
+                    "neck_01": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "chest",
+                        "nodeType": "joint"
+                    },
+                    "neck_02": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "neck_01",
+                        "nodeType": "joint"
+                    },
+                    "neck_03": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "neck_02",
+                        "nodeType": "joint"
+                    },
+                    "neck_04": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "neck_03",
+                        "nodeType": "joint"
+                    },
+                    "neck_05": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "neck_04",
+                        "nodeType": "joint"
+                    },
+                    "neck_06": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "neck_05",
+                        "nodeType": "joint"
+                    },
+                    "neck_07": {
+                        "tz": 12,
+                        "radius": 3,
+                        "parent": "neck_06",
+                        "nodeType": "joint"
+                    },
+                    "head": {
+                        "tz": 2.096,
+                        "jox": 67.609,
+                        "radius": 3,
+                        "parent": "neck_07",
+                        "nodeType": "joint"
+                    },
+                    "ear_l": {
+                        "tx": 7.128,
+                        "ty": 2.438,
+                        "tz": -4.806,
+                        "jox": -44.7,
+                        "joz": -17.7,
+                        "radius": 3,
+                        "parent": "head",
+                        "nodeType": "joint"
+                    },
+                    "ear_tip_l": {
+                        "ty": 8.5,
+                        "radius": 3,
+                        "parent": "ear_l",
+                        "nodeType": "joint"
+                    },
+                    "ear_r": {
+                        "tx": -7.128,
+                        "ty": 2.438,
+                        "tz": -4.806,
+                        "jox": 135.3,
+                        "joz": 17.7,
+                        "radius": 3,
+                        "parent": "head",
+                        "nodeType": "joint"
+                    },
+                    "ear_tip_r": {
+                        "ty": -8.5,
+                        "radius": 3,
+                        "parent": "ear_r",
+                        "nodeType": "joint"
+                    },
+                    "eye_l": {
+                        "tx": 7.298,
+                        "ty": 4.374,
+                        "tz": 5.87,
+                        "radius": 3,
+                        "parent": "head",
+                        "nodeType": "joint"
+                    },
+                    "eye_r": {
+                        "tx": -7.298,
+                        "ty": 4.374,
+                        "tz": 5.87,
+                        "jox": 180.0,
+                        "radius": 3,
+                        "parent": "head",
+                        "nodeType": "joint"
+                    },
+                    "head_tip": {
+                        "ty": -1.811,
+                        "tz": 36.066,
+                        "radius": 3,
+                        "parent": "head",
+                        "nodeType": "joint"
+                    },
+                    "jaw": {
+                        "ty": -6.034,
+                        "tz": 6.392,
+                        "jox": 4.3305,
+                        "radius": 3,
+                        "parent": "head",
+                        "nodeType": "joint"
+                    },
+                    "jaw_tip": {
+                        "tz": 22.192,
+                        "radius": 3,
+                        "parent": "jaw",
+                        "nodeType": "joint"
+                    },
+                    "scapula_l": {
+                        "tx": 10.706,
+                        "ty": 4.564,
+                        "tz": -4.28,
+                        "jox": 49.4669,
+                        "joy": 1.5141,
+                        "joz": -1.2943,
+                        "radius": 3,
+                        "parent": "chest",
+                        "nodeType": "joint"
+                    },
+                    "humerus_l": {
+                        "tx": 01.987,
+                        "tz": 39.995,
+                        "jox": 87.8821,
+                        "radius": 3,
+                        "parent": "scapula_l",
+                        "nodeType": "joint"
+                    },
+                    "radius_l": {
+                        "tz": 24.26,
+                        "jox": -47.5437,
+                        "radius": 3,
+                        "parent": "humerus_l",
+                        "nodeType": "joint"
+                    },
+                    "fore_cannon_l": {
+                        "tz": 27.78,
+                        "radius": 3,
+                        "parent": "radius_l",
+                        "nodeType": "joint"
+                    },
+                    "fore_pastern_l": {
+                        "tz": 28,
+                        "jox": -30.1682,
+                        "radius": 3,
+                        "parent": "fore_cannon_l",
+                        "nodeType": "joint"
+                    },
+                    "fore_hoof_l": {
+                        "ty": 0.2,
+                        "tz": 7.5,
+                        "radius": 3,
+                        "parent": "fore_pastern_l",
+                        "nodeType": "joint"
+                    },
+                    "fore_hoof_tip_l": {
+                        "tz": 7.5,
+                        "radius": 3,
+                        "parent": "fore_hoof_l",
+                        "nodeType": "joint"
+                    },
+                    "scapula_r": {
+                        "tx": -10.706,
+                        "ty": 4.564,
+                        "tz": -4.28,
+                        "jox": -130.5331,
+                        "joy": -1.5141,
+                        "joz": 1.2943,
+                        "radius": 3,
+                        "parent": "chest",
+                        "nodeType": "joint"
+                    },
+                    "humerus_r": {
+                        "tx": -1.987,
+                        "tz": -39.995,
+                        "jox": 87.8821,
+                        "radius": 3,
+                        "parent": "scapula_r",
+                        "nodeType": "joint"
+                    },
+                    "radius_r": {
+                        "tz": -24.26,
+                        "jox": -47.5437,
+                        "radius": 3,
+                        "parent": "humerus_r",
+                        "nodeType": "joint"
+                    },
+                    "fore_cannon_r": {
+                        "tz": -27.78,
+                        "radius": 3,
+                        "parent": "radius_r",
+                        "nodeType": "joint"
+                    },
+                    "fore_pastern_r": {
+                        "tz": -28,
+                        "jox": -30.1682,
+                        "radius": 3,
+                        "parent": "fore_cannon_r",
+                        "nodeType": "joint"
+                    },
+                    "fore_hoof_r": {
+                        "ty": -0.2,
+                        "tz": -7.5,
+                        "radius": 3,
+                        "parent": "fore_pastern_r",
+                        "nodeType": "joint"
+                    },
+                    "fore_hoof_tip_r": {
+                        "tz": -7.5,
+                        "radius": 3,
+                        "parent": "fore_hoof_r",
+                        "nodeType": "joint"
+                    },
+                    "tail_01": {
+                        "tz": -20,
+                        "radius": 3,
+                        "parent": "pelvis",
+                        "nodeType": "joint"
+                    },
+                    "tail_02": {
+                        "tz": -10,
+                        "radius": 3,
+                        "parent": "tail_01",
+                        "nodeType": "joint"
+                    },
+                    "tail_03": {
+                        "tz": -10,
+                        "radius": 3,
+                        "parent": "tail_02",
+                        "nodeType": "joint"
+                    },
+                    "tail_04": {
+                        "tz": -20,
+                        "radius": 3,
+                        "parent": "tail_03",
+                        "nodeType": "joint"
+                    },
+                    "tail_05": {
+                        "tz": -20,
+                        "radius": 3,
+                        "parent": "tail_04",
+                        "nodeType": "joint"
+                    },
+                    "tail_06": {
+                        "tz": -20,
+                        "radius": 3,
+                        "parent": "tail_05",
+                        "nodeType": "joint"
+                    },
+                    "tail_07": {
+                        "tz": -20,
+                        "radius": 3,
+                        "parent": "tail_06",
+                        "nodeType": "joint"
+                    }
+                }
+            }
+        }
+
+    def get_guide_data(self):
+
+        if self.charRoot is None:
+                print('Quadruped.get_guide_data: No char root defined.')
+
+        guide_data = {}
+        guide_data['size'] = {5}
+
+        guide_sfx = '_Guide'
+
+        attrList = ['sx', 'sy', 'sz', 'v']
+        justTzRx = ['tx', 'ty', 'ry', 'rz', 'sx', 'sy', 'sz', 'v']
+        justTzTyRx = ['tx', 'ry', 'rz', 'sx', 'sy', 'sz', 'v']
+
+        guide_grp = self.find_node(self.charRoot, 'Body_Guide_Grp')
+
+        # Center of Gravity
+        #guideList.append(['COG_Guide', None, guideGrp, justTzTyRx])
+        guide_data['COG'] = {
+            'name': 'COG'+guide_sfx,
+            'matchTransform': 'spine_04',
+            'parent': guide_grp,
+            'attributes': justTzTyRx
+        }
+        # Pelvis
+        #guideList.append(['Pelvis_Guide', None, 'COG_Guide', justTzTyRx])
+        guide_data['Pelvis'] = {
+            'name': 'Pelvis'+guide_sfx,
+            'matchTransform': 'pelvis',
+            'parent': 'COG'+guide_sfx,
+            'attributes': justTzTyRx
+        }
+        # Chest
+        #guideList.append(['Chest_Guide', None, 'COG_Guide', justTzTyRx])
+        guide_data['Chest'] = {
+            'name': 'Chest'+guide_sfx,
+            'matchTransform': 'chest',
+            'parent': 'COG'+guide_sfx,
+            'attributes': justTzTyRx
+        }
+        # Neck FK 1
+        #guideList.append(['NeckFK1_Guide', None, 'Chest_Guide', justTzTyRx])
+        guide_data['NeckFK1'] = {
+            'name': 'NeckFK1'+guide_sfx,
+            'matchTransform': 'chest',
+            'parent': 'Chest'+guide_sfx,
+            'attributes': justTzTyRx
+        }
+        # Neck FK 2
+        #guideList.append(['NeckFK2_Guide', None, 'NeckFK1_Guide', justTzTyRx])
+        guide_data['NeckFK2'] = {
+            'name': 'NeckFK2'+guide_sfx,
+            'matchTransform': 'neck_02',
+            'parent': 'NeckFK1'+guide_sfx,
+            'attributes': justTzTyRx
+        }
+        # Neck FK 3
+        #guideList.append(['NeckFK3_Guide', None, 'NeckFK2_Guide', justTzTyRx])
+        guide_data['NeckFK3'] = {
+            'name': 'NeckFK3'+guide_sfx,
+            'matchTransform': 'neck_03',
+            'parent': 'NeckFK2'+guide_sfx,
+            'attributes': justTzTyRx
+        }
+        # Neck FK 4
+        #guideList.append(['NeckFK4_Guide', None, 'NeckFK3_Guide', justTzTyRx])
+        guide_data['NeckFK4'] = {
+            'name': 'NeckFK4'+guide_sfx,
+            'matchTransform': 'neck_04',
+            'parent': 'NeckFK3'+guide_sfx,
+            'attributes': justTzTyRx
+        }
+        # Head
+        #guideList.append(['Head_Guide', 'Head', 'NeckFK4_Guide', justTzTyRx])
+        guide_data['Head'] = {
+            'name': 'Head'+guide_sfx,
+            'matchTransform': 'head',
+            'parent': 'NeckFK4'+guide_sfx,
+            'constraintNode': 'head',
+            'attributes': justTzTyRx
+        }
+        # HeadTip
+        #guideList.append(['HeadTip_Guide', 'HeadTip', 'Head_Guide', justTzRx])
+        guide_data['Head_Tip'] = {
+            'name': 'Head_Tip'+guide_sfx,
+            'matchTransform': 'head_tip',
+            'parent': 'Head'+guide_sfx,
+            'constraintNode': 'head_tip',
+            'attributes': justTzRx
+        }
+        # Neck IK 1
+        #guideList.append(['Neck1_Guide', 'Neck1', 'Chest_Guide', attrList])
+        guide_data['NeckIK1'] = {
+            'name': 'NeckIK1'+guide_sfx,
+            'matchTransform': 'neck_01',
+            'parent': 'Chest'+guide_sfx,
+            'attributes': justTzTyRx
+        }
+        # Neck IK 2
+        #guideList.append(['Neck2_Guide', 'Neck7', 'Head_Guide', attrList])
+        guide_data['NeckIK2'] = {
+            'name': 'NeckIK2'+guide_sfx,
+            'matchTransform': 'neck_07',
+            'parent': 'Head'+guide_sfx,
+            'attributes': justTzTyRx
+        }
+        # Jaw
+        #guideList.append(['Jaw_Guide', 'Jaw', 'Head_Guide', justTzTyRx])
+        guide_data['Jaw'] = {
+            'name': 'Jaw'+guide_sfx,
+            'matchTransform': 'jaw',
+            'parent': 'Head'+guide_sfx,
+            'constraintNode': 'jaw',
+            'attributes': justTzTyRx
+        }
+        # JawTip
+        #guideList.append(['JawTip_Guide', 'JawTip', 'Jaw_Guide', attrList])
+        guide_data['Jaw_Tip'] = {
+            'name': 'Jaw_Tip'+guide_sfx,
+            'matchTransform': 'jaw_tip',
+            'parent': 'Jaw'+guide_sfx,
+            'constraintNode': 'jaw_tip',
+            'attributes': justTzTyRx
+        }
+        # Tail
+        for i in range(1, 8):
+            attr = justTzRx
+            if i == 1:
+                attr = justTzTyRx
+                parent = 'Pelvis'+guide_sfx
+            else:
+                parent = 'Tail_0'+str(i-1)+guide_sfx
+
+            guide_data['Tail_0'+str(i)] = {
+                'name': 'Tail_0'+str(i)+guide_sfx,
+                'matchTransform': 'tail_0'+str(i)+'',
+                'parent': parent,
+                'constraintNode': 'tail_0'+str(i)+'',
+                'attributes': attr
+            }
+        # Femur
+        #guideList.append(['Femur_Lft_Guide', 'Femur_Lft', 'Pelvis_Guide', ['sx', 'sy', 'sz', 'v']])
+        guide_data['Femur_Lft'] = {
+            'name': 'Femur_Lft'+guide_sfx,
+            'matchTransform': 'femur_l',
+            'parent': 'Pelvis'+guide_sfx,
+            'constraintNode': 'femur_l',
+            'attributes': ['sx', 'sy', 'sz', 'v']
+        }
+        # Fibula
+        #guideList.append(['Fibula_Lft_Guide', 'Fibula_Lft', 'Femur_Lft_Guide', justTzTyRx])
+        guide_data['Fibula_Lft'] = {
+            'name': 'Fibula_Lft'+guide_sfx,
+            'matchTransform': 'fibula_l',
+            'constraintNode': 'fibula_l',
+            'parent': 'Femur_Lft'+guide_sfx,
+            'attributes': justTzTyRx
+        }
+        # Cannon
+        #guideList.append(['HindCannon_Lft_Guide', 'HindCannon_Lft', 'Fibula_Lft_Guide', justTzTyRx])
+        guide_data['Hind_Cannon_Lft'] = {
+            'name': 'Hind_Cannon_Lft'+guide_sfx,
+            'matchTransform': 'hind_cannon_l',
+            'constraintNode': 'hind_cannon_l',
+            'parent': 'Fibula_Lft'+guide_sfx,
+            'attributes': justTzTyRx
+        }
+
+        # Pastern
+        #guideList.append(['HindPastern_Lft_Guide', 'HindPastern_Lft', 'HindCannon_Lft_Guide', justTzTyRx])
+        guide_data['Hind_Pastern_Lft'] = {
+            'name': 'Hind_Pastern_Lft'+guide_sfx,
+            'matchTransform': 'hind_pastern_l',
+            'constraintNode': 'hind_pastern_l',
+            'parent': 'Hind_Cannon_Lft'+guide_sfx,
+            'attributes': justTzTyRx
+        }
+        # Hoof
+        #guideList.append(['HindHoof_Lft_Guide', 'HindHoof_Lft', 'HindPastern_Lft_Guide', justTzRx])
+        guide_data['Hind_Hoof_Lft'] = {
+            'name': 'Hind_Hoof_Lft'+guide_sfx,
+            'matchTransform': 'hind_hoof_l',
+            'constraintNode': 'hind_hoof_l',
+            'parent': 'Hind_Pastern_Lft'+guide_sfx,
+            'attributes': justTzTyRx
+        }
+        # Hoof Tip
+        # guideList.append(['HindHoofTip_Lft_Guide', 'HindHoofTip_Lft', 'HindHoof_Lft_Guide', justTzRx])
+        guide_data['Hind_Hoof_Tip_Lft'] = {
+            'name': 'Hind_Hoof_Tip_Lft'+guide_sfx,
+            'matchTransform': 'hind_hoof_tip_l',
+            'constraintNode': 'hind_hoof_tip_l',
+            'parent': 'Hind_Hoof_Lft'+guide_sfx,
+            'attributes': justTzTyRx
+        }
+        # Hind Hoof Back
+        # guideList.append(['HindHoofBack_Lft_Guide', 'Heel_Lft_Jnt', 'HindHoof_Lft_Guide', attrList])
+        guide_data['Hind_Hoof_Back_Lft'] = {
+            'name': 'Hind_Hoof_Back_Lft'+guide_sfx,
+            'parent': 'Hind_Hoof_Lft'+guide_sfx,
+            'attributes': attrList
+        }
+        # Hind Hoof Front
+        # guideList.append(['HindHoofFront_Lft_Guide', 'Heel_Lft_Jnt', 'HindHoof_Lft_Guide', attrList])
+        guide_data['Hind_Hoof_Front_Lft'] = {
+            'name': 'Hind_Hoof_Front_Lft'+guide_sfx,
+            'parent': 'Hind_Hoof_Lft'+guide_sfx,
+            'attributes': attrList
+        }
+        # Hind Hoof In
+        #guideList.append(['HindHoofIn_Lft_Guide', 'Heel_Lft_Jnt', 'HindHoof_Lft_Guide', attrList])
+        guide_data['Hind_Hoof_In_Lft'] = {
+            'name': 'Hind_Hoof_In_Lft'+guide_sfx,
+            'parent': 'Hind_Hoof_Lft'+guide_sfx,
+            'attributes': attrList
+        }
+        # Hind Hoof Out
+        #guideList.append(['HindHoofOut_Lft_Guide', 'Heel_Lft_Jnt', 'HindHoof_Lft_Guide', attrList])
+        guide_data['Hind_Hoof_Out_Lft'] = {
+            'name': 'Hind_Hoof_Out_Lft'+guide_sfx,
+            'parent': 'Hind_Hoof_Lft'+guide_sfx,
+            'attributes': attrList
+        }
+        # Hind Leg Pole
+        #guideList.append(['HindLegPole_Lft_Guide', None, 'HindCannon_Lft_Guide', attrList])
+        guide_data['Hind_Leg_Pole_Lft'] = {
+            'name': 'Hind_Leg_Pole_Lft'+guide_sfx,
+            'parent': 'Hind_Cannon_Lft'+guide_sfx,
+            'attributes': attrList
+        }
+        # Eyes
+        #guideList.append(['Eye_Lft_Guide', 'Eye_Lft_Jnt', 'Head_Guide', ['sx', 'sy', 'sz', 'v']])
+        guide_data['Eye_Lft'] = {
+            'name': 'Eye_Lft'+guide_sfx,
+            'matchTransform': 'eye_l',
+            'parent': 'Head'+guide_sfx,
+            'attributes': attrList
+        }
+        # Ear
+        #guideList.append(['Ear_Lft_Guide', 'Ear_Lft', 'Head_Guide', ['sx', 'sy', 'sz', 'v']])
+        guide_data['Ear_Lft'] = {
+            'name': 'Ear_Lft'+guide_sfx,
+            'parent': 'Head'+guide_sfx,
+            'matchTransform': 'ear_l',
+            'constraintNode': 'ear_l',
+            'attributes': attrList
+        }
+        # EarTip
+        #guideList.append(['EarTip_Lft_Guide', 'EarTip_Lft', 'Ear_Lft_Guide', attrList])
+        guide_data['Ear_Tip_Lft'] = {
+            'name': 'Ear_Tip_Lft'+guide_sfx,
+            'parent': 'Ear_Lft'+guide_sfx,
+            'matchTransform': 'ear_tip_l',
+            'constraintNode': 'ear_tip_l',
+            'attributes': attrList
+        }
+        # Scapula
+        #guideList.append( ['Scapula_Lft_Guide', 'Scapula_Lft', 'Chest_Guide', ['sx', 'sy', 'sz', 'v']])
+        guide_data['Scapula_Lft'] = {
+            'name': 'Scapula_Lft'+guide_sfx,
+            'matchTransform': 'scapula_l',
+            'constraintNode': 'scapula_l',
+            'parent': 'Chest'+guide_sfx,
+            'attributes': attrList
+        }
+        # Humerus
+        #guideList.append(['Humerus_Lft_Guide', 'Humerus_Lft', 'Scapula_Lft_Guide', justTzRx])
+        guide_data['Humerus_Lft'] = {
+            'name': 'Humerus_Lft'+guide_sfx,
+            'matchTransform': 'humerus_l',
+            'constraintNode': 'humerus_l',
+            'parent': 'Scapula_Lft'+guide_sfx,
+            'attributes': justTzRx
+        }
+        # Radius
+        #guideList.append(['Radius_Lft_Guide', 'Radius_Lft', 'Humerus_Lft_Guide', justTzRx])
+        guide_data['Radius_Lft'] = {
+            'name': 'Radius_Lft'+guide_sfx,
+            'matchTransform': 'radius_l',
+            'constraintNode': 'radius_l',
+            'parent': 'Humerus_Lft'+guide_sfx,
+            'attributes': justTzRx
+        }
+        # ForeCannon
+        #guideList.append(['ForeCannon_Lft_Guide', 'ForeCannon_Lft', 'Radius_Lft_Guide', justTzRx])
+        guide_data['Fore_Cannon_Lft'] = {
+            'name': 'Fore_Cannon_Lft'+guide_sfx,
+            'matchTransform': 'fore_cannon_l',
+            'constraintNode': 'fore_cannon_l',
+            'parent': 'Radius_Lft'+guide_sfx,
+            'attributes': justTzRx
+        }
+        # ForePastern
+        #guideList.append( ['ForePastern_Lft_Guide', 'ForePastern_Lft', 'ForeCannon_Lft_Guide', justTzRx])
+        guide_data['Fore_Pastern_Lft'] = {
+            'name': 'Fore_Pastern_Lft'+guide_sfx,
+            'matchTransform': 'fore_pastern_l',
+            'constraintNode': 'fore_pastern_l',
+            'parent': 'Fore_Cannon_Lft'+guide_sfx,
+            'attributes': justTzRx
+        }
+        # ForeHoof
+        #guideList.append( ['ForeHoof_Lft_Guide', 'ForeHoof_Lft', 'ForePastern_Lft_Guide', justTzRx])
+        guide_data['Fore_Hoof_Lft'] = {
+            'name': 'Fore_Hoof_Lft'+guide_sfx,
+            'matchTransform': 'fore_hoof_l',
+            'constraintNode': 'fore_hoof_l',
+            'parent': 'Fore_Pastern_Lft'+guide_sfx,
+            'attributes': justTzRx
+        }
+        # ForeHoofTip
+        #guideList.append( ['ForeHoofTip_Lft_Guide', 'ForeHoofTip_Lft', 'ForeHoof_Lft_Guide', justTzRx])
+        guide_data['Fore_Hoof_Tip_Lft'] = {
+            'name': 'Fore_Hoof_Tip_Lft'+guide_sfx,
+            'matchTransform': 'fore_hoof_tip_l',
+            'constraintNode': 'fore_hoof_tip_l',
+            'parent': 'Fore_Hoof_Lft'+guide_sfx,
+            'attributes': justTzRx
+        }
+        # Fore Hoof Front
+        #guideList.append(['ForeHoofBack_Lft_Guide', 'Heel_Lft', 'ForeHoofTip_Lft_Guide', attrList])
+        guide_data['Fore_Hoof_Back_Lft'] = {
+            'name': 'Fore_Hoof_Back_Lft'+guide_sfx,
+            'parent': 'Fore_Hoof_Lft'+guide_sfx,
+            'attributes': attrList
+        }
+        # Fore Hoof Back
+        #guideList.append(['ForeHoofFront_Lft_Guide', 'Heel_Lft', 'ForeHoofTip_Lft_Guide', attrList])
+        guide_data['Fore_Hoof_Front_Lft'] = {
+            'name': 'Fore_Hoof_Front_Lft'+guide_sfx,
+            'parent': 'Fore_Hoof_Lft'+guide_sfx,
+            'attributes': attrList
+        }
+        # Fore Hoof In
+        #guideList.append(['ForeHoofIn_Lft_Guide', 'Heel_Lft', 'ForeHoofTip_Lft_Guide', attrList])
+        guide_data['Fore_Hoof_In_Lft'] = {
+            'name': 'Fore_Hoof_In_Lft'+guide_sfx,
+            'parent': 'Fore_Hoof_Lft'+guide_sfx,
+            'attributes': attrList
+        }
+        # Fore Hoof Out
+        #guideList.append(['ForeHoofOut_Lft_Guide', 'Heel_Lft_Jnt', 'ForeHoofTip_Lft_Guide', attrList])
+        guide_data['Fore_Hoof_Out_Lft'] = {
+            'name': 'Fore_Hoof_Out_Lft'+guide_sfx,
+            'parent': 'Fore_Hoof_Lft'+guide_sfx,
+            'attributes': attrList
+        }
+        # Fore Leg Pole
+        #guideList.append(['ForeLegPole_Lft_Guide', None, 'ForeCannon_Lft_Guide', attrList])
+        guide_data['Fore_Leg_Pole_Lft'] = {
+            'name': 'Fore_Leg_Pole_Lft'+guide_sfx,
+            'parent': 'Fore_Cannon_Lft'+guide_sfx,
+            'attributes': attrList
+        }
+
+        return guide_data
+
+    def get_guide_list(self):
+
+        guide_list = []
+
+        guide_list.append('COG')
+        guide_list.append('Pelvis')
+        guide_list.append('Tail_01')
+        guide_list.append('Tail_02')
+        guide_list.append('Tail_03')
+        guide_list.append('Tail_04')
+        guide_list.append('Tail_05')
+        guide_list.append('Tail_06')
+        guide_list.append('Tail_07')
+        guide_list.append('Chest')
+        guide_list.append('NeckFK1')
+        guide_list.append('NeckFK2')
+        guide_list.append('NeckFK3')
+        guide_list.append('NeckFK4')
+        guide_list.append('Head')
+        guide_list.append('Head_Tip')
+        guide_list.append('NeckIK1')
+        guide_list.append('NeckIK2')
+        # Head
+        guide_list.append('Jaw')
+        guide_list.append('Jaw_Tip')
+        guide_list.append('Eye_Lft')
+        guide_list.append('Ear_Lft')
+        guide_list.append('Ear_Tip_Lft')
+        # Hind Leg
+        guide_list.append('Femur_Lft')
+        guide_list.append('Fibula_Lft')
+        guide_list.append('Hind_Cannon_Lft')
+        guide_list.append('Hind_Pastern_Lft')
+        guide_list.append('Hind_Hoof_Lft')
+        guide_list.append('Hind_Hoof_Tip_Lft')
+        guide_list.append('Hind_Hoof_Back_Lft')
+        guide_list.append('Hind_Hoof_Front_Lft')
+        guide_list.append('Hind_Hoof_In_Lft')
+        guide_list.append('Hind_Hoof_Out_Lft')
+        guide_list.append('Hind_Leg_Pole_Lft')
+        # Fore Leg
+        guide_list.append('Scapula_Lft')
+        guide_list.append('Humerus_Lft')
+        guide_list.append('Radius_Lft')
+        guide_list.append('Fore_Cannon_Lft')
+        guide_list.append('Fore_Pastern_Lft')
+        guide_list.append('Fore_Hoof_Lft')
+        guide_list.append('Fore_Hoof_Tip_Lft')
+        guide_list.append('Fore_Hoof_Back_Lft')
+        guide_list.append('Fore_Hoof_Front_Lft')
+        guide_list.append('Fore_Hoof_In_Lft')
+        guide_list.append('Fore_Hoof_Out_Lft')
+        guide_list.append('Fore_Leg_Pole_Lft')
+
+        return guide_list
+
+# Quadruped
+#
+######################################################################################
+
+class Control:
+
+    @staticmethod
+    def cross(name='cross', size=1):
+        return mc.curve(d=1, p=[[1 * size, 0, 0],
+                                [-1 * size, 0, 0],
+                                [0, 0, 0],
+                                [0, 1 * size, 0],
+                                [0, -1 * size, 0],
+                                [0, 0, 0],
+                                [0, 0, 1 * size],
+                                [0, 0, -1 * size]], name=name)
 
 ######################################################################################
 #
@@ -13723,6 +14788,7 @@ class Model(Transform):
             return self.get_sym_points( pts, axis )
 
     def get_sym_points( self, pts, axis=0 ):
+        """
         posX = [ ]
         negX = [ ]
         nulX = [ ]
@@ -13778,6 +14844,58 @@ class Model(Transform):
             else:
                 mc.warning( 'aniMeta Mirror Skin: Can not find a matching -X vertex for index ', i )
                 sym_neg.append( None )
+
+        return posX, sym_neg, nulX
+        """
+        tol = self.tol
+        posX, negX, nulX = [], [], []
+
+        # Fast pass: classify indices by coordinate sign on the chosen axis
+        for i, p in enumerate(pts):
+            x = p[axis]  # MPoint supports indexing; for tuples/arrays also fine
+            if x > tol:
+                posX.append(i)
+            elif x < -tol:
+                negX.append(i)
+            else:
+                nulX.append(i)
+
+        # If nothing on one side, we can return early
+        if not posX:
+            return posX, [], nulX
+        if not negX:
+            # No matches possible for + side
+            return posX, [None] * len(posX), nulX
+
+        # Mirror multipliers for chosen axis  (fixes your original elif axis==0 bug)
+        mult = [-1, 1, 1]
+        mult[axis] = -1
+        x_multi, y_multi, z_multi = mult
+
+        sym_neg = []
+        # Prebuild MPoints for neg side to avoid attribute lookups in the inner loop
+        neg_points = [(idx, pts[idx]) for idx in negX]
+
+        for i in posX:
+            # Mirror the +axis point
+            p = pts[i]
+            p_neg = om.MPoint(p[0] * x_multi, p[1] * y_multi, p[2] * z_multi)
+
+            best_idx = None
+            best_dist = float("inf")
+
+            # Scan -axis side once; compute distance once per candidate
+            for j_idx, j_p in neg_points:
+                d = p_neg.distanceTo(j_p)
+                if d < best_dist:
+                    best_dist = d
+                    best_idx = j_idx
+
+            if best_idx is None:
+                mc.warning("aniMeta Mirror Geo: Cannot find a matching -X vertex for index {}".format(i))
+                sym_neg.append(None)
+            else:
+                sym_neg.append(best_idx)
 
         return posX, sym_neg, nulX
 
