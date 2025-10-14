@@ -167,7 +167,7 @@ class AniMeta( object ):
         self.ui = AniMetaUI()
         self.update_ui()
 
-    def find_node( self, root, nodeName ):
+    def find_node( self, root, nodeName, quiet=False ):
         '''
         Finds a DAG node within the specified character node, useful when multiple rigs are present.
         :param root: The character`s name.
@@ -200,6 +200,10 @@ class AniMeta( object ):
             if currentNode == nodeNameShort:
 
                 return node
+
+        if not quiet:
+            mc.warning('aniMeta: Can not find node ' + nodeName + ' under transform ' + root)
+
         return None
 
 
@@ -730,8 +734,6 @@ class Transform(AniMeta):
             mc.connectAttr(multi1 + '.output', comp + '.inputTranslate')
             mc.connectAttr(multi2 + '.output', comp + '.inputRotate')
             mc.connectAttr(comp + '.outputMatrix',node + '.offsetParentMatrix')
-
-
 
     def matrix_constraint(self, node=None, target=None, reference=None):
         """
@@ -1889,6 +1891,8 @@ class Rig( Transform ):
             showRotateOrder = kwargs[ 'showRotateOrder' ]
         if 'color' in kwargs:
             color = kwargs['color']
+        if 'scaleAttr' in kwargs:
+            gs = kwargs['scaleAttr']
 
         name = self.short_name( name )
 
@@ -2035,7 +2039,14 @@ class Rig( Transform ):
         cluster = mc.deformer( ctrl_path.fullPathName(), type='cluster', name='aniMetaCluster')
         compMatrix = mc.createNode('composeMatrix', ss=True, name=name+'HandleOffsetMatrix')
 
-        mc.connectAttr( ctrl_path.fullPathName()+'.controlOffset', compMatrix + '.inputTranslate')
+        multiplyDivide = mc.createNode( 'multiplyDivide', name=ctrl_path.partialPathName() + '_offset_multi', ss=True)
+
+        mc.connectAttr( charRoot+'.globalRigControlScale', multiplyDivide + '.input1X')
+        mc.connectAttr( charRoot+'.globalRigControlScale', multiplyDivide + '.input1Y')
+        mc.connectAttr( charRoot+'.globalRigControlScale', multiplyDivide + '.input1Z')
+        mc.connectAttr( ctrl_path.fullPathName()+'.controlOffset', multiplyDivide + '.input2')
+
+        mc.connectAttr( multiplyDivide+'.output', compMatrix + '.inputTranslate')
         mc.connectAttr( compMatrix+'.outputMatrix', cluster[0] + '.matrix')
 
         for node in mc.listHistory( ctrl_path.fullPathName()):
@@ -4978,13 +4989,21 @@ class Char( Rig ):
         inc = length / (joint_count - 1)
         frac = 1 / (joint_count - 1)
 
+        inc_node = mc.createNode('divide', name=f'{name}_{no}_curve_inc', ss=True )
+        mc.setAttr( inc_node+'.input2', joint_count-1)
+        mc.connectAttr( main_grp + '.initialLength', inc_node+'.input1')
+
         scale_multi = mc.createNode('multDL', name=f'{name}_{no}_scale_multi', ss=True)
         mc.connectAttr(self.charRoot + '.globalScale', scale_multi + '.input1')
         mc.connectAttr(main_grp + '.initialLength', scale_multi + '.input2')
 
         for i in range(joint_count):
+            joint_inc = mc.createNode('multDL', name=f'{name}_{no}_curve_inc_'+str(i+1), ss=True)
+            mc.setAttr( joint_inc+'.input1', i)
+            mc.connectAttr( inc_node+'.output', joint_inc+'.input2')
             # The absolute position along the length of the spline
             mc.addAttr(outputs2[i], ln='position', min=0, k=True, dv=inc * i)
+            mc.connectAttr( joint_inc+'.output', outputs2[i]+'.position')
 
             # The relative position along the length of the spline
             mc.addAttr(outputs2[i], ln='uValue', min=0, k=True, dv=frac * i)
@@ -5031,7 +5050,6 @@ class Char( Rig ):
             mc.connectAttr(outputs2[i] + '.uValue', blend_colors2 + '.color1R')
 
             mc.connectAttr(blend_colors2 + '.outputR', spline2 + '.readData[' + str(i) + '].readU')
-
         spline1 = mc.parent(spline1, spline_1_grp)
         outputs1 = mc.parent(outputs1, spline_1_grp)
         spline2 = mc.parent(spline2, spline_2_grp)
@@ -10713,7 +10731,7 @@ class Quadruped( Char ):
                 'matchTransform': 'Tail_07_Guide',
                 'size': [ 30, 4, 4 ],
                 'constraint': self.kParent,
-                'constraintNode': joints['tail_08']
+                'constraintNode': joints['tail_07']
             }
             handleDict[ 'Root_Ctr_Ctrl' ] = {
                 'name': 'Root_Ctr_Ctrl',
@@ -11218,7 +11236,7 @@ class Quadruped( Char ):
                 hindleg_grp = mc.createNode( 'transform', name=DIR+'legIK_'+SIDE+'_Grp', parent=rig_grp)
 
                 # Parent FK Controls to pelvis proxy
-                grp = self.find_node(self.charRoot, 'Femur_FK_'+SIDE+'_Ctrl_Grp')
+                grp = self.find_node(self.charRoot, 'Femur_FK_'+SIDE+'_Grp')
                 mc.parent( grp, pelvis_proxy)
 
                 femurJnt = joints[ 'femur_' + side  ]
@@ -11302,6 +11320,7 @@ class Quadruped( Char ):
                 default_values = [1]
                 for i, bone in enumerate( bones ):
                     parent = mc.listRelatives( self.controls[bone+'_FK_'+SIDE+'_Ctrl'].fullPathName(), p=True, pa=True)[0]
+                    print('SIDE', SIDE)
                     self.build_autorotation(   name=bone,
                                                control=self.controls[bone+'_FK_'+SIDE+'_Ctrl'].fullPathName(),
                                                grp=parent,
@@ -11663,6 +11682,7 @@ class Quadruped( Char ):
                            up_vec=(1,0,0),
                            up_vec_offset=(5,0,0),
                            default_value=0):
+        print('\n\nbuild_autorotation', control)
         parent = mc.listRelatives( grp, parent=True, path=True)[0]
         autorot_grp = mc.createNode( 'transform', name=name+'_Autorot_Grp', parent=parent)
         up_obj = mc.createNode( 'transform', name=name+'_Autorot_UpVec', parent=parent)
@@ -11783,7 +11803,7 @@ class Quadruped( Char ):
 
         mc.setAttr(ik_joints[1].fullPathName() + '.preferredAngle', pa, 0, 0)
 
-        ikName = 'legFront_' + SIDE + '_IK'
+        ikName = DIR+'Leg_' + SIDE + '_IK'
         ik = mc.ikHandle(n=ikName, sj=ik_joints[0].fullPathName(), ee=ik_joints[2].fullPathName())
         ikHandle = '|' + ik[0]
         effector = ik[1]
@@ -13713,6 +13733,7 @@ class Quadruped2( Char ):
         ctrlsDict = {}
         ctrlsDict['character']      = self.charRoot
         ctrlsDict['globalScale']    = True
+        ctrlsDict['scaleAttr']      = 'globalRigControlScale'
         ctrlsDict['shapeType']      = self.kCube
         ctrlsDict['showRotateOrder']= True
         ctrlsDict['rotateOrder']    = kZXY
@@ -13848,10 +13869,22 @@ class Quadruped2( Char ):
 
     def build_main_attrs(self, rootGrp ):
 
-        for attrName in ['globalScale', 'globalCtrlScale', 'jointRadius']:
+        attrs = ['globalScale', 'globalCtrlScale', 'jointRadius', 'globalRigControlScale']
+
+        for attrName in attrs:
             if not mc.attributeQuery(attrName, node=rootGrp, exists=True):
                 mc.addAttr(rootGrp, longName=attrName, defaultValue=1, at='float', min=0.0001)
                 mc.setAttr(rootGrp + '.' + attrName, k=True)
+
+        # globalRigControlScale holds the pre-multiplied value of globalScale and globalCtrlScale
+        multi = mc.createNode('multiply', name=rootGrp+'_Global_Rig_Control_Scale', ss=True)
+        mc.connectAttr( rootGrp + '.' + attrs[0], multi + '.input[0]')
+        mc.connectAttr( rootGrp + '.' + attrs[1], multi + '.input[1]')
+        mc.connectAttr( multi + '.output', rootGrp + '.' + attrs[3])
+
+        # Connect the global scale attribute to the guide group
+        for xyz in 'xyz':
+            mc.connectAttr( rootGrp + '.' + attrs[0], 'Guide_Grp.s'+xyz )
 
         dispDict = {
             'Rig_Grp': 'show_Rig',
@@ -14171,6 +14204,11 @@ class Quadruped2( Char ):
         mc.pointConstraint(jaw_tip, jaw_tip_jnt_proxy, mo=False)
         mc.orientConstraint(jaw_tip, jaw_tip_jnt_proxy, mo=True)
 
+        # Aims
+        aim_vec = [0, 0, -1]
+
+        if self.up_axis == 'z':
+            aim_vec = [0, 1, 0]
         # Tail
         tail_fk = []
         for i in range(1,8):
@@ -14185,6 +14223,17 @@ class Quadruped2( Char ):
             tail = mc.createNode('transform', name=ctrl+SIDE+g2c_suffix, parent=parent, ss=True)
             tail_guide = self.find_node( self.charRoot, ctrl+SIDE+suffix)
             mc.pointConstraint( tail_guide, tail, mo=False )
+
+            target = 'Tail'+str(i+1)+'_FK'
+            target =  self.find_node( self.charRoot, target+SIDE+suffix, quiet=True)
+            if target:
+                mc.aimConstraint( target,
+                                  tail,
+                                    mo = False,
+                                    aimVector = aim_vec,
+                                    upVector = (1,0,0 ),
+                                    worldUpType = "vector",
+                                    worldUpVector = (1,0,0) )
 
             tail_fk.append( tail )
 
@@ -14203,9 +14252,9 @@ class Quadruped2( Char ):
                 if j > 1:
                     parent=ears[j-2]
                 ear = mc.createNode('transform', name=ctrl +no+'_'+SIDE+ g2c_suffix, parent=parent, ss=True)
-                ear_guide = self.find_node(self.charRoot, ctrl+no+'_'+SIDE + suffix)
 
                 if side == 'l':
+                    ear_guide = self.find_node(self.charRoot, ctrl+no+'_'+SIDE + suffix)
                     mc.pointConstraint(ear_guide, ear, mo=False)
 
                     if j == 1:
@@ -14241,11 +14290,12 @@ class Quadruped2( Char ):
             ctrl = 'Scapula'
             ctrl_fk = ctrl+'_FK'
             scapula = mc.createNode('transform', name=ctrl_fk+'_'+SIDE+g2c_suffix, parent=chest, ss=True)
-            scapula_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
-            humerus_guide = self.find_node( self.charRoot, 'Humerus_'+SIDE+suffix)
+
             up_obj = None
             if side == 'l':
 
+                scapula_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
+                humerus_guide = self.find_node( self.charRoot, 'Humerus_'+SIDE+suffix)
                 up_obj = mc.createNode( 'transform', name=ctrl+'_'+side+'_UpVec' , parent=chest)
                 up_vec_offset = [100,0,0]
                 mc.setAttr( up_obj+'.t', *up_vec_offset )
@@ -14270,10 +14320,10 @@ class Quadruped2( Char ):
             # Scapula Autorot
             ctrl = 'ScapulaAutorot'
             scapula_autorot = mc.createNode('transform', name=ctrl+'_'+SIDE+g2c_suffix, parent=chest, ss=True)
-            fore_pastern_guide = self.find_node( self.charRoot, 'Fore_Pastern_'+SIDE+suffix)
 
             if side == 'l':
 
+                fore_pastern_guide = self.find_node( self.charRoot, 'Fore_Pastern_'+SIDE+suffix)
                 mc.pointConstraint( scapula_guide, scapula_autorot, mo=False )
                 mc.aimConstraint( fore_pastern_guide,
                                  scapula_autorot,
@@ -14292,10 +14342,10 @@ class Quadruped2( Char ):
             ctrl = 'Humerus'
             ctrl_fk = ctrl+'_FK'
             humerus = mc.createNode('transform', name=ctrl_fk+'_'+SIDE+g2c_suffix, parent=scapula, ss=True)
-            radius_guide = self.find_node( self.charRoot, 'Radius_'+SIDE+suffix)
             up_obj = None
             if side == 'l':
 
+                radius_guide = self.find_node( self.charRoot, 'Radius_'+SIDE+suffix)
                 up_obj = mc.createNode( 'transform', name=ctrl+'_'+side+'_UpVec' , parent=scapula)
                 up_vec_offset = [100,0,0]
                 mc.setAttr( up_obj+'.t', *up_vec_offset )
@@ -14341,9 +14391,9 @@ class Quadruped2( Char ):
             ctrl = 'Radius'
             ctrl_fk = ctrl+'_FK'
             radius = mc.createNode('transform', name=ctrl_fk+'_'+SIDE+g2c_suffix, parent=humerus, ss=True)
-            fore_cannon_guide = self.find_node( self.charRoot, 'Fore_Cannon_'+SIDE+suffix)
 
             if side == 'l':
+                fore_cannon_guide = self.find_node( self.charRoot, 'Fore_Cannon_'+SIDE+suffix)
                 mc.pointConstraint( radius_guide, radius, mo=False )
                 mc.aimConstraint( fore_cannon_guide,
                                  radius,
@@ -14361,9 +14411,9 @@ class Quadruped2( Char ):
             ctrl = 'Fore_Cannon'
             ctrl_fk = ctrl+'_FK'
             fore_cannon = mc.createNode('transform', name=ctrl_fk+'_'+SIDE+g2c_suffix, parent=radius, ss=True)
-            fore_pastern_guide = self.find_node( self.charRoot, 'Fore_Pastern_'+SIDE+suffix)
 
             if side == 'l':
+                fore_pastern_guide = self.find_node( self.charRoot, 'Fore_Pastern_'+SIDE+suffix)
                 mc.pointConstraint( fore_cannon_guide, fore_cannon, mo=False )
                 mc.aimConstraint( fore_pastern_guide,
                                  fore_cannon,
@@ -14381,9 +14431,9 @@ class Quadruped2( Char ):
             ctrl = 'Fore_Pastern'
             ctrl_fk = ctrl+'_FK'
             fore_pastern = mc.createNode('transform', name=ctrl_fk+'_'+SIDE+g2c_suffix, parent=fore_cannon, ss=True)
-            fore_foot_guide = self.find_node( self.charRoot, 'Fore_Foot_'+SIDE+suffix)
 
             if side == 'l':
+                fore_foot_guide = self.find_node( self.charRoot, 'Fore_Foot_'+SIDE+suffix)
                 mc.pointConstraint( fore_pastern_guide, fore_pastern, mo=False )
                 mc.aimConstraint( fore_foot_guide,
                                  fore_pastern,
@@ -14424,9 +14474,9 @@ class Quadruped2( Char ):
             ctrl = 'Fore_Leg_Pole'
             ctrl_ik = ctrl+'_IK'
             fore_pole = mc.createNode('transform', name=ctrl_ik + '_' + SIDE + g2c_suffix, parent=fore_foot_ik, ss=True)
-            fore_pole_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
 
             if side == 'l':
+                fore_pole_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
                 mc.pointConstraint(fore_pole_guide, fore_pole, mo=False)
             else:
                 fore_pole_l = self.find_node( self.charRoot, ctrl_ik+'_Lft'+g2c_suffix)
@@ -14436,9 +14486,9 @@ class Quadruped2( Char ):
             ctrl = 'Fore_Foot_Ctr'
             ctrl_fk = ctrl+'_FK'
             fore_foot_ctr_fk = mc.createNode('transform', name=ctrl_fk + '_' + SIDE + g2c_suffix, parent=fore_foot_fk, ss=True)
-            fore_hoof_guide = self.find_node( self.charRoot, 'Fore_Foot_Tip_'+SIDE+suffix)
 
             if side == 'l':
+                fore_hoof_guide = self.find_node( self.charRoot, 'Fore_Foot_Tip_'+SIDE+suffix)
                 mc.pointConstraint(fore_hoof_guide, fore_foot_ctr_fk, mo=False)
                 mc.orientConstraint(main, fore_foot_ctr_fk, mo=False)
             else:
@@ -14449,9 +14499,9 @@ class Quadruped2( Char ):
             ctrl = 'Fore_Foot_Ctr'
             ctrl_ik = ctrl+'_IK'
             fore_foot_ctr_ik = mc.createNode('transform', name=ctrl_ik + '_' + SIDE + g2c_suffix, parent=fore_foot_ik, ss=True)
-            fore_hoof_guide = self.find_node( self.charRoot, 'Fore_Foot_Tip_'+SIDE+suffix)
 
             if side == 'l':
+                fore_hoof_guide = self.find_node( self.charRoot, 'Fore_Foot_Tip_'+SIDE+suffix)
                 mc.pointConstraint(fore_hoof_guide, fore_foot_ctr_ik, mo=False)
                 mc.orientConstraint(main, fore_foot_ctr_ik, mo=False)
             else:
@@ -14461,9 +14511,9 @@ class Quadruped2( Char ):
             # Fore Foot Back
             ctrl = 'Fore_Foot_Back'
             fore_foot_back = mc.createNode('transform', name=ctrl + '_' + SIDE + g2c_suffix, parent=fore_foot_ctr_ik, ss=True)
-            fore_foot_back_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
 
             if side == 'l':
+                fore_foot_back_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
                 mc.pointConstraint(fore_foot_back_guide, fore_foot_back, mo=False)
             else:
                 fore_foot_back_l = self.find_node( self.charRoot, ctrl+'_Lft'+g2c_suffix)
@@ -14472,9 +14522,9 @@ class Quadruped2( Char ):
             # Fore Foot In
             ctrl = 'Fore_Foot_In'
             fore_foot_in = mc.createNode('transform', name=ctrl + '_' + SIDE + g2c_suffix, parent=fore_foot_back, ss=True)
-            fore_foot_in_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
 
             if side == 'l':
+                fore_foot_in_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
                 mc.pointConstraint(fore_foot_in_guide, fore_foot_in, mo=False)
             else:
                 fore_foot_in_l = self.find_node( self.charRoot, ctrl+'_Lft'+g2c_suffix)
@@ -14483,9 +14533,9 @@ class Quadruped2( Char ):
             # Fore Foot Out
             ctrl = 'Fore_Foot_Out'
             fore_foot_out = mc.createNode('transform', name=ctrl + '_' + SIDE + g2c_suffix, parent=fore_foot_in, ss=True)
-            fore_foot_out_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
 
             if side == 'l':
+                fore_foot_out_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
                 mc.pointConstraint(fore_foot_out_guide, fore_foot_out, mo=False)
             else:
                 fore_foot_out_l = self.find_node( self.charRoot, ctrl+'_Lft'+g2c_suffix)
@@ -14494,9 +14544,9 @@ class Quadruped2( Char ):
             # Fore Foot Front
             ctrl = 'Fore_Foot_Front'
             fore_foot_front = mc.createNode('transform', name=ctrl + '_' + SIDE + g2c_suffix, parent=fore_foot_out, ss=True)
-            fore_foot_front_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
 
             if side == 'l':
+                fore_foot_front_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
                 mc.pointConstraint(fore_foot_front_guide, fore_foot_front, mo=False)
             else:
                 fore_foot_front_l = self.find_node( self.charRoot, ctrl+'_Lft'+g2c_suffix)
@@ -14537,51 +14587,107 @@ class Quadruped2( Char ):
 
             # Femur
             ctrl = 'Femur'
-            femur = mc.createNode('transform', name=ctrl+'_'+SIDE+g2c_suffix, parent=pelvis, ss=True)
-            femur_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
-            fibula_guide = self.find_node( self.charRoot, 'Fibula_'+SIDE+suffix)
+            ctrl_fk = ctrl+'_FK'
+            femur = mc.createNode('transform', name=ctrl_fk+'_'+SIDE+g2c_suffix, parent=pelvis, ss=True)
 
             if side == 'l':
+                femur_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
+                fibula_guide = self.find_node( self.charRoot, 'Fibula_'+SIDE+suffix)
+                up_obj = mc.createNode( 'transform', name=ctrl+'_'+side+'_UpVec' , parent=pelvis)
+                up_vec_offset = [100,0,0]
+                mc.setAttr( up_obj+'.t', *up_vec_offset )
+                mult = mc.createNode( 'multMatrix', name =ctrl+'_'+side+'_UpVec_MM', ss=True)
+                mc.connectAttr( femur_guide+'.wm[0]', mult+'.matrixIn[0]')
+                mc.connectAttr( pelvis+'.wim[0]', mult+'.matrixIn[1]')
+                mc.connectAttr( mult+'.matrixSum', up_obj+'.opm')
+
                 mc.pointConstraint( femur_guide, femur, mo=False )
                 mc.aimConstraint( fibula_guide,
                                  femur,
                                  mo=False,
                                  aimVector=(0,0,1),
                                  upVector=(1,0,0),
-                                 worldUpType="objectrotation",
+                                 worldUpType="object",
                                  worldUpVector=(1,0,0),
-                                 worldUpObject=femur_guide)
+                                 worldUpObject=up_obj)
             else:
-                femur_l = self.find_node( self.charRoot, ctrl+'_Lft'+g2c_suffix)
+                femur_l = self.find_node( self.charRoot, ctrl_fk+'_Lft'+g2c_suffix)
                 self.create_mirror_matrix_constraint( femur, femur_l, 0)
+
+            # Scapula Autorot
+            ctrl = ctrl+'Autorot'
+            femur_autorot = mc.createNode('transform', name=ctrl + '_' + SIDE + g2c_suffix, parent=pelvis, ss=True)
+
+            if side == 'l':
+                hind_pastern_guide = self.find_node(self.charRoot, 'Hind_Pastern_' + SIDE + suffix)
+                mc.pointConstraint(femur_guide, femur_autorot, mo=False)
+                mc.aimConstraint(hind_pastern_guide,
+                                 femur_autorot,
+                                 mo=False,
+                                 aimVector=(0, 0, 1),
+                                 upVector=(1, 0, 0),
+                                 worldUpType="object",
+                                 worldUpVector=(1, 0, 0),
+                                 worldUpObject=up_obj)
+            else:
+                femur_autorot_l = self.find_node(self.charRoot, ctrl + '_Lft' + g2c_suffix)
+                self.create_mirror_matrix_constraint(femur_autorot, femur_autorot_l, 0)
 
             # Fibula
             ctrl = 'Fibula'
-            fibula = mc.createNode('transform', name=ctrl+'_'+SIDE+g2c_suffix, parent=femur, ss=True)
-            fibula_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
-            hind_cannon_guide = self.find_node( self.charRoot, 'Hind_Cannon_'+SIDE+suffix)
+            ctrl_fk = ctrl+'_FK'
+            fibula = mc.createNode('transform', name=ctrl_fk+'_'+SIDE+g2c_suffix, parent=femur, ss=True)
 
             if side == 'l':
+                fibula_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
+                hind_cannon_guide = self.find_node( self.charRoot, 'Hind_Cannon_'+SIDE+suffix)
+                up_obj = mc.createNode( 'transform', name=ctrl+'_'+side+'_UpVec' , parent=femur)
+                up_vec_offset = [100,0,0]
+                mc.setAttr( up_obj+'.t', *up_vec_offset )
+                mult = mc.createNode( 'multMatrix', name =ctrl+'_'+side+'_UpVec_MM', ss=True)
+                mc.connectAttr( fibula_guide+'.wm[0]', mult+'.matrixIn[0]')
+                mc.connectAttr( femur+'.wim[0]', mult+'.matrixIn[1]')
+                mc.connectAttr( mult+'.matrixSum', up_obj+'.opm')
+
                 mc.pointConstraint( fibula_guide, fibula, mo=False )
                 mc.aimConstraint( hind_cannon_guide,
                                  fibula,
                                  mo=False,
                                  aimVector=(0,0,1),
                                  upVector=(1,0,0),
-                                 worldUpType="objectrotation",
+                                 worldUpType="object",
                                  worldUpVector=(1,0,0),
-                                 worldUpObject=fibula_guide)
+                                 worldUpObject=up_obj)
             else:
-                fibula_l = self.find_node( self.charRoot, ctrl+'_Lft'+g2c_suffix)
+                fibula_l = self.find_node( self.charRoot, ctrl_fk+'_Lft'+g2c_suffix)
                 self.create_mirror_matrix_constraint( fibula, fibula_l, 1)
+
+            # Fibula Autorot
+            ctrl = ctrl+'Autorot'
+            fibula_autorot = mc.createNode('transform', name=ctrl + '_' + SIDE + g2c_suffix, parent=femur, ss=True)
+
+            if side == 'l':
+                mc.pointConstraint(fibula_guide, fibula_autorot, mo=False)
+                mc.aimConstraint(hind_pastern_guide,
+                                 fibula_autorot,
+                                 mo=False,
+                                 aimVector=(0, 0, 1),
+                                 upVector=(1, 0, 0),
+                                 worldUpType="object",
+                                 worldUpVector=(1, 0, 0),
+                                 worldUpObject=up_obj)
+            else:
+                fibula_autorot_l = self.find_node(self.charRoot, ctrl + '_Lft' + g2c_suffix)
+                self.create_mirror_matrix_constraint(fibula_autorot, fibula_autorot_l, 1)
 
             # Hind Cannon
             ctrl = 'Hind_Cannon'
-            hind_cannon = mc.createNode('transform', name=ctrl+'_'+SIDE+g2c_suffix, parent=fibula, ss=True)
-            hind_cannon_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
-            hind_pastern_guide = self.find_node( self.charRoot, 'Hind_Pastern_'+SIDE+suffix)
+            ctrl_fk = ctrl+'_FK'
+            hind_cannon = mc.createNode('transform', name=ctrl_fk+'_'+SIDE+g2c_suffix, parent=fibula, ss=True)
 
             if side == 'l':
+                hind_cannon_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
+                hind_pastern_guide = self.find_node( self.charRoot, 'Hind_Pastern_'+SIDE+suffix)
                 mc.pointConstraint( hind_cannon_guide, hind_cannon, mo=False )
                 mc.aimConstraint( hind_pastern_guide,
                                  hind_cannon,
@@ -14592,16 +14698,17 @@ class Quadruped2( Char ):
                                  worldUpVector=(1,0,0),
                                  worldUpObject=hind_cannon_guide)
             else:
-                hind_cannon_l = self.find_node( self.charRoot, ctrl+'_Lft'+g2c_suffix)
+                hind_cannon_l = self.find_node( self.charRoot, ctrl_fk+'_Lft'+g2c_suffix)
                 self.create_mirror_matrix_constraint( hind_cannon, hind_cannon_l, 1)
 
             # Hind Pastern
             ctrl = 'Hind_Pastern'
-            hind_pastern = mc.createNode('transform', name=ctrl+'_'+SIDE+g2c_suffix, parent=fibula, ss=True)
-            hind_pastern_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
-            hind_foot_guide = self.find_node( self.charRoot, 'Hind_Foot_'+SIDE+suffix)
+            ctrl_fk = ctrl+'_FK'
+            hind_pastern = mc.createNode('transform', name=ctrl_fk+'_'+SIDE+g2c_suffix, parent=hind_cannon, ss=True)
 
             if side == 'l':
+                hind_pastern_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
+                hind_foot_guide = self.find_node( self.charRoot, 'Hind_Foot_'+SIDE+suffix)
                 mc.pointConstraint( hind_pastern_guide, hind_pastern, mo=False )
                 mc.aimConstraint( hind_foot_guide,
                                  hind_pastern,
@@ -14612,15 +14719,16 @@ class Quadruped2( Char ):
                                  worldUpVector=(1,0,0),
                                  worldUpObject=hind_pastern_guide)
             else:
-                hind_pastern_l = self.find_node( self.charRoot, ctrl+'_Lft'+g2c_suffix)
+                hind_pastern_l = self.find_node( self.charRoot, ctrl_fk+'_Lft'+g2c_suffix)
                 self.create_mirror_matrix_constraint( hind_pastern, hind_pastern_l, 1)
 
             # Hind Foot
             ctrl = 'Hind_Foot'
-            hind_foot = mc.createNode('transform', name=ctrl + '_' + SIDE + g2c_suffix, parent=fibula, ss=True)
-            hind_foot_tip_guide = self.find_node(self.charRoot, 'Hind_Foot_Tip_' + SIDE + suffix)
+            ctrl_fk = ctrl+'_FK'
+            hind_foot = mc.createNode('transform', name=ctrl_fk + '_' + SIDE + g2c_suffix, parent=hind_pastern, ss=True)
 
             if side == 'l':
+                hind_foot_tip_guide = self.find_node(self.charRoot, 'Hind_Foot_Tip_' + SIDE + suffix)
                 mc.pointConstraint(hind_foot_guide, hind_foot, mo=False)
                 mc.aimConstraint(hind_foot_tip_guide,
                                  hind_foot,
@@ -14631,50 +14739,54 @@ class Quadruped2( Char ):
                                  worldUpVector=(1, 0, 0),
                                  worldUpObject=hind_foot_guide)
             else:
-                hind_foot_l = self.find_node( self.charRoot, ctrl+'_Lft'+g2c_suffix)
+                hind_foot_l = self.find_node( self.charRoot, ctrl_fk+'_Lft'+g2c_suffix)
                 self.create_mirror_matrix_constraint( hind_foot, hind_foot_l, 1)
 
             # Hind Foot
-            ctrl = 'Hind_Foot_Tip'
-            hind_foot_tip = mc.createNode('transform', name=ctrl + '_' + SIDE + g2c_suffix, parent=fibula, ss=True)
+            ctrl = 'Hind_Foot_Ctr'
+            ctrl_fk = ctrl+'_FK'
+            hind_foot_tip = mc.createNode('transform', name=ctrl_fk + '_' + SIDE + g2c_suffix, parent=hind_foot, ss=True)
 
             if side == 'l':
                 mc.pointConstraint(hind_foot_tip_guide, hind_foot_tip, mo=False)
                 mc.orientConstraint( hind_foot, hind_foot_tip, mo=False )
             else:
-                hind_foot_tip_l = self.find_node( self.charRoot, ctrl+'_Lft'+g2c_suffix)
+                hind_foot_tip_l = self.find_node( self.charRoot, ctrl_fk+'_Lft'+g2c_suffix)
                 self.create_mirror_matrix_constraint( hind_foot_tip, hind_foot_tip_l, 1)
 
             # Hind Foot IK
-            ctrl = 'Hind_Foot_IK'
-            hind_foot_ik = mc.createNode('transform', name=ctrl+'_'+SIDE+g2c_suffix, parent=g2c_group, ss=True)
+            ctrl = 'Hind_Foot'
+            ctrl_ik = ctrl+'_IK'
+            hind_foot_ik = mc.createNode('transform', name=ctrl_ik+'_'+SIDE+g2c_suffix, parent=g2c_group, ss=True)
 
             if side == 'l':
                 mc.pointConstraint( hind_pastern_guide, hind_foot_ik, mo=False )
             else:
-                hind_foot_ik_l = self.find_node( self.charRoot, ctrl+'_Lft'+g2c_suffix)
+                hind_foot_ik_l = self.find_node( self.charRoot, ctrl_ik+'_Lft'+g2c_suffix)
                 self.create_mirror_matrix_constraint( hind_foot_ik, hind_foot_ik_l, 2)
 
             # Hind Pole
             ctrl = 'Hind_Leg_Pole'
-            hind_pole = mc.createNode('transform', name=ctrl + '_' + SIDE + g2c_suffix, parent=hind_foot_ik, ss=True)
-            hind_pole_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
+            ctrl_ik = ctrl+'_IK'
+            hind_pole = mc.createNode('transform', name=ctrl_ik + '_' + SIDE + g2c_suffix, parent=hind_foot_ik, ss=True)
 
             if side == 'l':
+                hind_pole_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
                 mc.pointConstraint(hind_pole_guide, hind_pole, mo=False)
             else:
-                hind_pole_l = self.find_node( self.charRoot, ctrl+'_Lft'+g2c_suffix)
+                hind_pole_l = self.find_node( self.charRoot, ctrl_ik+'_Lft'+g2c_suffix)
                 self.create_mirror_matrix_constraint( hind_pole, hind_pole_l, 2)
 
             # Hind Foot Ctr
             ctrl = 'Hind_Foot_Ctr'
-            hind_foot_ctr = mc.createNode('transform', name=ctrl + '_' + SIDE + g2c_suffix, parent=hind_foot_ik, ss=True)
-            hind_hoof_guide = self.find_node( self.charRoot, 'Hind_Foot_Tip_'+SIDE+suffix)
+            ctrl_ik = ctrl+'_IK'
+            hind_foot_ctr = mc.createNode('transform', name=ctrl_ik + '_' + SIDE + g2c_suffix, parent=hind_foot_ik, ss=True)
 
             if side == 'l':
+                hind_hoof_guide = self.find_node( self.charRoot, 'Hind_Foot_Tip_'+SIDE+suffix)
                 mc.pointConstraint(hind_hoof_guide, hind_foot_ctr, mo=False)
             else:
-                hind_foot_ctr_l = self.find_node( self.charRoot, ctrl+'_Lft'+g2c_suffix)
+                hind_foot_ctr_l = self.find_node( self.charRoot, ctrl_ik+'_Lft'+g2c_suffix)
                 self.create_mirror_matrix_constraint( hind_foot_ctr, hind_foot_ctr_l, 2)
 
             # Hind Foot Back
@@ -14691,9 +14803,9 @@ class Quadruped2( Char ):
             # Hind Foot In
             ctrl = 'Hind_Foot_In'
             hind_foot_in = mc.createNode('transform', name=ctrl + '_' + SIDE + g2c_suffix, parent=hind_foot_back, ss=True)
-            hind_foot_in_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
 
             if side == 'l':
+                hind_foot_in_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
                 mc.pointConstraint(hind_foot_in_guide, hind_foot_in, mo=False)
             else:
                 hind_foot_in_l = self.find_node( self.charRoot, ctrl+'_Lft'+g2c_suffix)
@@ -14702,9 +14814,9 @@ class Quadruped2( Char ):
             # Hind Foot Out
             ctrl = 'Hind_Foot_Out'
             hind_foot_out = mc.createNode('transform', name=ctrl + '_' + SIDE + g2c_suffix, parent=hind_foot_in, ss=True)
-            hind_foot_out_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
 
             if side == 'l':
+                hind_foot_out_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
                 mc.pointConstraint(hind_foot_out_guide, hind_foot_out, mo=False)
             else:
                 hind_foot_out_l = self.find_node( self.charRoot, ctrl+'_Lft'+g2c_suffix)
@@ -14713,13 +14825,45 @@ class Quadruped2( Char ):
             # Hind Foot Front
             ctrl = 'Hind_Foot_Front'
             hind_foot_front = mc.createNode('transform', name=ctrl + '_' + SIDE + g2c_suffix, parent=hind_foot_out, ss=True)
-            hind_foot_front_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
 
             if side == 'l':
+                hind_foot_front_guide = self.find_node( self.charRoot, ctrl+'_'+SIDE+suffix)
                 mc.pointConstraint(hind_foot_front_guide, hind_foot_front, mo=False)
             else:
                 hind_foot_front_l = self.find_node( self.charRoot, ctrl+'_Lft'+g2c_suffix)
                 self.create_mirror_matrix_constraint( hind_foot_front, hind_foot_front_l, 2)
+
+            # Hind Fetlock
+            ctrl = 'Hind_Fetlock'
+            hind_fetlock = mc.createNode('transform', name=ctrl + '_' + SIDE + g2c_suffix, parent=hind_foot_front,
+                                         ss=True)
+
+            if side == 'l':
+                mc.pointConstraint(hind_foot_guide, hind_fetlock, mo=False)
+            else:
+                hind_pastern_l = self.find_node(self.charRoot, ctrl + '_Lft' + g2c_suffix)
+                self.create_mirror_matrix_constraint(hind_fetlock, hind_pastern_l, 2)
+
+            # Fore Pastern
+            ctrl = 'Hind_Pastern'
+            hind_pastern = mc.createNode('transform', name=ctrl + '_' + SIDE + g2c_suffix, parent=hind_fetlock, ss=True)
+
+            if side == 'l':
+                mc.pointConstraint(hind_pastern_guide, hind_pastern, mo=False)
+            else:
+                hind_pastern_l = self.find_node(self.charRoot, ctrl + '_Lft' + g2c_suffix)
+                self.create_mirror_matrix_constraint(hind_pastern, hind_pastern_l, 2)
+
+            # Fore Fetlock
+            ctrl = 'Hind_Fetlock2'
+            hind_fetlock2 = mc.createNode('transform', name=ctrl + '_' + SIDE + g2c_suffix, parent=hind_pastern,
+                                          ss=True)
+
+            if side == 'l':
+                mc.pointConstraint(hind_foot_guide, hind_fetlock2, mo=False)
+            else:
+                hind_pastern_l = self.find_node(self.charRoot, ctrl + '_Lft' + g2c_suffix)
+                self.create_mirror_matrix_constraint(hind_fetlock2, hind_pastern_l, 2)
 
         return
 
@@ -14736,13 +14880,14 @@ class Quadruped2( Char ):
         self.zero_out_to_offsetParent(ctrl_grp)
         mc.connectAttr( g2c+'.wm[0]', ctrl_grp+'.opm')
 
-        def connect_matrix(control, parent, side='Ctr', parent_side='Ctr'):
+        def connect_matrix(control, parent, side='Ctr', parent_side='Ctr', debug=False):
             target = self.find_node( self.charRoot, control+'_'+side+g2c_suffix)
             grp = self.find_node( self.charRoot, control+'_'+side+ctrl_grp_suffix)
             ref = self.find_node( self.charRoot, parent+'_'+parent_side+g2c_suffix)
-            #print('connect_matrix target', control+'_'+side+g2c_suffix, target)
-            #print('connect_matrix grp   ', control+'_'+side+ctrl_grp_suffix, grp)
-            #print('connect_matrix ref   ', parent+'_'+parent_side+g2c_suffix, ref)
+            if debug:
+                print('connect_matrix target', control+'_'+side+g2c_suffix, target)
+                print('connect_matrix grp   ', control+'_'+side+ctrl_grp_suffix, grp)
+                print('connect_matrix ref   ', parent+'_'+parent_side+g2c_suffix, ref)
             self.matrix_constraint( node=grp, target=target, reference=ref)
 
         def connect_matrix_ik(control, parent, side='Ctr', parent_side='Ctr'):
@@ -14796,12 +14941,22 @@ class Quadruped2( Char ):
                 mc.connectAttr(mult + '.matrixSum', dcomp + '.inputMatrix')
                 mc.connectAttr(dcomp + '.outputTranslate', joint + '.t')
 
-
         # Pelvis
         connect_matrix( 'Pelvis', 'COG', 'Ctr')
 
         # Chest
         connect_matrix( 'Chest', 'COG', 'Ctr')
+
+        # Spine
+        # Add a distance node to update the spine`s initial Length
+        pelvis_guide = self.find_node( self.charRoot, 'Pelvis'+CTR+g2c_suffix)
+        chest_guide = self.find_node( self.charRoot, 'Chest'+CTR+g2c_suffix)
+        spine_grp = self.find_node( self.charRoot, 'Spine_1_Grp')
+
+        distance = mc.createNode('distanceBetween', name='SpineLength_G2C', ss=True)
+        mc.connectAttr(  pelvis_guide+'.wm[0]', distance +'.inMatrix1')
+        mc.connectAttr(  chest_guide+'.wm[0]', distance +'.inMatrix2')
+        mc.connectAttr(  distance+'.distance', spine_grp +'.initialLength')
 
         # Neck FK
         connect_matrix( 'Neck1_FK', 'Chest', 'Ctr')
@@ -14932,27 +15087,32 @@ class Quadruped2( Char ):
 
             scapula_g2c = self.find_node(self.charRoot, 'Scapula_FK_' + self.SIDES[i] + '_G2C' )
             scapula_autorot_g2c = self.find_node(self.charRoot, 'ScapulaAutorot_' + self.SIDES[i] + '_G2C' )
-            mult = mc.createNode('multMatrix', name=scapula_g2c + '_MM', ss=True)
-            dcomp = mc.createNode('decomposeMatrix', name=scapula_g2c + '_DM', ss=True)
+            short_name = self.short_name(scapula_autorot_g2c)
+
+            mult = mc.createNode('multMatrix', name=short_name + '_MM', ss=True)
+            dcomp = mc.createNode('decomposeMatrix', name=short_name + '_DM', ss=True)
 
             mc.connectAttr(scapula_g2c + '.wm[0]', mult + '.matrixIn[0]')
             mc.connectAttr(scapula_autorot_g2c + '.wim[0]', mult + '.matrixIn[1]')
             mc.connectAttr(mult + '.matrixSum', dcomp + '.inputMatrix')
             mc.connectAttr( dcomp + '.outputRotate', aim+'.offset')
-            ###############################################################################################
 
+            # Update Humerus autorot aimConstraint offset
             humerus_autorot = self.find_node( self.charRoot, 'Humerus_' + self.SIDES[i] + '_Autorot_Grp' )
             aim = mc.listConnections(humerus_autorot+'.rx', s=True,d=False)[0]
 
             humerus_g2c = self.find_node(self.charRoot, 'Humerus_FK_' + self.SIDES[i] + '_G2C' )
             humerus_autorot_g2c = self.find_node(self.charRoot, 'HumerusAutorot_' + self.SIDES[i] + '_G2C' )
-            mult = mc.createNode('multMatrix', name=scapula_g2c + '_MM', ss=True)
-            dcomp = mc.createNode('decomposeMatrix', name=scapula_g2c + '_DM', ss=True)
+            short_name = self.short_name(humerus_autorot_g2c)
+            mult = mc.createNode('multMatrix', name=short_name + '_MM', ss=True)
+            dcomp = mc.createNode('decomposeMatrix', name=short_name + '_DM', ss=True)
 
             mc.connectAttr(humerus_g2c + '.wm[0]', mult + '.matrixIn[0]')
             mc.connectAttr(humerus_autorot_g2c + '.wim[0]', mult + '.matrixIn[1]')
             mc.connectAttr(mult + '.matrixSum', dcomp + '.inputMatrix')
             mc.connectAttr( dcomp + '.outputRotate', aim+'.offset')
+
+            ###############################################################################################
 
             #head_world_orient = self.find_node(self.charRoot, 'Head' + CTR + '_WorldOrient')
             #head_world_orient = self.find_node(self.charRoot, 'Head' + CTR + '_WorldOrient')
@@ -14960,6 +15120,99 @@ class Quadruped2( Char ):
             #orient_constraint = mc.listConnections(head_world_orient + '.rx', s=True, d=False)[0]
             #mc.connectAttr(head_g2c + '.rotate', orient_constraint + '.offset')
 
+            # FK
+            connect_matrix( 'Femur_FK', 'Pelvis', self.SIDES[i] )
+            connect_matrix( 'Fibula_FK', 'Femur_FK', self.SIDES[i], self.SIDES[i] )
+            connect_matrix_ik( 'Hind_Cannon_FK', 'Fibula_FK', self.SIDES[i], self.SIDES[i] )
+            connect_matrix_ik( 'Hind_Pastern_FK', 'Hind_Cannon_FK', self.SIDES[i], self.SIDES[i] )
+            connect_matrix( 'Hind_Foot_FK', 'Hind_Pastern_FK', self.SIDES[i], self.SIDES[i] )
+
+            #IK
+            connect_matrix( 'Hind_Foot_IK', 'Main', self.SIDES[i]  )
+            connect_matrix( 'Hind_Leg_Pole_IK', 'Hind_Foot_IK', self.SIDES[i], self.SIDES[i] )
+
+            # Joints
+            connect_matrix_joint('fibula_IK', 'Femur_FK', 'Fibula_FK', side=self.SIDES[i])
+            connect_matrix_joint('hind_cannon_IK', 'Fibula_FK', 'Hind_Cannon_FK', side=self.SIDES[i], just_t=True)
+            connect_matrix_joint('hind_pastern_IK', 'Hind_Cannon_FK', 'Hind_Pastern_FK', side=self.SIDES[i], just_t=True)
+            connect_matrix_joint('hind_foot_IK', 'Hind_Pastern_FK', 'Hind_Foot_FK', side=self.SIDES[i])
+
+            # Set up connections to update stretch
+            fibula = self.find_node(self.charRoot, 'Fibula_FK_'+self.SIDES[i]+'_G2C')
+            cannon = self.find_node(self.charRoot, 'Hind_Cannon_FK_'+self.SIDES[i]+'_G2C')
+            pastern = self.find_node(self.charRoot, 'Hind_Pastern_FK_'+self.SIDES[i]+'_G2C')
+
+            fibula_fk_ctrl = self.find_node(self.charRoot, 'Fibula_FK_'+self.SIDES[i]+'_Ctrl')
+            con = mc.listConnections(fibula_fk_ctrl+'.wm[0]', d=True, s=False)
+            hind_leg_distance = None
+            if len(con)==1:
+                hind_leg_distance=con[0]
+
+            # Get Distances
+            overall_distance = mc.createNode('distanceBetween', name='Hind_Leg_Distance_1_'+self.SIDES[i], ss=True)
+            upper_distance = mc.createNode('distanceBetween', name='Hind_Leg_Distance_2_'+self.SIDES[i], ss=True)
+            lower_distance = mc.createNode('distanceBetween', name='Hind_Leg_Distance_3_'+self.SIDES[i], ss=True)
+            mc.connectAttr( fibula+'.wm[0]', overall_distance + '.inMatrix1')
+            mc.connectAttr( pastern+'.wm[0]', overall_distance + '.inMatrix2')
+
+            mc.connectAttr( fibula+'.wm[0]', upper_distance + '.inMatrix1')
+            mc.connectAttr( cannon+'.wm[0]', upper_distance + '.inMatrix2')
+
+            mc.connectAttr( cannon+'.wm[0]', lower_distance + '.inMatrix1')
+            mc.connectAttr( pastern+'.wm[0]', lower_distance + '.inMatrix2')
+
+            # Divide to get fraction
+            upper_distance_div = mc.createNode('divideDL', name='Hind_Leg_Div_1_'+self.SIDES[i], ss=True)
+            lower_distance_div = mc.createNode('divideDL', name='Hind_Leg_Div_2_'+self.SIDES[i], ss=True)
+
+            mc.connectAttr( upper_distance+'.distance', upper_distance_div + '.input1')
+            mc.connectAttr( overall_distance+'.distance', upper_distance_div + '.input2')
+
+            mc.connectAttr( lower_distance+'.distance', lower_distance_div + '.input1')
+            mc.connectAttr( overall_distance+'.distance', lower_distance_div + '.input2')
+
+            # Connect results
+            mc.connectAttr( overall_distance + '.distance', hind_leg_distance+'.initialDistance' )
+            mc.connectAttr( upper_distance_div + '.output', hind_leg_distance+'.distanceFraction1' )
+            mc.connectAttr( lower_distance_div + '.output', hind_leg_distance+'.distanceFraction2' )
+
+            # Foot Tip Joint
+            foot_ctr_fk = self.find_node(self.charRoot, 'Hind_Foot_Ctr_FK_'+self.SIDES[i]+'_G2C')
+            foot_tip = self.find_node(self.charRoot, 'hind_foot_tip_'+self.sides[i])
+            mc.connectAttr(foot_ctr_fk+'.t', foot_tip+'.t')
+
+            # Foot Groups
+            def connect_grp(source, dst, side):
+                g2c = self.find_node(self.charRoot, source+'_' + side + '_G2C')
+                grp = self.find_node(self.charRoot, dst + '_' + side + '_Grp')
+
+                mc.connectAttr(g2c + '.dagLocalMatrix', grp + '.opm')
+                mc.setAttr(grp + '.t', 0, 0, 0)
+
+            connect_grp( 'Hind_Foot_Ctr_IK', 'Hind_Foot_Ctr', self.SIDES[i])
+            connect_grp( 'Hind_Foot_Back', 'Hind_Foot_Back', self.SIDES[i])
+            connect_grp( 'Hind_Foot_Front', 'Hind_Foot_Front', self.SIDES[i])
+            connect_grp( 'Hind_Foot_In', 'Hind_Foot_In', self.SIDES[i])
+            connect_grp( 'Hind_Foot_Out', 'Hind_Foot_Out', self.SIDES[i])
+            connect_grp( 'Hind_Fetlock', 'Hind_Fetlock', self.SIDES[i])
+            connect_grp( 'Hind_Pastern', 'Hind_Pastern', self.SIDES[i])
+            connect_grp( 'Hind_Fetlock2', 'Hind_Fetlock2', self.SIDES[i])
+
+            # Update Scapula autorot aimConstraint offset
+            femur_autorot = self.find_node( self.charRoot, 'Femur_' + self.SIDES[i] + '_Autorot_Grp' )
+            aim = mc.listConnections(femur_autorot+'.rx', s=True,d=False)[0]
+
+            femur_g2c = self.find_node(self.charRoot, 'Femur_FK_' + self.SIDES[i] + '_G2C' )
+            femur_autorot_g2c = self.find_node(self.charRoot, 'FemurAutorot_' + self.SIDES[i] + '_G2C' )
+            short_name = self.short_name(femur_autorot_g2c)
+
+            mult = mc.createNode('multMatrix', name=short_name + '_MM', ss=True)
+            dcomp = mc.createNode('decomposeMatrix', name=short_name + '_DM', ss=True)
+
+            mc.connectAttr(femur_g2c + '.wm[0]', mult + '.matrixIn[0]')
+            mc.connectAttr(femur_autorot_g2c + '.wim[0]', mult + '.matrixIn[1]')
+            mc.connectAttr(mult + '.matrixSum', dcomp + '.inputMatrix')
+            mc.connectAttr( dcomp + '.outputRotate', aim+'.offset')
 
 
     def build_joints(self):
@@ -14990,7 +15243,7 @@ class Quadruped2( Char ):
             joints['neck_0' + str(i)] = self.get_path(self.find_node(self.charRoot, 'neck_0' + str(i)))
 
         # Tail
-        for i in range(1, 13):
+        for i in range(1, 8):
             no = str(i)
             if i < 10:
                 no = '0' + no
@@ -15218,10 +15471,10 @@ class Quadruped2( Char ):
 
         dict = {}
 
-        dict['Legs'] = ['ForeFoot_IK_Lft_Ctrl_Grp',
-                        'HindFoot_IK_Lft_Ctrl_Grp',
-                        'Scapula_FK_Lft_Ctrl_Grp',
-                        'Femur_FK_Lft_Ctrl_Grp']
+        dict['Legs'] = ['Fore_Foot_IK_Lft_Grp',
+                        'Hind_Foot_IK_Lft_Grp',
+                        'Scapula_FK_Lft_Grp',
+                        'Femur_FK_Lft_Grp']
 
         dict['Head'] = ['Head_Ctr_Ctrl',
                         'Neck1_FK_Ctr_Ctrl',
@@ -15447,7 +15700,7 @@ class Quadruped2( Char ):
 
         mc.setAttr(ik_joints[1].fullPathName() + '.preferredAngle', pa, 0, 0)
 
-        ikName = 'legFront_' + SIDE + '_IK'
+        ikName = DIR+'_Leg_' + SIDE + '_IK'
         ik = mc.ikHandle(n=ikName, sj=ik_joints[0].fullPathName(), ee=ik_joints[2].fullPathName())
         ikHandle = '|' + ik[0]
         effector = ik[1]
@@ -15460,12 +15713,12 @@ class Quadruped2( Char ):
 
         # Match the orientation to the g2c before orientConstraining it
         # TODO remove when hind leg is implemented
-        if DIR == 'Fore':
-            fore_pastern_g2c = self.find_node(self.charRoot, DIR+'_Pastern_FK_'+SIDE+'_G2C')
-            mc.matchTransform(ik_joints[2].fullPathName(), fore_pastern_g2c, pos=False, rot=True)
+        #if DIR == 'Fore':
+        pastern_g2c = self.find_node(self.charRoot, DIR+'_Pastern_FK_'+SIDE+'_G2C')
+        mc.matchTransform(ik_joints[2].fullPathName(), pastern_g2c, pos=False, rot=True)
 
-        fore_pastern = self.find_node(self.charRoot, DIR+'_Pastern_'+SIDE+'_Grp')
-        mc.orientConstraint(fore_pastern, ik_joints[2].fullPathName(), mo=True)
+        pastern = self.find_node(self.charRoot, DIR+'_Pastern_'+SIDE+'_Grp')
+        mc.orientConstraint(pastern, ik_joints[2].fullPathName(), mo=True)
         ik_foot_ctl = self.controls[DIR+'_Foot_IK_' + SIDE + '_Ctrl'].fullPathName()
 
         mc.addAttr(ik_foot_ctl, longName='ikActive', min=0, max=1, dv=1, keyable=True)
@@ -15782,10 +16035,10 @@ class Quadruped2( Char ):
                 print('Build HindLeg', SIDE)
 
             DIR = 'Hind'
-            hindleg_grp = mc.createNode('transform', name=DIR + 'legIK_' + SIDE + '_Grp', parent=rig_grp)
+            hindleg_grp = mc.createNode('transform', name='Hind_Leg_IK_' + SIDE + '_Grp', parent=rig_grp)
 
             # Parent FK Controls to pelvis proxy
-            grp = self.find_node(self.charRoot, 'Femur_FK_' + SIDE + '_Ctrl_Grp')
+            grp = self.find_node(self.charRoot, 'Femur_FK_' + SIDE + '_Grp')
             mc.parent(grp, self.pelvis_proxy)
 
             femurJnt = self.joints['femur_' + side]
@@ -15835,14 +16088,13 @@ class Quadruped2( Char ):
             footJntIK = self.joint_copy(footJnt, footJntIK_jnt_name, pasternJntIK)
 
             grandparent = self.get_grandparent(self.controls[DIR + '_Foot_IK_' + SIDE + '_Ctrl'].fullPathName())
-
             mc.matchTransform(grandparent,
                               pasternJnt.fullPathName(),
                               rot=False,
                               pos=True)
             # Now we have to align the pole vector again to match the guide
             grandparent = self.get_grandparent(self.controls[DIR + '_Leg_Pole_IK_' + SIDE + '_Ctrl'].fullPathName())
-            guide = self.find_node(self.charRoot, DIR + '_Leg_Pole_' + SIDE + '_G2C')
+            guide = self.find_node(self.charRoot, DIR + '_Leg_Pole_IK_' + SIDE + '_G2C')
 
             mc.matchTransform(grandparent,
                               guide,
@@ -15861,7 +16113,7 @@ class Quadruped2( Char ):
                            self.controls[DIR + '_Cannon_FK_' + SIDE + '_Ctrl'],
                            self.controls[DIR + '_Pastern_FK_' + SIDE + '_Ctrl']]
 
-            self.build_ik(DIR, SIDE, ik_joints, fk_controls, foot_grps)
+            ik_handle = self.build_ik(DIR, SIDE, ik_joints, fk_controls, foot_grps)
 
             mc.parentConstraint(femurJntFK.fullPathName(), femurJnt)
             mc.parentConstraint(fibulaJntFK.fullPathName(), fibulaJnt)
@@ -15875,20 +16127,25 @@ class Quadruped2( Char ):
             for i, bone in enumerate(bones):
                 parent = \
                 mc.listRelatives(self.controls[bone + '_FK_' + SIDE + '_Ctrl'].fullPathName(), p=True, pa=True)[0]
+                aim_vec = (0, 0, 1)
+                if SIDE == 'Rgt':
+                    aim_vec = (0,0,-1)
                 self.build_auto_rotation(name=bone,
                                          control=self.controls[bone + '_FK_' + SIDE + '_Ctrl'].fullPathName(),
                                          grp=parent,
-                                         target=self.controls[DIR + '_Foot_IK_' + SIDE + '_Ctrl'].fullPathName(),
-                                         aim_vec=(0, 0, 1),
+                                         side=SIDE,
+                                         target=ik_handle,
+                                         aim_vec=aim_vec,
                                          up_vec=(1, 0, 0),
                                          up_vec_offset=(5, 0, 0),
                                          default_value=default_values[i])
+
             # HindLeg
             #
             ########################################################################################################
 
     def build_pickwalking(self):
-
+        return
         def parent_controller(node1, node2):
             node1 = self.find_node(self.charRoot, node1)
             node2 = self.find_node(self.charRoot, node2)
@@ -16031,7 +16288,7 @@ class Quadruped2( Char ):
         # Neck
         src = self.find_node(self.charRoot, 'Neck1_IK'+CTR+'_Guide')
         dst = self.find_node(self.charRoot, 'Neck3_IK'+CTR+'_Guide')
-        print(src, dst)
+
         count = 7
         node, neck = self.create_spline_simple('neck', [src, dst], count, in_rot_offset, out_rot_offset)
 
@@ -16318,7 +16575,7 @@ class Quadruped2( Char ):
             ctrl_data['Femur_FK_' + self.SIDES[i] + '_Ctrl'] = {
                 'name': 'Femur_FK_' + self.SIDES[i] + '_Ctrl',
                 'parent': 'Pelvis'+CTR+'_Ctrl',
-                'matchTransform': 'Femur_' + self.SIDES[i] + g2c_suffix,
+                'matchTransform': 'Femur_FK_' + self.SIDES[i] + g2c_suffix,
                 'size': [10, 10, 10],
                 'color': self.colors[i],
                 'constraint': self.kParent,
@@ -16328,16 +16585,18 @@ class Quadruped2( Char ):
             ctrl_data['Fibula_FK_' + self.SIDES[i] + '_Ctrl'] = {
                 'name': 'Fibula_FK_' + self.SIDES[i] + '_Ctrl',
                 'parent': 'Femur_FK_' + self.SIDES[i] + '_Ctrl',
-                'matchTransform': 'Fibula_' + self.SIDES[i] + g2c_suffix,
+                'matchTransform': 'Fibula_FK_' + self.SIDES[i] + g2c_suffix,
                 'color': self.colors[i],
                 'shapeType': self.kSphere,
                 'radius': 4,
-                'maintainOffset': False
+                'maintainOffset': False,
+                'constraint': self.kParent,
+                'constraintNode': self.joints['fibula_' + self.sides[i]],
             }
             ctrl_data['Hind_Cannon_FK_' + self.SIDES[i] + '_Ctrl'] = {
                 'name': 'Hind_Cannon_FK_' + self.SIDES[i] + '_Ctrl',
                 'parent': 'Fibula_FK_' + self.SIDES[i] + '_Ctrl',
-                'matchTransform': 'Hind_Cannon_' + self.SIDES[i] + g2c_suffix,
+                'matchTransform': 'Hind_Cannon_FK_' + self.SIDES[i] + g2c_suffix,
                 'color': self.colors[i],
                 'shapeType': self.kSphere,
                 'radius': 4,
@@ -16346,7 +16605,7 @@ class Quadruped2( Char ):
             ctrl_data['Hind_Pastern_FK_' + self.SIDES[i] + '_Ctrl'] = {
                 'name': 'Hind_Pastern_FK_' + self.SIDES[i] + '_Ctrl',
                 'parent': 'Hind_Cannon_FK_' + self.SIDES[i] + '_Ctrl',
-                'matchTransform': 'Hind_Pastern_' + self.SIDES[i] + g2c_suffix,
+                'matchTransform': 'Hind_Pastern_FK_' + self.SIDES[i] + g2c_suffix,
                 'color': self.colors[i],
                 'shapeType': self.kSphere,
                 'radius': 4,
@@ -16355,7 +16614,7 @@ class Quadruped2( Char ):
             ctrl_data['Hind_Foot_FK_' + self.SIDES[i] + '_Ctrl'] = {
                 'name': 'Hind_Foot_FK_' + self.SIDES[i] + '_Ctrl',
                 'parent': 'Hind_Pastern_FK_' + self.SIDES[i] + '_Ctrl',
-                'matchTransform': 'Hind_Foot_' + self.SIDES[i] + g2c_suffix,
+                'matchTransform': 'Hind_Foot_FK_' + self.SIDES[i] + g2c_suffix,
                 'color': self.colors[i],
                 'shapeType': self.kSphere,
                 'radius': 4,
@@ -16365,7 +16624,7 @@ class Quadruped2( Char ):
             ctrl_data['Hind_Foot_IK_' + self.SIDES[i] + '_Ctrl'] = {
                 'name': 'Hind_Foot_IK_' + self.SIDES[i] + '_Ctrl',
                 'parent': 'Main'+CTR+'_Ctrl',
-                'matchPosition': 'Hind_Pastern_' + self.SIDES[i] + g2c_suffix,
+                'matchPosition': 'Hind_Pastern_FK_' + self.SIDES[i] + g2c_suffix,
                 'color': self.colors[i],
                 'shapeType': self.kCube,
                 'size': [20, 2, 20],
@@ -16375,7 +16634,7 @@ class Quadruped2( Char ):
             ctrl_data['Hind_Leg_Pole_IK_' + self.SIDES[i] + '_Ctrl'] = {
                 'name': 'Hind_Leg_Pole_IK_' + self.SIDES[i] + '_Ctrl',
                 'parent': 'Hind_Foot_IK_' + self.SIDES[i] + '_Ctrl',
-                'matchTransform': 'Hind_Leg_Pole_' + self.SIDES[i] + g2c_suffix,
+                'matchTransform': 'Hind_Leg_Pole_IK_' + self.SIDES[i] + g2c_suffix,
                 'color': self.colors[i],
                 'shapeType': self.kCube,
                 'size': [4, 4, 4]
@@ -16538,7 +16797,7 @@ class Quadruped2( Char ):
                     "spine_06": {
                         "tz": 12,
                         "radius": 3,
-                        "parent": "Spine5",
+                        "parent": "spine_05",
                         "nodeType": "joint"
                     },
                     "spine_07": {
@@ -16851,7 +17110,7 @@ class Quadruped2( Char ):
             joints['neck_0' + str(i)] = self.get_path(self.find_node(self.charRoot, 'neck_0' + str(i)))
 
         # Tail
-        for i in range(1, 13):
+        for i in range(1, 8):
             no = str(i)
             if i < 10:
                 no = '0' + no
@@ -26000,7 +26259,6 @@ class Build( Rig ):
                 print ("\nExecuting build file:          ",  buildFilePath)
                 execfile(  buildFilePath )
                 print ('\naniMeta: build file execution finished.\n')
-
 
             except NameError as e:
                 print ('\naniMeta: there was a problem executing the build file ')
