@@ -13898,6 +13898,7 @@ class Quadruped2( Char ):
                 ctrlDict = self.check_axis( ctrlDict )
  
                 # Build the control
+                print('Build', control)
                 self.controls[control] = self.create_control(**ctrlDict)
                 mc.setAttr(self.controls[control].fullPathName() + '.v', k=False)
 
@@ -13979,7 +13980,8 @@ class Quadruped2( Char ):
             'Joint_Grp': 'show_Joints',
             'Guide_Grp': 'show_Guides',
             'Geo_Grp': 'show_Geo',
-            'Mocap_Grp': 'show_Mocap'
+            'Mocap_Grp': 'show_Mocap',
+            'Proxy_Grp': 'show_Proxy'
         }
         for key in dispDict.keys():
             jntGrp = self.find_node(rootGrp, key)
@@ -15932,6 +15934,8 @@ class Quadruped2( Char ):
 
         bind_pose_grp = mc.createNode( 'transform', name='Bind_Pose_Grp', parent=rig_grp, ss=True)
 
+        mc.setAttr( bind_pose_grp + '.v', False )
+
         mc.parent( bind_pose_root , bind_pose_grp)
 
         self.joints = self.get_joint_dict()
@@ -16095,7 +16099,7 @@ class Quadruped2( Char ):
         mc.setAttr(self.controls['Neck3_IK_Ctr_Ctrl'].fullPathName()+'.tangent', 0.01)
 
         path = self.controls['Neck1_FK_Ctr_Ctrl']
-
+        path = self.get_path(  path.partialPathName())
         for i in range( 3):
             path.pop()
 
@@ -18953,6 +18957,8 @@ class Quadruped2( Char ):
                 handles_Ctr.append(self.controls[ctl])
 
         set_data(handles_Ctr, data)
+        for handle in handles_Ctr:
+            print(handle)
 
         # Main Root
         data = {}
