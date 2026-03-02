@@ -11899,7 +11899,7 @@ class Quadruped( Char ):
                                     parent=grps['pastern'],
                                     ss=True)
         hoof_guide = self.find_node(self.charRoot, DIR + '_Hoof_Lft_Guide')
-        mc.matchTransform(grps['fetlock2'], hoof_guide, pos=True, rot=True)
+        mc.matchTransform(grps['fetlock2'], foot_g2c, pos=True, rot=True)
 
         return grps
 
@@ -11940,16 +11940,18 @@ class Quadruped( Char ):
         mc.connectAttr(ik_foot_ctl + '.ikTwist', ikHandle + '.twist')
 
         mc.connectAttr(ik_foot_ctl + '.fetlockRoll', grps['fetlock'] + '.rx')
-        mc.connectAttr(ik_foot_ctl + '.fetlockLean', grps['fetlock'] + '.rz')
-        mc.connectAttr(ik_foot_ctl + '.fetlockTwist', grps['fetlock'] + '.ry')
 
         if SIDE == 'Lft':
             mc.connectAttr(ik_foot_ctl + '.hoofTwist', grps['ctr'] + '.ry')
+            mc.connectAttr(ik_foot_ctl + '.fetlockLean', grps['fetlock'] + '.rz')
+            mc.connectAttr(ik_foot_ctl + '.fetlockTwist', grps['fetlock'] + '.ry')
         else:
             mult = mc.createNode( 'multDL', name=DIR + 'LegIK_twist_mult', ss=True )
             mc.connectAttr(ik_foot_ctl + '.hoofTwist', mult + '.input1')
             mc.setAttr(mult + '.input2', -1)
             mc.connectAttr(mult + '.output', grps['ctr'] + '.ry')
+
+
 
         mc.connectAttr(ik_foot_ctl + '.hoofRoll', grps['front'] + '.rx')
         mc.connectAttr(ik_foot_ctl + '.hoofRoll', grps['back'] + '.rx')
@@ -14747,8 +14749,8 @@ class Quadruped2( Char ):
             ctrl_fk = ctrl+'_FK'
             fore_pastern = mc.createNode('transform', name=ctrl_fk+'_'+SIDE+g2c_suffix, parent=fore_cannon, ss=True)
 
+            fore_foot_guide = self.find_node( self.charRoot, 'Fore_Foot_'+SIDE+suffix)
             if side == 'l':
-                fore_foot_guide = self.find_node( self.charRoot, 'Fore_Foot_'+SIDE+suffix)
                 mc.pointConstraint( fore_pastern_guide, fore_pastern, mo=False )
                 mc.aimConstraint( fore_foot_guide,
                                  fore_pastern,
@@ -14771,7 +14773,29 @@ class Quadruped2( Char ):
 
             if side == 'l':
                 mc.pointConstraint( fore_foot_guide, fore_foot_fk, mo=False )
-                mc.orientConstraint( fore_pastern, fore_foot_fk, mo=False )
+                #mc.orientConstraint( fore_pastern, fore_foot_fk, mo=False )Fore_Foot_Tip_Lft_Guide
+                fore_foot_tip_guide = self.find_node( self.charRoot, 'Fore_Foot_Tip_'+SIDE+suffix)
+                aim = mc.aimConstraint( fore_foot_tip_guide,
+                                 fore_foot_fk,
+                                 mo=False,
+                                 aimVector=(0, 0, 1),
+                                 upVector=(1, 0, 0),
+                                 worldUpType="objectrotation",
+                                 worldUpVector=(1,0,0),
+                                 worldUpObject=fore_foot_guide)[0]
+                """
+                scapula_g2c = self.find_node(self.charRoot, 'Fore_Foot_FK_' + SIDE + '_G2C')
+                scapula_autorot_g2c = self.find_node(self.charRoot, 'Fore_Pastern_FK_' + SIDE + '_G2C')
+                short_name = self.short_name(fore_foot_fk)
+
+                mult = mc.createNode('multMatrix', name=short_name + '_MM', ss=True)
+                dcomp = mc.createNode('decomposeMatrix', name=short_name + '_DM', ss=True)
+
+                mc.connectAttr(scapula_g2c + '.wm[0]', mult + '.matrixIn[0]')
+                mc.connectAttr(scapula_autorot_g2c + '.wim[0]', mult + '.matrixIn[1]')
+                mc.connectAttr(mult + '.matrixSum', dcomp + '.inputMatrix')
+                mc.connectAttr(dcomp + '.outputRotate', aim + '.offset')
+                """
             else:
                 fore_foot_l = self.find_node( self.charRoot, ctrl_fk+'_Lft'+g2c_suffix)
                 self.create_mirror_matrix_constraint( fore_foot_fk, fore_foot_l, 1)
@@ -14886,20 +14910,24 @@ class Quadruped2( Char ):
             fore_pastern = mc.createNode('transform', name=ctrl + '_' + SIDE + g2c_suffix, parent=fore_fetlock, ss=True)
 
             if side == 'l':
-                mc.pointConstraint(fore_pastern_guide, fore_pastern, mo=False)
+                target = self.find_node(self.charRoot, 'Fore_Pastern_FK_' + SIDE + g2c_suffix)
+                self.matrix_constraint(node=fore_pastern, target=target, reference=fore_fetlock)
+                #mc.pointConstraint(fore_pastern_guide, fore_pastern, mo=False)
             else:
                 fore_pastern_l = self.find_node( self.charRoot, ctrl+'_Lft'+g2c_suffix)
-                self.create_mirror_matrix_constraint( fore_pastern, fore_pastern_l, 2)
+                self.create_mirror_matrix_constraint( fore_pastern, fore_pastern_l, 0)
 
             # Fore Fetlock
             ctrl = 'Fore_Fetlock2'
             fore_fetlock2 = mc.createNode('transform', name=ctrl + '_' + SIDE + g2c_suffix, parent=fore_pastern, ss=True)
 
             if side == 'l':
-                mc.pointConstraint(fore_foot_guide, fore_fetlock2, mo=False)
+                target = self.find_node(self.charRoot, 'Fore_Foot_FK_' + SIDE + g2c_suffix)
+                self.matrix_constraint(node=fore_fetlock2, target=target, reference=fore_pastern)
+                #mc.pointConstraint(fore_foot_guide, fore_fetlock2, mo=False)
             else:
                 fore_pastern_l = self.find_node( self.charRoot, ctrl+'_Lft'+g2c_suffix)
-                self.create_mirror_matrix_constraint( fore_fetlock2, fore_pastern_l, 2)
+                self.create_mirror_matrix_constraint( fore_fetlock2, fore_pastern_l, 1)
 
             ############################################################################################################
             # Hind Leg
@@ -15175,10 +15203,12 @@ class Quadruped2( Char ):
             hind_pastern = mc.createNode('transform', name=ctrl + '_' + SIDE + g2c_suffix, parent=hind_fetlock, ss=True)
 
             if side == 'l':
-                mc.pointConstraint(hind_pastern_guide, hind_pastern, mo=False)
+                target = self.find_node(self.charRoot, 'Hind_Pastern_FK_' + SIDE + g2c_suffix)
+                self.matrix_constraint(node=hind_pastern, target=target, reference=hind_fetlock)
+                #mc.pointConstraint(hind_pastern_guide, hind_pastern, mo=False)
             else:
                 hind_pastern_l = self.find_node(self.charRoot, ctrl + '_Lft' + g2c_suffix)
-                self.create_mirror_matrix_constraint(hind_pastern, hind_pastern_l, 2)
+                self.create_mirror_matrix_constraint(hind_pastern, hind_pastern_l, 0)
 
             # Fore Fetlock
             ctrl = 'Hind_Fetlock2'
@@ -15186,10 +15216,12 @@ class Quadruped2( Char ):
                                           ss=True)
 
             if side == 'l':
-                mc.pointConstraint(hind_foot_guide, hind_fetlock2, mo=False)
+                target = self.find_node(self.charRoot, 'Hind_Foot_FK_' + SIDE + g2c_suffix)
+                self.matrix_constraint(node=hind_fetlock2, target=target, reference=hind_pastern)
+                #mc.pointConstraint(hind_foot_guide, hind_fetlock2, mo=False)
             else:
                 hind_pastern_l = self.find_node(self.charRoot, ctrl + '_Lft' + g2c_suffix)
-                self.create_mirror_matrix_constraint(hind_fetlock2, hind_pastern_l, 2)
+                self.create_mirror_matrix_constraint(hind_fetlock2, hind_pastern_l, 1)
 
         return
 
@@ -15454,7 +15486,6 @@ class Quadruped2( Char ):
 
             mc.connectAttr( lower_distance+'.distance', lower_distance_div + '.input1')
             mc.connectAttr( ik_distance+'.output', lower_distance_div + '.input2')
-
 
             # Connect results
             mc.connectAttr( ik_distance + '.output', fore_leg_distance+'.initialDistance' )
@@ -16769,8 +16800,11 @@ class Quadruped2( Char ):
                                     name=DIR + '_Fetlock2_' + SIDE + '_Grp',
                                     parent=grps['pastern'],
                                     ss=True)
-        foot_guide = self.find_node(self.charRoot, DIR + '_Foot_Lft_Guide')
-        mc.matchTransform(grps['fetlock2'], foot_guide, pos=True, rot=True)
+        #foot_guide = self.find_node(self.charRoot, DIR + '_Foot_Lft_Guide')
+        foot_g2c = self.find_node(self.charRoot, DIR + '_Foot_FK_' + SIDE + '_G2C')
+        mc.matchTransform(grps['fetlock2'], foot_g2c, pos=True, rot=True)
+
+        self.zero_out_to_offsetParent( grps['fetlock2'] )
 
         return grps
 
@@ -16780,8 +16814,8 @@ class Quadruped2( Char ):
         if DIR == 'Hind':
             pa=-45
 
-        r_up = '.ry'
-        r_front = '.rz'
+        r_up = 'ry'
+        r_front = 'rz'
 
         #if self.up_axis == 'z':
         #    r_up = '.rz'
@@ -16823,36 +16857,25 @@ class Quadruped2( Char ):
         mc.addAttr(ik_foot_ctl, longName='fetlockLean', min=-90, max=90, keyable=True)
         mc.addAttr(ik_foot_ctl, longName='fetlockTwist', min=-180, max=180, keyable=True)
 
-        mc.connectAttr(ik_foot_ctl + '.fetlockRoll', grps['fetlock'] + '.rx')
-        if SIDE == 'Lft':
-            mc.connectAttr(ik_foot_ctl + '.ikTwist', ikHandle + '.twist')
-        else:
-            self.connect_invert(ik_foot_ctl, 'ikTwist', ikHandle, 'twist')
-
-        print ('THIS', grps['fetlock'] + r_front )
-
-        parent = mc.listRelatives( grps['fetlock'] + r_front)
-
-        mc.connectAttr(ik_foot_ctl + '.fetlockLean', grps['fetlock'] + r_front)
-        mc.connectAttr(ik_foot_ctl + '.fetlockTwist', grps['fetlock'] + r_up)
-
-        if SIDE == 'Lft':
-            mc.connectAttr(ik_foot_ctl + '.footTwist', grps['ctr'] + r_up)
-        else:
-            mult = mc.createNode( 'multDL', name=DIR + 'LegIK_twist_mult', ss=True )
-            mc.connectAttr(ik_foot_ctl + '.footTwist', mult + '.input1')
-            mc.setAttr(mult + '.input2', -1)
-            mc.connectAttr(mult + '.output', grps['ctr'] + r_up)
-
         mc.connectAttr(ik_foot_ctl + '.footRoll', grps['front'] + '.rx')
         mc.connectAttr(ik_foot_ctl + '.footRoll', grps['back'] + '.rx')
 
+        mc.connectAttr(ik_foot_ctl + '.fetlockRoll', grps['fetlock'] + '.rx')
+
         if SIDE == 'Lft':
-            mc.connectAttr(ik_foot_ctl + '.footLean', grps['in'] + r_front)
-            mc.connectAttr(ik_foot_ctl + '.footLean', grps['out'] + r_front)
+            mc.connectAttr(ik_foot_ctl + '.ikTwist', ikHandle + '.twist')
+            mc.connectAttr(ik_foot_ctl + '.footLean', grps['in'] + '.' + r_front)
+            mc.connectAttr(ik_foot_ctl + '.footLean', grps['out'] + '.' + r_front)
+            mc.connectAttr(ik_foot_ctl + '.footTwist', grps['ctr'] + '.' + r_up)
+            mc.connectAttr(ik_foot_ctl + '.fetlockLean', grps['fetlock'] + '.' + r_front)
+            mc.connectAttr(ik_foot_ctl + '.fetlockTwist', grps['fetlock'] + '.' + r_up)
         else:
-            self.connect_invert(ik_foot_ctl, 'footLean', grps['in'], r_front.replace('.',''))
-            self.connect_invert(ik_foot_ctl, 'footLean', grps['out'], r_front.replace('.',''))
+            self.connect_invert(ik_foot_ctl, 'ikTwist', ikHandle, 'twist')
+            self.connect_invert(ik_foot_ctl, 'footLean', grps['in'], r_front)
+            self.connect_invert(ik_foot_ctl, 'footLean', grps['out'], r_front)
+            self.connect_invert(ik_foot_ctl, 'footTwist', grps['ctr'], r_up)
+            self.connect_invert(ik_foot_ctl, 'fetlockLean', grps['fetlock'], r_front)
+            self.connect_invert(ik_foot_ctl, 'fetlockTwist', grps['fetlock'], r_up)
 
         # Limit the rotation for roll
         mc.transformLimits(grps['front'], erx=(True, False), rx=(0, 0))
@@ -16961,7 +16984,19 @@ class Quadruped2( Char ):
         mc.connectAttr(comp2 + '.outputMatrix', ctl_grp2 + '.offsetParentMatrix')
 
         # This helps keeping the foot oriented when the fetlock roll etc attributes are used
-        mc.orientConstraint( grps['front'], grps['fetlock2'], mo=True )
+        orient = mc.orientConstraint( grps['front'], grps['fetlock2'], mo=True )
+
+        fetlock_g2c = self.find_node( self.charRoot, DIR+"_Fetlock_"+SIDE+'_G2C')
+        fetlock2_g2c = self.find_node( self.charRoot, DIR+"_Fetlock2_"+SIDE+'_G2C')
+
+        mm = mc.createNode('multMatrix', name= grps['fetlock2']+'_mm', ss=True )
+        mc.connectAttr( fetlock2_g2c+'.worldMatrix[0]', mm+'.matrixIn[0]')
+        mc.connectAttr( fetlock_g2c+'.worldInverseMatrix[0]', mm+'.matrixIn[1]')
+        dm = mc.createNode('decomposeMatrix', name= grps['fetlock2']+'_dm', ss=True )
+        mc.connectAttr( mm+'.matrixSum', dm+'.inputMatrix')
+        mc.connectAttr( dm+'.outputRotate', orient[0]+'.offset')
+
+
         blend_grp = mc.listRelatives( self.controls[DIR+'_Foot_FK_' + SIDE + '_Ctrl'], p=True, pa=True )[0]
         mc.connectAttr( grps['fetlock2'] + '.r', blend_grp+'.r')
         return ikHandle
