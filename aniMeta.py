@@ -10567,23 +10567,21 @@ class Quadruped( Char ):
         # TODO [x] Loose eye aim control
         # TODO [x] Add helper joints
         # TODO [x] make `FK`and `IK` lower case in joint name
-        # TODO [ ] add length attribute to IK legs to tweak leg length
+        # TODO [x] Quadruped: fetlock lean and twist should work
         # TODO [x] add tangent attribute to Neck IK controls and connect to spline
-        # TODO [ ] make tail joint count adjustable
-        # TODO [ ] Neck controls don`t reorient when guides are moved
         # TODO [x] Make import hierarchy work so presets of quadrupeds can be imported
+        # TODO [x] Quadruped: IK Attributes should behave symmetrically
+        # TODO [x] improve pose swapping on quadruped
+        # TODO [x] fix mirroring leg pole
+        # TODO [x] ear controls need aniMeta tags
+        # TODO [x] unlock rx on Quad  neck, tail guides (spine too?)
+        # TODO [x] unlock r on ear, eyes guides
+        # TODO [x] Rename Neck spline outputs so they do not end on "_Guide"
+        # TODO [x] when IKactive is off the additional attributes on the IK control should not have an effect on the legs like autorot
+        # TODO [ ] add length attribute to IK legs to tweak leg length
+        # TODO [ ] make tail joint count adjustable
         # TODO [ ] Garbage collect nodes for rig deletion
-        # TODO [ ] Rename spline outputs so they do not end on "_Guide"
         # TODO [ ] Biped switch leg twist aimConstraints to objectrotation up to fix flipping
-        # TODO [ ] unlock rx on Quad  neck, tail guides (spine too?)
-        # TODO [ ] unlock r on ear, eyes guides
-        # TODO [ ] ear controls need aniMeta tags
-        # TODO [ ] when IKactive is off the additional attributes on the IK control should not have an effect on the legs like autorot
-        # TODO [ ] fix mirroring leg pole
-        # TODO [ ] Ear Controls need aniMeta attributes so key all works
-        # TODO [ ] improve pose swapping on quadruped
-        # TODO [ ] Quadruped: IK Attributes should behave symmetrically
-        # TODO [ ] Quadruped: fetlock lean and twist should work
 
         if self.DEBUG:
             print( 'Quadruped.build_control_rig start')
@@ -11326,7 +11324,9 @@ class Quadruped( Char ):
                                                aim_vec=(0, 0, 1),
                                                up_vec=(1, 0, 0),
                                                up_vec_offset=(5, 0, 0),
-                                               default_value=default_values[i])
+                                               default_value=default_values[i],
+                                               limbPosition='Fore',
+                                               side=SIDE)
 
                 if self.DEBUG:
                     print('Build ForeLeg Done', SIDE)
@@ -11437,7 +11437,9 @@ class Quadruped( Char ):
                                                aim_vec=(0, 0, 1),
                                                up_vec=(1, 0, 0),
                                                up_vec_offset=(5, 0, 0),
-                                               default_value=default_values[i])
+                                               default_value=default_values[i],
+                                               limbPosition='Hind',
+                                               side=SIDE)
                 # HindLeg
                 #
                 ########################################################################################################
@@ -11790,8 +11792,11 @@ class Quadruped( Char ):
                            aim_vec=(0,0,1),
                            up_vec=(1,0,0),
                            up_vec_offset=(5,0,0),
-                           default_value=0):
-        print('\n\nbuild_autorotation', control)
+                           default_value=0,
+                           limbPosition='Fore',
+                           side='Lft'):
+        #print('\n\nbuild_autorotation', control)
+
         parent = mc.listRelatives( grp, parent=True, path=True)[0]
         autorot_grp = mc.createNode( 'transform', name=name+'_Autorot_Grp', parent=parent)
         up_obj = mc.createNode( 'transform', name=name+'_Autorot_UpVec', parent=parent)
@@ -11802,7 +11807,14 @@ class Quadruped( Char ):
 
         mc.addAttr( control, ln='autorot', min=0, max=1, k=True, dv=default_value)
 
-        mc.connectAttr( control+'.autorot', pb+'.weight')
+        # Add a multiplier so that autorot is only active when IK is
+        ik_ctl = self.find_node( self.charRoot, limbPosition+'_Foot_IK_'+side+'_Ctrl')
+        multi = mc.createNode('multDL', name=name+'_Autorot_'+side+'_multi', ss=True)
+        
+        mc.connectAttr( ik_ctl + '.ikActive', multi+'.input1')
+        mc.connectAttr( control+'.autorot', multi+'.input2')
+
+        mc.connectAttr( multi+'.output', pb+'.weight')
         mc.connectAttr( autorot_grp+'.r', pb+'.inRotate2')
         mc.connectAttr( pb+'.outRotate', grp+'.r')
 
@@ -11950,8 +11962,6 @@ class Quadruped( Char ):
             mc.connectAttr(ik_foot_ctl + '.hoofTwist', mult + '.input1')
             mc.setAttr(mult + '.input2', -1)
             mc.connectAttr(mult + '.output', grps['ctr'] + '.ry')
-
-
 
         mc.connectAttr(ik_foot_ctl + '.hoofRoll', grps['front'] + '.rx')
         mc.connectAttr(ik_foot_ctl + '.hoofRoll', grps['back'] + '.rx')
@@ -13837,17 +13847,6 @@ class Quadruped2( Char ):
         ################################################################################################################
 
         ################################################################################################################
-        # Eyes
-
-        if self.DEBUG:
-            print('build eyes')
-
-        self.build_eyes()
-
-        # Eyes
-        ################################################################################################################
-
-        ################################################################################################################
         # Meta Data
 
         if self.DEBUG:
@@ -13911,11 +13910,11 @@ class Quadruped2( Char ):
             'Neck2_FK_Ctr_Ctrl',
             'Neck3_FK_Ctr_Ctrl',
             'Neck4_FK_Ctr_Ctrl',
-            'Head_Ctr_Ctrl',
-            'Jaw_Ctr_Ctrl',
             'Neck1_IK_Ctr_Ctrl',
             'Neck2_IK_Ctr_Ctrl',
-            'Neck3_IK_Ctr_Ctrl'
+            'Neck3_IK_Ctr_Ctrl',
+            'Head_Ctr_Ctrl',
+            'Jaw_Ctr_Ctrl',
         ]
         for i in range( self.tail_joint_count):
             controlsList.append( 'Tail'+str(i+1)+'_FK_Ctr_Ctrl')
@@ -14749,8 +14748,8 @@ class Quadruped2( Char ):
             ctrl_fk = ctrl+'_FK'
             fore_pastern = mc.createNode('transform', name=ctrl_fk+'_'+SIDE+g2c_suffix, parent=fore_cannon, ss=True)
 
-            fore_foot_guide = self.find_node( self.charRoot, 'Fore_Foot_'+SIDE+suffix)
             if side == 'l':
+                fore_foot_guide = self.find_node( self.charRoot, 'Fore_Foot_'+SIDE+suffix)
                 mc.pointConstraint( fore_pastern_guide, fore_pastern, mo=False )
                 mc.aimConstraint( fore_foot_guide,
                                  fore_pastern,
@@ -16463,6 +16462,8 @@ class Quadruped2( Char ):
 
         self.build_world_orient(self.controls['Head_Ctr_Ctrl'], self.controls['Main_Ctr_Ctrl'], 1)
 
+        self.build_eyes()
+
     def build_eyes(self):
 
         """
@@ -17010,7 +17011,8 @@ class Quadruped2( Char ):
                             up_vec=(1,0,0),
                             up_vec_offset=(5,0,0),
                             default_value=0,
-                            world_up_object=None):
+                            world_up_object=None,
+                            limbPosition='Fore'):
         parent = mc.listRelatives( grp, parent=True, path=True)[0]
         autorot_grp = mc.createNode( 'transform', name=name+'_'+side+'_Autorot_Grp', parent=parent)
         up_obj = mc.createNode( 'transform', name=name+'_'+side+'_Autorot_UpVec' , parent=parent)
@@ -17028,7 +17030,14 @@ class Quadruped2( Char ):
 
         mc.addAttr( control, ln='autorot', min=0, max=1, k=True, dv=default_value)
 
-        mc.connectAttr( control+'.autorot', pb+'.weight')
+        # Add a multiplier so that autorot is only active when IK is
+        ik_ctl = self.find_node(self.charRoot, limbPosition + '_Foot_IK_' + side + '_Ctrl')
+        multi = mc.createNode('multDL', name=name + '_Autorot_' + side + '_multi', ss=True)
+
+        mc.connectAttr(ik_ctl + '.ikActive', multi + '.input1')
+        mc.connectAttr(control + '.autorot', multi + '.input2')
+
+        mc.connectAttr(multi + '.output', pb + '.weight')
         mc.connectAttr( autorot_grp+'.r', pb+'.inRotate2')
         mc.connectAttr( pb+'.outRotate', grp+'.r')
 
@@ -17169,7 +17178,8 @@ class Quadruped2( Char ):
                                          up_vec=(1, 0, 0),
                                          up_vec_offset=(5, 0, 0),
                                          default_value=default_values[i],
-                                         world_up_object=self.find_node(self.charRoot, 'chest_proxy') )
+                                         world_up_object=self.find_node(self.charRoot, 'chest_proxy'),
+                                         limbPosition=DIR)
 
             if self.DEBUG:
                 print('Build ForeLeg Done', SIDE)
@@ -17465,7 +17475,8 @@ class Quadruped2( Char ):
                                          up_vec=(1, 0, 0),
                                          up_vec_offset=(5, 0, 0),
                                          default_value=default_values[i],
-                                         world_up_object=self.find_node(self.charRoot, 'pelvis_proxy'))
+                                         world_up_object=self.find_node(self.charRoot, 'pelvis_proxy'),
+                                         limbPosition=DIR)
 
             # HindLeg
             #
@@ -17767,7 +17778,7 @@ class Quadruped2( Char ):
         node, neck = self.create_spline_simple('neck', [src, dst], [1,1],count, in_rot_offset, out_rot_offset)
 
         for i in range(count):
-            neck[i] = mc.rename(neck[i], 'Neck' + str(i + 1) + CTR +'_Guide')
+            neck[i] = mc.rename(neck[i], 'Neck' + str(i + 1) + CTR +'_GuideOutput')
             self.set_metaData(neck[i], meta_data)
 
         neck_grp = mc.createNode('transform', name='Neck_Guides_Grp', parent=guideGrp, ss=True)
@@ -17921,7 +17932,8 @@ class Quadruped2( Char ):
         }
         ctrl_data['Head'+CTR+'_Ctrl'] = {
             'name': 'Head'+CTR+'_Ctrl',
-            'parent': 'Neck4_FK'+CTR+'_Ctrl',
+            #'parent': 'Neck4_FK'+CTR+'_Ctrl',
+            'parent': 'Neck3_IK'+CTR+'_Ctrl',
             'matchTransform': 'Head'+CTR+g2c_suffix,
             'size': [20, 6, 6],
             'constraint': self.kParent,
@@ -18895,6 +18907,8 @@ class Quadruped2( Char ):
 
         justT = ['rx', 'ry', 'rz', 'sx', 'sy', 'sz', 'v']
         justTCtr = ['tx', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz', 'v']
+        justTRxCtr = ['tx', 'ry', 'rz', 'sx', 'sy', 'sz', 'v']
+        justTR =  ['sx', 'sy', 'sz', 'v']
 
         guide_grp = self.find_node(self.charRoot, 'Body_Guide_Grp')
 
@@ -18926,28 +18940,28 @@ class Quadruped2( Char ):
             'name': 'Neck1_FK'+SIDE+guide_sfx,
             'matchTransform': 'chest',
             'parent': 'Chest'+SIDE+guide_sfx,
-            'attributes': justTCtr
+            'attributes': justTRxCtr
         }
         # Neck FK 2
         guide_data['Neck2_FK'+SIDE] = {
             'name': 'Neck2_FK'+SIDE+guide_sfx,
             'matchTransform': 'neck_02',
             'parent': 'Neck1_FK'+SIDE+guide_sfx,
-            'attributes': justTCtr
+            'attributes': justTRxCtr
         }
         # Neck FK 3
         guide_data['Neck3_FK'+SIDE] = {
             'name': 'Neck3_FK'+SIDE+guide_sfx,
             'matchTransform': 'neck_03',
             'parent': 'Neck2_FK'+SIDE+guide_sfx,
-            'attributes': justTCtr
+            'attributes': justTRxCtr
         }
         # Neck FK 4
         guide_data['Neck4_FK'+SIDE] = {
             'name': 'Neck4_FK'+SIDE+guide_sfx,
             'matchTransform': 'neck_04',
             'parent': 'Neck3_FK'+SIDE+guide_sfx,
-            'attributes': justTCtr
+            'attributes': justTRxCtr
         }
         # Head
         guide_data['Head'+SIDE] = {
@@ -18955,7 +18969,7 @@ class Quadruped2( Char ):
             'matchTransform': 'head',
             'parent': 'Neck4_FK'+SIDE+guide_sfx,
             'constraintNode': 'head',
-            'attributes': justTCtr
+            'attributes': justTRxCtr
         }
         # HeadTip
         guide_data['Head_Tip'+SIDE] = {
@@ -18970,14 +18984,14 @@ class Quadruped2( Char ):
             'name': 'Neck1_IK'+SIDE+guide_sfx,
             'matchTransform': 'neck_01',
             'parent': 'Neck1_FK'+SIDE+guide_sfx,
-            'attributes': justTCtr
+            'attributes': justTRxCtr
         }
         # Neck IK 2
         guide_data['Neck3_IK'+SIDE] = {
             'name': 'Neck3_IK'+SIDE+guide_sfx,
             'matchTransform': 'neck_07',
             'parent': 'Head'+SIDE+guide_sfx,
-            'attributes': justTCtr
+            'attributes': justTRxCtr
         }
         # Jaw
         guide_data['Jaw'+SIDE] = {
@@ -18985,7 +18999,7 @@ class Quadruped2( Char ):
             'matchTransform': 'jaw',
             'parent': 'Head'+SIDE+guide_sfx,
             'constraintNode': 'jaw',
-            'attributes': justTCtr
+            'attributes': justTRxCtr
         }
         # JawTip
         guide_data['Jaw_Tip'+SIDE] = {
@@ -19014,7 +19028,7 @@ class Quadruped2( Char ):
                 'matchTransform': match,
                 'parent': parent,
                 'constraintNode': match,
-                'attributes': justTCtr
+                'attributes': justTRxCtr
             }
 
         CTR = SIDE
@@ -19103,7 +19117,7 @@ class Quadruped2( Char ):
             'name': 'Eye'+SIDE+guide_sfx,
             'matchTransform': 'eye_l',
             'parent': 'Head'+CTR+guide_sfx,
-            'attributes': justT
+            'attributes': justTR
         }
         # Ear
         guide_data['Ear1'+SIDE] = {
@@ -19111,7 +19125,7 @@ class Quadruped2( Char ):
             'parent': 'Head'+CTR+guide_sfx,
             'matchTransform': 'ear_01_l',
             'constraintNode': 'ear_01_l',
-            'attributes': justT
+            'attributes': justTR
         }
         # EarTip
         guide_data['Ear2'+SIDE] = {
@@ -19293,7 +19307,11 @@ class Quadruped2( Char ):
             handles = []
 
             for ctl in self.controls.keys():
+                # Foot
                 if SIDE in ctl and 'Foot' in ctl:
+                    handles.append(self.controls[ctl])
+                # Ear
+                if SIDE in ctl and 'Ear' in ctl:
                     handles.append(self.controls[ctl])
 
             set_data(handles, data)
@@ -19352,8 +19370,6 @@ class Quadruped2( Char ):
                 handles_Ctr.append(self.controls[ctl])
 
         set_data(handles_Ctr, data)
-        for handle in handles_Ctr:
-            print(handle)
 
         # Main Root
         data = {}
