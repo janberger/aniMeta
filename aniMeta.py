@@ -1667,12 +1667,12 @@ class Rig( Transform ):
         """
         Inverts a value by plugging a reverse node inbetween source and dest nodes.
         """
-        rev = mc.createNode('reverse', name=node2+'_'+attr2+'_rev', ss=True)
+        inv = mc.createNode('multDL', name=node2+'_'+attr2+'_multi', ss=True)
+        mc.setAttr( inv+'.input2', -1)
+        mc.connectAttr( node1+'.'+attr1, inv+'.input1')
+        mc.connectAttr( inv+'.output', node2+'.'+attr2)
 
-        mc.connectAttr( node1+'.'+attr1, rev+'.inputX')
-        mc.connectAttr( rev+'.outputX', node2+'.'+attr2)
-
-        return rev
+        return inv
 
     def get_pose( self, matrix_as_list=False, handle_mode=1 ):
 
@@ -2904,7 +2904,7 @@ class Rig( Transform ):
                 mc.undoInfo( openChunk = True )
                 try:
                     for handle in handles:
-                        self.reset_handle( self.find_node( character, handle ) )
+                        self.reset_handle( handle )
                 finally:
                     mc.undoInfo( closeChunk = True )
         else:
@@ -2965,6 +2965,22 @@ class Rig( Transform ):
         grandparent = mc.listRelatives(parent[0], parent=True)
         if grandparent:
             return grandparent[0]
+        return None
+
+    def get_opposite_control(self, char, control):
+        if not mc.objExists( char):
+            mc.warning('get_opposite_control: character does not exist', char)
+            return None
+        if self.find_node(char, control) is None:
+            mc.warning('get_opposite_control: can not find control', control)
+            return None
+
+        if 'Lft' in control:
+            control = control.replace( 'Lft', 'Rgt' )
+            return self.find_node( char, control)
+        if 'Rgt' in control:
+            control = control.replace( 'Rgt', 'Lft' )
+            return self.find_node( char, control)
         return None
 
     def import_drivenKeys( self, fileName ):
@@ -16303,8 +16319,7 @@ class Anim(Transform):
             if animFn.postInfinityType != oma.MFnAnimCurve.kConstant:
                 dict[ 'post' ]          = animFn.postInfinityType
 
-            if animFn.isWeighted:
-                dict[ 'weighted' ]      = animFn.isWeighted
+            dict[ 'weighted' ]      = animFn.isWeighted
 
             dict['keys']  = {}
 
@@ -16319,6 +16334,7 @@ class Anim(Transform):
             itxy  = [] # In tangent XY
             otxy  = [] # Out tangent XY
             alt = []
+
             for i in range( 0, animFn.numKeys ):
 
                 if dict['type'] == 'animCurveUA' or dict['type'] == 'animCurveUL':
@@ -16359,40 +16375,21 @@ class Anim(Transform):
                 tmp_dict[ 'wl' ] = animFn.weightsLocked(i)
                 tmp_dict[ 'tl' ] = animFn.tangentsLocked(i)
 
-                if itt[i] != oma.MFnAnimCurve.kTangentAuto:
-                    tmp_dict['itt'] = itt[i]
-
-                if ott[i] != oma.MFnAnimCurve.kTangentAuto:
-                    tmp_dict['ott'] = itt[i]
-
-                if itaw[i][0] != 0.0:
-                    tmp_dict['ia'] = round( itaw[i][0], 5 )
-
-                if itaw[i][1] != 1.0:
-                    tmp_dict['iw'] = round( itaw[i][1], 5 )
-
-                if otaw[i][0] != 0.0:
-                    tmp_dict['oa'] = round( otaw[i][0], 5 )
-
-                if otaw[i][1] != 1.0:
-                    tmp_dict['ow'] = round( otaw[i][1], 5 )
-
-                if itxy[i][0] != 1.0:
-                    tmp_dict['ix'] = round( itxy[i][0], 5 )
-
-                if itxy[i][1] != 0.0:
-                    tmp_dict['iy'] = round( itxy[i][1], 5 )
-
-                if otxy[i][0] != 1.0:
-                    tmp_dict['ox'] = round( otxy[i][0], 5 )
-
-                if otxy[i][1] != 0.0:
-                    tmp_dict['oy'] = round( otxy[i][1], 5 )
+                tmp_dict['itt'] = itt[i]
+                tmp_dict['ott'] = itt[i]
+                tmp_dict['ia'] = round( itaw[i][0], 5 )
+                tmp_dict['iw'] = round( itaw[i][1], 5 )
+                tmp_dict['oa'] = round( otaw[i][0], 5 )
+                tmp_dict['ow'] = round( otaw[i][1], 5 )
+                tmp_dict['ix'] = round( itxy[i][0], 5 )
+                tmp_dict['iy'] = round( itxy[i][1], 5 )
+                tmp_dict['ox'] = round( otxy[i][0], 5 )
+                tmp_dict['oy'] = round( otxy[i][1], 5 )
 
                 if len ( tmp_dict ) > 0:
                     tmp_dict[ 'time' ] = times[ i ]
-
                     alt.append( tmp_dict )
+
             if len ( alt ) > 0:
                 dict[ 'keys' ]['tangent'] = alt
 
@@ -16413,7 +16410,9 @@ class Anim(Transform):
                 mc.warning('aniMeta: can not set MFnAnimCurve on ' + animCurve)
                 return False
 
-            animFn.setIsWeighted( data[ 'weighted' ] )
+            if 'weighted' in data:
+                animFn.setIsWeighted( data[ 'weighted' ] )
+
             keys = data[ 'keys' ]
 
             if 'time' in keys and 'value' in keys:
@@ -16421,8 +16420,20 @@ class Anim(Transform):
                 values = keys[ 'value' ]
 
             if len( times ) == len( values ):
+                #for i in range(animFn.numKeys):
+                #    print('test', animFn.input(i), animFn.value(i))
+
                 for i in range( len( times ) ):
-                    animFn.addKey( times[ i ], values[ i ] )
+                    time = om.MTime(times[i], om.MTime.uiUnit())
+
+                    index = animFn.find( time)
+
+                    if index is None:
+                        #animFn.addKey( time, values[ i ] )
+                        mc.setKeyframe( animCurve, time=times[i], value=values[i])
+                    else:
+                        #animFn.setValue(index, values[ i ])
+                        mc.keyframe(animCurve, e=True, t=(times[i],), vc=values[i])
 
             if 'tangent' in keys:
                 tangents = keys[ 'tangent' ]
@@ -16430,30 +16441,389 @@ class Anim(Transform):
                 for i in range( len( tangents ) ):
 
                     tangent = tangents[ i ]
+                    lock = mc.keyTangent(animCurve, q=True, index=(i, i), lock=True )[0]
+                    #weighted = mc.keyTangent(animCurve, q=True, index=(i, i), weightedTangents=True )
+                    #weightLock = mc.keyTangent(animCurve, q=True, index=(i, i), weightLock=True )
+                    #if weighted:
+                   #     mc.keyTangent( animCurve, e=True, index=(i, i), weightLock=False )
+                    mc.keyTangent( animCurve, e=True, index=(i, i), lock=False  )
 
-                    if 'time' in tangent:
-                        # Unlock it before setting tangents
-                        animFn.setTangentsLocked( i, False )
-                        animFn.setWeightsLocked( i, False )
+                    mc.keyTangent( animCurve, e=True, index=(i, i),
+                                   inAngle=tangent['ia'],
+                                   inWeight=tangent['iw'],
+                                   outAngle=tangent['oa'],
+                                   outWeight=tangent['ow']
+                    )
+                    mc.keyTangent( animCurve, e=True, index=(i, i), lock=lock )
+                    #if weighted:
+                    #    mc.keyTangent( animCurve, e=True, index=(i, i), weightLock=True )
+                    """
+                    #if 'time' in tangent:
+                    # Unlock it before setting tangents
+                    animFn.setTangentsLocked( i, False )
+                    animFn.setWeightsLocked( i, False )
 
-                        animFn.setTangent( i, tangent[ 'ix' ], tangent[ 'iy' ], True )  # In Tangent XY
-                        animFn.setTangent( i, tangent[ 'ox' ], tangent[ 'oy' ], False )  # Out Tangent XY
+                    animFn.setTangent( i, tangent[ 'ix' ], tangent[ 'iy' ], True  )  # In Tangent XY
+                    animFn.setTangent( i, tangent[ 'ox' ], tangent[ 'oy' ], False  )  # Out Tangent XY
 
-                        animFn.setAngle( i, om.MAngle( math.radians( tangent[ 'ia' ] ) ), True )  # In Angle
-                        animFn.setAngle( i, om.MAngle( math.radians( tangent[ 'oa' ] ) ), False )  # Out Angle
+                    animFn.setAngle( i, om.MAngle( math.radians( tangent[ 'ia' ] ) ), True )  # In Angle
+                    animFn.setAngle( i, om.MAngle( math.radians( tangent[ 'oa' ] ) ), False )  # Out Angle
 
-                        animFn.setWeight( i, tangent[ 'iw' ], True )  # In Weight
-                        animFn.setWeight( i, tangent[ 'ow' ], False )  # Out weight
+                    animFn.setWeight( i, tangent[ 'iw' ], True )  # In Weight
+                    animFn.setWeight( i, tangent[ 'ow' ], False )  # Out weight
 
-                        # Finally, set the lock state
-                        animFn.setTangentsLocked( i, tangent[ 'tl' ] )
-                        animFn.setWeightsLocked( i, tangent[ 'wl' ] )
+                    # Finally, set the lock state
+                    animFn.setTangentsLocked( i, tangent[ 'tl' ] )
+                    animFn.setWeightsLocked( i, tangent[ 'wl' ] )
 
-                        animFn.setIsBreakdown( i, tangent[ 'bd' ] )
+                    animFn.setIsBreakdown( i, tangent[ 'bd' ] )"""
+                    #else:
+                    #    print('no time in tangents')
 
             return True
+
+    def mirror_anim_ui(self, *args, **kwargs):
+        MirrorAnimationUI().ui()
+
+    def mirror_anim(self, char, handles, start_time=1, end_time=100):
+
+        am_rig = Rig()
+
+        anim_data = {}
+        # Loop over handles and collect animation data
+        for handle in handles:
+            anim_data[handle] = {}
+            attrs = mc.listAttr(handle, k=True)
+            # Loop over keyable attributes
+            for attr in attrs:
+                con = mc.listConnections(handle + '.' + attr, s=True, d=False)
+                # test if attribute is static
+                if con is None:
+                    data = {'type': 'static'}
+                    data['value'] = mc.getAttr(handle + '.' + attr)
+                    # Store static value
+                    anim_data[handle][attr] = data
+                else:
+                    # store animation curve data
+                    anim_data[handle][attr] = self.get_anim_curve_data(con[0])
+
+        mc.undoInfo(openChunk=True)
+        # Loop over handles
+        for handle in handles:
+
+            # see if there is a matching control on the opposite side of the character
+            opposite = am_rig.get_opposite_control(char, handle)
+
+            # If not it must be a center control
+            if opposite is None:
+                opposite = handle
+
+            short_name = am_rig.short_name(opposite)
+
+            # Get mirror attriutes depending on mirror type
+            mirror_attrs = self.get_mirror_attrs(handle)
+
+            # Loop over attributes
+            for attr in anim_data[short_name].keys():
+                if anim_data[short_name][attr]['type'] == 'static':
+
+                    # mirror static value
+                    value = anim_data[short_name][attr]['value']
+                    if attr in mirror_attrs:
+                        value *= -1
+                    # This may be an edge case where there is animation data on one side but static on the other
+                    con = mc.listConnections(handle + '.' + attr, s=True, d=False) or []
+                    if len(con):
+                        self.delete_keys_in_range(con[0], start_time, end_time)
+
+                    mc.setAttr(opposite + '.' + attr, value)
+                else:
+                    # test if the anim data needs to be mirrored
+                    if attr in mirror_attrs:
+                        # mirror anim data
+                        data = self.mirror_data(anim_data[short_name][attr])
+                    else:
+                        data = anim_data[short_name][attr]
+                        # Find the
+                    con = mc.listConnections(handle + '.' + attr, s=True, d=False) or []
+                    if con is not None:
+                        self.delete_keys_in_range(con[0], start_time, end_time)
+                        self.set_anim_curve_data(con[0], data)
+
+        mc.undoInfo(closeChunk=True)
+
+    def get_mirror_type(self, handle):
+        dataDict = self.get_metaData(handle)
+        if 'Mirror' in dataDict:
+            return dataDict['Mirror']
+        else:
+            mc.warning('AniMeta: can not get mirror type for control '+handle)
+
+    def get_mirror_attrs(self, handle):
+        mirror_type = self.get_mirror_type(handle)
+        if mirror_type == kBasic:
+            return (['translateX', 'rotateY', 'rotateZ'])
+        if mirror_type == kSymmetricTranslation:
+            return ([])
+        if mirror_type == kSymmetricRotation:
+            return (['translateX', 'translateY', 'translateZ'])
+
+    def mirror_data(self, in_data):
+        data = copy.deepcopy(in_data)
+        for i in range(len(data['keys']['value'])):
+            data['keys']['value'][i] *= -1
+            if 'ia' in data['keys']['tangent'][i]:
+                data['keys']['tangent'][i]['ia'] *= -1
+                data['keys']['tangent'][i]['oa'] *= -1
+        return data
+
+    def delete_keys_in_range(self,anim_curve, start_time, end_time):
+
+        # Get all key times
+        key_times = mc.keyframe(anim_curve, query=True, timeChange=True)
+
+        if not key_times:
+            return
+
+        # Filter keys within the range
+        keys_to_delete = [t for t in key_times if start_time <= t <= end_time]
+
+        # Delete them
+        for t in keys_to_delete:
+            mc.cutKey(anim_curve, time=(t, t), clear=True)
+# Anim
 #
 ######################################################################################
+
+
+######################################################################################
+#
+# Mirror Animation UI
+
+
+class MirrorAnimationUI( Anim ):
+
+    ui_name = 'MirrorAnimation'
+    title = 'Mirror Animation'
+    width = 300
+    height = 290
+
+    mode_ctrl = None
+    attr_ctrl = None
+    axis_ctrl = None
+
+    def __init__( self ):
+        super( MirrorAnimationUI, self ).__init__()
+
+    def ui( self, *args ):
+
+        # Loesch das Fenster, wenn es bereits existiert
+        if mc.window( self.ui_name, exists = True ):
+            mc.deleteUI( self.ui_name )
+
+        mc.window( self.ui_name, title = self.title, width = self.width, height = self.height, sizeable = False )
+
+        # Layout fuer Menus
+        mc.menuBarLayout()
+
+        # Edit Menu
+        mc.menu( label = 'Edit' )
+
+        # Edit Menu Items
+        mc.menuItem( label = 'Save Settings', command = self.save_settings )
+        mc.menuItem( label = 'Reset Settings', command = self.reset_settings )
+
+        # Edit Menu
+        mc.menu( label = 'Help' )
+        mc.menuItem( label = 'Help on ' + self.title )
+
+        form = mc.formLayout()
+
+        mirror_button = mc.button( label = 'Mirror', command = self.mirror_button_cmd )
+        apply_button = mc.button( label = 'Apply', command = self.apply_button_cmd )
+        close_button = mc.button( label = 'Close', command = self.delete )
+
+
+        mode_label = mc.text( label = 'Mode' )
+        controls_label = mc.text( label = 'Controls' )
+        frames_label = mc.text( label = 'Frame Range' )
+
+        self.mode_ctrl = mc.radioButtonGrp(
+            label = '',
+            vertical = True,
+            cw = (1, 60),
+            label1 =  'Swap Left and Right' ,
+            numberOfRadioButtons = 1,
+            changeCommand = self.save_settings
+        )
+
+        self.controls_ctrl = mc.radioButtonGrp(
+            label = '',
+            vertical = True,
+            cw = (1, 60),
+            labelArray2 = [ 'All', 'Selected'  ],
+            numberOfRadioButtons = 2,
+            changeCommand = self.save_settings
+        )
+
+        self.frames_ctrl = mc.radioButtonGrp(
+            label = '',
+            vertical = True,
+            cw = (1, 60),
+            labelArray3 = [ 'Timeline', 'Current Range', 'Custom Range' ],
+            numberOfRadioButtons = 3,
+            changeCommand = self.save_settings
+        )
+        self.start_frame_ctrl = mc.intFieldGrp(
+            label='Start Frame',
+            cw2=(60,50),
+            en=False,
+            changeCommand = self.save_settings )
+        self.end_frame_ctrl = mc.intFieldGrp(
+            label='End Frame',
+            cw2=(60,50),
+            en=False,
+            changeCommand = self.save_settings )
+
+        mc.formLayout(
+            form,
+            edit = True,
+            attachForm = [
+                (mode_label, 'top', 10),
+                (mode_label, 'left', 45),
+                (controls_label, 'left', 45),
+                (frames_label, 'left', 45),
+                (mirror_button, 'bottom', 5),
+                (mirror_button, 'left', 5),
+                (close_button, 'bottom', 5),
+                (close_button, 'right', 5),
+                (apply_button, 'bottom', 5),
+                (self.mode_ctrl, 'left', 50),
+                (self.controls_ctrl, 'left', 50),
+                (self.frames_ctrl, 'left', 50)  ,
+                (self.start_frame_ctrl, 'left', 50) ,
+                (self.end_frame_ctrl, 'left', 50) ],
+
+            attachPosition = [ (mirror_button, 'right', 5, 33),
+                               (close_button, 'left', 5, 66),
+                               (apply_button, 'right', 0, 66),
+                               (apply_button, 'left', 0, 33) ],
+
+            attachControl = [ (self.mode_ctrl, 'top', 5, mode_label),
+                              (controls_label, 'top', 5, self.mode_ctrl),
+                              (self.controls_ctrl, 'top', 5, controls_label),
+                              (frames_label, 'top', 5, self.controls_ctrl),
+                              (self.frames_ctrl, 'top', 5, frames_label),
+                              (self.start_frame_ctrl, 'top', 5, self.frames_ctrl),
+                              (self.end_frame_ctrl, 'top', 0, self.start_frame_ctrl) ]
+        )
+        self.restore_settings()
+
+        mc.showWindow()
+
+    def mirror_button_cmd( self, *args ):
+        # Führt den Mirror Befehl aus
+        self.mirror()
+        # Schliesst das Interface
+        if mc.window( self.ui_name, exists = True ):
+            mc.deleteUI( self.ui_name )
+
+    def apply_button_cmd( self, *args ):
+        # Fuehrt den Mirror Befehl aus
+        self.mirror()
+
+    def delete( self, *args ):
+        # Schliesst das Interface
+        if mc.window( self.ui_name, exists = True ):
+            mc.deleteUI( self.ui_name )
+
+    def save_settings( self, *args ):
+        # RadioButtonGrp indeices are 1-based and the actual mode inidces are zero-based
+        # so we need to compensate by substracting 1
+        mode = mc.radioButtonGrp( self.mode_ctrl, query = True, select = True ) -1
+        control = mc.radioButtonGrp( self.controls_ctrl, query = True, select = True ) -1
+        frame = mc.radioButtonGrp( self.frames_ctrl, query = True, select = True ) -1
+        start = mc.intFieldGrp( self.start_frame_ctrl, query = True, value1 = True )
+        end = mc.intFieldGrp( self.end_frame_ctrl, query = True, value1 = True )
+
+        mc.optionVar( intValue = ('aniMetaMirrorAnim_Mode', mode) )
+        mc.optionVar( intValue = ('aniMetaMirrorAnim_Controls', control) )
+        mc.optionVar( intValue = ('aniMetaMirrorAnim_Frames', frame) )
+        mc.optionVar( intValue = ('aniMetaMirrorAnim_FrameStart', start) )
+        mc.optionVar( intValue = ('aniMetaMirrorAnim_FrameEnd', end) )
+
+        self.check_frames()
+
+    def check_frames(self ):
+        frame = mc.radioButtonGrp( self.frames_ctrl, query = True, select = True ) -1
+        if frame == 2:
+            mc.intFieldGrp( self.start_frame_ctrl, e=True, en=True )
+            mc.intFieldGrp( self.end_frame_ctrl, e=True, en=True )
+        else:
+            mc.intFieldGrp( self.start_frame_ctrl, e=True, en=False )
+            mc.intFieldGrp( self.end_frame_ctrl, e=True, en=False )
+
+    def restore_settings( self, *args ):
+        if not mc.optionVar( exists = 'aniMetaMirrorAnim_Mode' ):
+            self.reset_settings()
+
+        # RadioButtonGrp indeices are 1-based and the actual mode inidces are zero-based
+        # so we need to compensate by adding 1
+        mode = mc.optionVar( query = 'aniMetaMirrorAnim_Mode' ) + 1
+        control = mc.optionVar( query = 'aniMetaMirrorAnim_Controls' ) + 1
+        frame = mc.optionVar( query = 'aniMetaMirrorAnim_Frames' ) + 1
+        start = mc.optionVar( query = 'aniMetaMirrorAnim_FrameStart' )
+        end = mc.optionVar( query = 'aniMetaMirrorAnim_FrameEnd' )
+
+        mc.radioButtonGrp( self.mode_ctrl, edit = True, select = mode )
+        mc.radioButtonGrp( self.controls_ctrl, edit = True, select = control )
+        mc.radioButtonGrp( self.frames_ctrl, edit = True, select = frame )
+        mc.intFieldGrp( self.start_frame_ctrl, edit = True, value1 = start )
+        mc.intFieldGrp( self.end_frame_ctrl, edit = True, value1 = end )
+
+        self.check_frames()
+
+    def reset_settings( self, *args ):
+        mc.radioButtonGrp( self.mode_ctrl, edit = True, select = 1 )
+        mc.radioButtonGrp( self.controls_ctrl, edit = True, select = 1 )
+        mc.radioButtonGrp( self.frames_ctrl, edit = True, select = 1 )
+        mc.intFieldGrp( self.start_frame_ctrl, edit = True, value1 = 0 )
+        mc.intFieldGrp( self.end_frame_ctrl, edit = True, value1 = 100 )
+
+        self.save_settings()
+
+    def mirror( self, *args ):
+
+        char = self.get_active_char()
+        control = mc.radioButtonGrp(self.controls_ctrl, query=True, select=True) - 1
+        if control == 0:
+            handles = Rig().get_char_handles( char, { 'Type': kHandle, 'Side': kAll } )
+        else:
+            sel = mc.ls(sl=True)
+            handles = []
+            for s in sel:
+                if mc.attributeQuery( 'aniMetaData', node=s, exists=True):
+                    handles.append(s)
+
+        frame = mc.radioButtonGrp(self.frames_ctrl, query=True, select=True) - 1
+
+        if frame == 0:
+            start_time = mc.playbackOptions(q=True, ast=True)
+            end_time = mc.playbackOptions(q=True, aet=True)
+        elif frame == 1:
+            start_time = mc.playbackOptions(q=True, min=True)
+            end_time = mc.playbackOptions(q=True, max=True)
+        elif frame == 2:
+            start_time = mc.intFieldGrp( self.start_frame_ctrl, query = True, value1 = True )
+            end_time = mc.intFieldGrp( self.end_frame_ctrl, query = True, value1 = True )
+
+        anim = Anim()
+        anim.mirror_anim(char, handles, start_time=start_time, end_time=end_time)
+
+# Transform Mirror UI
+#
+######################################################################################
+
 
 
 ######################################################################################
@@ -19907,16 +20277,54 @@ class MainTab( QWidget ):
         #   Edit
         ########################################
 
+        ########################################
+        #   Picker
+
         frame1 = FrameWidget('Picker', None  )
         frames_layout.addWidget(frame1)
         widget = QWidget(frame1)
         layout = QVBoxLayout(widget)
         layout.setSpacing(0)
-        layout.setContentsMargins(0,0,0,0)
+        layout.setContentsMargins(0,0,0,20)
         frame1.setLayout(layout)
 
         # Picker
         self.picker_create( layout )
+
+        #   Picker
+        ########################################
+
+        ########################################
+        #   Animation
+
+        frame1 = FrameWidget('Animation', None  )
+        frames_layout.addWidget(frame1)
+
+        widget   = QWidget(frame1)
+        layoutV  = QVBoxLayout(widget)
+        layoutV.setSpacing(px(2))
+        layoutV.setContentsMargins( px(8), px(12), px(8), px(12) )
+
+        layoutH  = QHBoxLayout(self)
+        layoutH.setSpacing(px(2))
+
+        layoutV.addLayout(layoutH)
+        frame1.setLayout(layoutV)
+
+        #self.modeLabel = QLabel("Rig Mode", self)
+
+        self.mirrorAnim = QPushButton("Mirror Animation", self)
+        self.mirrorAnim.clicked.connect( self.mirror_anim )
+
+        #self.modeControls = QPushButton("Control", self)
+        #self.modeControls.clicked.connect(  self.controls_mode )
+
+        #layoutH.addWidget( self.modeLabel )
+        layoutH.addWidget( self.mirrorAnim )
+        #layoutH.addWidget( self.modeControls )
+
+        #   Animation
+        ########################################
 
         frames_layout.addStretch()
 
@@ -19944,6 +20352,10 @@ class MainTab( QWidget ):
         )
         layout.addWidget( button, cell_y, cell_x, row_span, col_span, Qt.AlignCenter )
         return button
+
+    def mirror_anim(self):
+
+        Anim().mirror_anim_ui()
 
     def copy_pose( self ):
 
@@ -22908,12 +23320,12 @@ class LibTab(QWidget):
             with open( full_path, 'r' ) as read_file:
                 data = read_file.read()
 
-            dict = json.loads( data )
+            data_dict = json.loads( data )
 
-            if 'aniMeta' in dict:
+            if 'aniMeta' in data_dict:
 
-                if 'dataType' in dict['aniMeta'][0]:
-                    data_type = dict['aniMeta'][0]['dataType']
+                if 'dataType' in data_dict['aniMeta'][0]:
+                    data_type = data_dict['aniMeta'][0]['dataType']
 
                     char = self.am.get_active_char()
 
@@ -22921,19 +23333,30 @@ class LibTab(QWidget):
 
                         if data_type == 'aniMetaPose' and section == kLibPose:
 
-                            self.rig.set_pose( dict )
+                            self.rig.set_pose( data_dict )
 
                         elif data_type == 'aniMetaAnimation' and section == kLibAnim:
 
-                            self.import_anim_dialog( char, dict )
+                            frame_rate = mc.currentUnit(query=True, time=True)
+                            if data_dict['aniMeta'][0]['info']['time'] != frame_rate:
+                                mc.confirmDialog(title='Animation Import',
+                                                 message='The frame rates of the import clip ( ' + str(
+                                                     data_dict['aniMeta'][0]['info']['time']) + ' )\n'
+                                                                     'and the current scene( ' + str(
+                                                     frame_rate) + ' )do not match\n'
+                                                                   'Import aborted.',
+                                                 button=['OK'],
+                                                 defaultButton='OK')
+                                return False
+                            self.import_anim_dialog( char, data_dict )
 
                         elif data_type == 'aniMetaRig' and section == kLibRig:
 
-                            self.rig_import( char, dict )
+                            self.rig_import( char, data_dict )
 
                         elif section == kLibGuide:
 
-                            self.guide_import( char, dict )
+                            self.guide_import( char, data_dict )
 
                     else:
                         mc.warning( 'aniMeta load pose: please specify a character.' )
@@ -23438,10 +23861,11 @@ class LibTab(QWidget):
 
         self.save_import_options()
 
-        if mc.window( self.import_anim_ui, exists = True ):
-            mc.deleteUI( self.import_anim_ui )
+        success = self.import_anim_doit(**options)
 
-        self.import_anim_doit(**options)
+        if success:
+            if mc.window( self.import_anim_ui, exists = True ):
+                mc.deleteUI( self.import_anim_ui )
 
     def import_anim_doit( self, *args, **kwargs ):
 
@@ -23545,7 +23969,7 @@ class LibTab(QWidget):
             mm.eval( cmds )
             mc.undoInfo( closeChunk=True )
             print ('aniMeta: file imported.')
-
+        return True
     # Anim Import/Export
     #
     ####################################################################################################################
