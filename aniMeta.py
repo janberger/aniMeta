@@ -67,9 +67,13 @@ else:
 from functools import partial
 
 mult_DL_node_type = 'multDoubleLinear'
+add_DL_node_type = 'addDoubleLinear'
+divide_DL_node_type = 'divide'
 
 if maya_version > 2025:
     mult_DL_node_type = 'multDL'
+    add_DL_node_type = 'addDL'
+    divide_DL_node_type = 'divideDL'
 
 real_scale = mc.mayaDpiSetting(query=True, realScaleValue=True)
 
@@ -135,6 +139,14 @@ class AniMeta( object ):
     kCube, kSphere, kPipe, kCross = range(4)
 
     ui = None
+
+    ####################################################################################################################
+    #
+    # TODO
+    #
+    # TODO [ ] Add or improve mechanism to add custom controls that also get exported/imported
+    # TODO [ ] Remove existing keys in time range when importing animation
+    # TODO [ ] Add option to keep icon when exprting anim or simply dont create one when there is one already
 
     def __init__( self ):
 
@@ -1667,7 +1679,7 @@ class Rig( Transform ):
         """
         Inverts a value by plugging a reverse node inbetween source and dest nodes.
         """
-        inv = mc.createNode('multDL', name=node2+'_'+attr2+'_multi', ss=True)
+        inv = mc.createNode(mult_DL_node_type, name=node2+'_'+attr2+'_multi', ss=True)
         mc.setAttr( inv+'.input2', -1)
         mc.connectAttr( node1+'.'+attr1, inv+'.input1')
         mc.connectAttr( inv+'.output', node2+'.'+attr2)
@@ -5091,12 +5103,12 @@ class Char( Rig ):
         mc.setAttr( inc_node+'.input2', joint_count-1)
         mc.connectAttr( main_grp + '.initialLength', inc_node+'.input1')
 
-        scale_multi = mc.createNode('multDL', name=f'{name}_{no}_scale_multi', ss=True)
+        scale_multi = mc.createNode(mult_DL_node_type, name=f'{name}_{no}_scale_multi', ss=True)
         mc.connectAttr(self.charRoot + '.globalScale', scale_multi + '.input1')
         mc.connectAttr(main_grp + '.initialLength', scale_multi + '.input2')
 
         for i in range(joint_count):
-            joint_inc = mc.createNode('multDL', name=f'{name}_{no}_curve_inc_'+str(i+1), ss=True)
+            joint_inc = mc.createNode(mult_DL_node_type, name=f'{name}_{no}_curve_inc_'+str(i+1), ss=True)
             mc.setAttr( joint_inc+'.input1', i)
             mc.connectAttr( inc_node+'.output', joint_inc+'.input2')
             # The absolute position along the length of the spline
@@ -5106,7 +5118,7 @@ class Char( Rig ):
             # The relative position along the length of the spline
             mc.addAttr(outputs2[i], ln='uValue', min=0, k=True, dv=frac * i)
 
-            multi = mc.createNode('multDL', name=f'{name}_{no}_{i}_multi', ss=True)
+            multi = mc.createNode(mult_DL_node_type, name=f'{name}_{no}_{i}_multi', ss=True)
             mc.connectAttr( self.charRoot + '.globalScale', multi + '.input1')
             mc.connectAttr( outputs2[i] + '.position', multi + '.input2')
 
@@ -12235,7 +12247,7 @@ class Quadruped(Char):
         dst_grp = self.find_node(self.charRoot, 'dst_offset_grp')
 
         mc.connectAttr( spine_grp +'.initialLength', src_grp+'.tz')
-        multi = mc.createNode('multDL', name='spine_neg_length', ss=True)
+        multi = mc.createNode(mult_DL_node_type, name='spine_neg_length', ss=True)
         mc.connectAttr( spine_grp +'.initialLength', multi+'.input1')
         mc.setAttr( multi+'.input2', -1)
         mc.connectAttr( multi +'.output', dst_grp+'.tz')
@@ -12347,7 +12359,7 @@ class Quadruped(Char):
             #overall_distance = mc.createNode('distanceBetween', name='Fore_Leg_Distance_1_'+self.SIDES[i], ss=True)
             upper_distance = mc.createNode('distanceBetween', name='Fore_Leg_Distance_2_'+self.SIDES[i], ss=True)
             lower_distance = mc.createNode('distanceBetween', name='Fore_Leg_Distance_3_'+self.SIDES[i], ss=True)
-            ik_distance = mc.createNode('addDL', name='Fore_Leg_Add_1_'+self.SIDES[i], ss=True)
+            ik_distance = mc.createNode(add_DL_node_type, name='Fore_Leg_Add_1_'+self.SIDES[i], ss=True)
 
             #mc.connectAttr( radius+'.wm[0]', overall_distance + '.inMatrix1')
             #mc.connectAttr( pastern+'.wm[0]', overall_distance + '.inMatrix2')
@@ -12359,8 +12371,8 @@ class Quadruped(Char):
             mc.connectAttr( pastern+'.wm[0]', lower_distance + '.inMatrix2')
 
             # Divide to get fraction
-            upper_distance_div = mc.createNode('divideDL', name='Fore_Leg_Div_1_'+self.SIDES[i], ss=True)
-            lower_distance_div = mc.createNode('divideDL', name='Fore_Leg_Div_2_'+self.SIDES[i], ss=True)
+            upper_distance_div = mc.createNode(divide_DL_node_type, name='Fore_Leg_Div_1_'+self.SIDES[i], ss=True)
+            lower_distance_div = mc.createNode(divide_DL_node_type, name='Fore_Leg_Div_2_'+self.SIDES[i], ss=True)
 
             mc.connectAttr( upper_distance+'.distance', ik_distance + '.input1')
             mc.connectAttr( lower_distance+'.distance', ik_distance + '.input2')
@@ -12469,7 +12481,7 @@ class Quadruped(Char):
             #overall_distance = mc.createNode('distanceBetween', name='Hind_Leg_Distance_1_'+self.SIDES[i], ss=True)
             upper_distance = mc.createNode('distanceBetween', name='Hind_Leg_Distance_2_'+self.SIDES[i], ss=True)
             lower_distance = mc.createNode('distanceBetween', name='Hind_Leg_Distance_3_'+self.SIDES[i], ss=True)
-            ik_distance = mc.createNode('addDL', name='Hind_Leg_Add_1_'+self.SIDES[i], ss=True)
+            ik_distance = mc.createNode(add_DL_node_type, name='Hind_Leg_Add_1_'+self.SIDES[i], ss=True)
 
             #mc.connectAttr( fibula+'.wm[0]', overall_distance + '.inMatrix1')
             #mc.connectAttr( pastern+'.wm[0]', overall_distance + '.inMatrix2')
@@ -12481,8 +12493,8 @@ class Quadruped(Char):
             mc.connectAttr( pastern+'.wm[0]', lower_distance + '.inMatrix2')
 
             # Divide to get fraction
-            upper_distance_div = mc.createNode('divideDL', name='Hind_Leg_Div_1_'+self.SIDES[i], ss=True)
-            lower_distance_div = mc.createNode('divideDL', name='Hind_Leg_Div_2_'+self.SIDES[i], ss=True)
+            upper_distance_div = mc.createNode(divide_DL_node_type, name='Hind_Leg_Div_1_'+self.SIDES[i], ss=True)
+            lower_distance_div = mc.createNode(divide_DL_node_type, name='Hind_Leg_Div_2_'+self.SIDES[i], ss=True)
 
             mc.connectAttr( upper_distance+'.distance', ik_distance + '.input1')
             mc.connectAttr( lower_distance+'.distance', ik_distance + '.input2')
@@ -13107,7 +13119,7 @@ class Quadruped(Char):
 
         src_grp = mc.createNode('transform', name='src_grp', parent=main_grp)
         dst_grp = mc.createNode('transform', name='dst_grp', parent=main_grp)
-        out_grp = mc.createNode('transform', name='output_grp', parent=main_grp)
+        #out_grp = mc.createNode('transform', name='output_grp', parent=main_grp)
 
         mc.connectAttr(src + '.wm[0]', src_grp + '.opm')
         mc.connectAttr(dst + '.wm[0]', dst_grp + '.opm')
@@ -13119,7 +13131,7 @@ class Quadruped(Char):
                          upVector=up_vec,
                          worldUpType="objectrotation",
                          worldUpVector=world_up_vec,
-                         worldUpObject=src)
+                         worldUpObject=cog)
 
         mc.aimConstraint(src,
                          dst_grp,
@@ -13128,7 +13140,7 @@ class Quadruped(Char):
                          upVector=up_vec,
                          worldUpType="objectrotation",
                          worldUpVector=world_up_vec,
-                         worldUpObject=dst)
+                         worldUpObject=cog)
 
         src_offset_grp = mc.createNode('transform', name='src_offset_grp', parent=src_grp)
         dst_offset_grp = mc.createNode('transform', name='dst_offset_grp', parent=dst_grp)
@@ -13164,7 +13176,7 @@ class Quadruped(Char):
         mc.connectAttr(dst_offset_grp + '.wm[0]', src_blnd + '.target[0].targetMatrix')
 
         rev = mc.createNode('reverse', name=name + '_reverse', ss=True)
-        mult = mc.createNode('multDL', name=name + '_multi', ss=True)
+        mult = mc.createNode(mult_DL_node_type, name=name + '_multi', ss=True)
         mc.setAttr(mult + '.input2', 0.5)
         mc.connectAttr(cog + '.' + stretch_attr, rev + '.inputX')
         mc.connectAttr(rev + '.outputX', mult + '.input1')
@@ -13917,7 +13929,7 @@ class Quadruped(Char):
 
         # Add a multiplier so that autorot is only active when IK is
         ik_ctl = self.find_node(self.charRoot, limbPosition + '_Foot_IK_' + side + '_Ctrl')
-        multi = mc.createNode('multDL', name=name + '_Autorot_' + side + '_multi', ss=True)
+        multi = mc.createNode(mult_DL_node_type, name=name + '_Autorot_' + side + '_multi', ss=True)
 
         mc.connectAttr(ik_ctl + '.ikActive', multi + '.input1')
         mc.connectAttr(control + '.autorot', multi + '.input2')
@@ -16294,10 +16306,11 @@ class Anim(Transform):
         super( Anim, self ).__init__()
 
     def get_anim_curve_data( self, node ):
-
+        print('get_anim_curve_data', node)
         dict = { }
         animObj = self.get_mobject( node )
         if animObj is not None:
+
             animFn = oma.MFnAnimCurve( animObj )
 
             dict[ 'type' ]          = curveType[ animFn.animCurveType ]
@@ -16505,6 +16518,12 @@ class Anim(Transform):
                     anim_data[handle][attr] = data
                 else:
                     # store animation curve data
+                    node = con[0]
+                    if mc.nodeType(node) == 'pairBlend':
+                        attr_pb = 'in' + attr[:1].upper() + attr[1:] + '1'
+                        if mc.attributeQuery(attr_pb, node=node, exists=True):
+                            con = mc.listConnections(node + '.' + attr_pb, s=True, d=False) or []
+
                     anim_data[handle][attr] = self.get_anim_curve_data(con[0])
 
         mc.undoInfo(openChunk=True)
@@ -16520,7 +16539,7 @@ class Anim(Transform):
 
             short_name = am_rig.short_name(opposite)
 
-            # Get mirror attriutes depending on mirror type
+            # Get mirror attributes depending on mirror type
             mirror_attrs = self.get_mirror_attrs(handle)
 
             # Loop over attributes
@@ -16546,9 +16565,18 @@ class Anim(Transform):
                         data = anim_data[short_name][attr]
                         # Find the
                     con = mc.listConnections(handle + '.' + attr, s=True, d=False) or []
-                    if con is not None:
-                        self.delete_keys_in_range(con[0], start_time, end_time)
-                        self.set_anim_curve_data(con[0], data)
+                    if len(con):
+                        node = con[0]
+                        if mc.nodeType(node) == 'pairBlend':
+                            attr_pb = 'in'+attr.capitalize()+'1'
+                            if mc.attributeQuery(attr_pb, node=node, exists=True):
+                                con = mc.listConnections(node + '.' + attr_pb, s=True, d=False) or []
+
+                        if len(con):
+                            self.delete_keys_in_range(con[0], start_time, end_time)
+                            self.set_anim_curve_data(con[0], data)
+                        else:
+                            mc.warning('AniMeta: Can not get input for handle attribute', handle, attr)
 
         mc.undoInfo(closeChunk=True)
 
@@ -19527,7 +19555,13 @@ def uninitializePlugin( mobject ):
     if mc.window(BlendShapeSplitter.ui_name, exists=True):
         mc.deleteUI(BlendShapeSplitter.ui_name)
 
-# Unininitialize
+    # Delete existing UIs
+    uis = [ MirrorAnimationUI.ui_name, AniMetaOptionsUI.name, BlendShapeSplitter.ui_name]
+    for ui in uis:
+        if mc.window(ui, exists=True):
+            mc.deleteUI(ui)
+
+# Uninitialize
 #
 ########################################################################################################################################################################################
 
